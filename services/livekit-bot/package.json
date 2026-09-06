@@ -1,0 +1,28 @@
+{
+  "name": "klayk-livekit-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KLAY K Bot - LiveKit/voice assistant for the KLAY K live streaming app",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "node --import tsx --test src/queue.test.ts src/events.test.ts src/speech.test.ts src/settings.test.ts src/announcements.test.ts",
+    "start": "node --import tsx src/index.ts"
+  },
+  "dependencies": {
+    "@livekit/rtc-node": "^0.13.34",
+    "@supabase/supabase-js": "^2.112.4",
+    "dotenv": "^17.4.2",
+    "livekit-server-sdk": "^2.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

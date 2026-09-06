@@ -1,0 +1,70 @@
+project_id = "klay_k"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[analytics]
+enabled = true
+port = 54327
+# Only enabled when using a fresh Supabase instance
+vector_port = 54328
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://localhost:3000"]
+jwt_expiry = 3600
+enable_signup = true
+
+[functions.livekit-token]
+verify_jwt = true
+# .cors.additional_origins defaults to allow all origins.
+# (additional_headers não é suportado pelo CLI no bloco de CORS de functions;
+#  o Flutter não sofre CORS e a webhook a seguir autentica por HMAC.)
+
+[functions.create-live]
+verify_jwt = false
+[functions.create-live.cors]
+
+[functions.end-live]
+verify_jwt = false
+[functions.end-live.cors]
+
+[functions.livekit-webhook]
+# Autentica por HMAC via header x-livekit-signature (não é um JWT do Supabase);
+# por isso verify_jwt precisa ser false aqui.
+verify_jwt = false
+[functions.livekit-webhook.cors]
+
+[functions.storage-init]
+verify_jwt = true
+[functions.storage-init.cors]
+
+[functions.signed-url]
+verify_jwt = false
+[functions.signed-url.cors]
+
+[functions.send-gift]
+# Autentica via JWT (Authorization) e valida o saldo/regras no backend com o
+# service role. O cliente NUNCA altera saldo.
+verify_jwt = true
+[functions.send-gift.cors]
+
+[functions.gift-admin]
+# CRUD do catálogo. Requer usuário com profiles.is_admin = true (validado no
+# backend com o service role). Realiza toda a escrita com o service role.
+verify_jwt = true
+[functions.gift-admin.cors]

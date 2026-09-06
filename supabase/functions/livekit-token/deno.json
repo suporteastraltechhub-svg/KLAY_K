@@ -1,0 +1,16 @@
+{
+  "name": "@klay-k/livekit-token",
+  "version": "0.0.1",
+  "exports": "./index.ts",
+  "tasks": {
+    "check": "deno check index.ts",
+    "test": "deno test --allow-net --allow-env index_test.ts"
+  },
+  "imports": {
+    "livekit-server-sdk": "npm:livekit-server-sdk@^2.9.0",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@^2"
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}
