@@ -5,6 +5,7 @@ import '../models/moment_models.dart';
 import '../services/moment_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/klayk_ux.dart';
+import '../l10n/app_localizations.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
 
@@ -86,6 +87,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
   }
 
   Future<void> _publish() async {
+    final l10n = AppLocalizations.of(context)!;
     final text = _composerCtrl.text.trim();
     if (text.isEmpty || _publishing) return;
     setState(() => _publishing = true);
@@ -94,13 +96,15 @@ class _MomentsScreenState extends State<MomentsScreen> {
       _composerCtrl.clear();
       _composerFocus.unfocus();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Momento publicado. Ele some após 24h.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.momentPublished)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e is StateError ? e.message : 'Não foi possível publicar.')),
+        SnackBar(
+          content: Text(e is StateError ? e.message : l10n.momentPublishFail),
+        ),
       );
     } finally {
       if (mounted) setState(() => _publishing = false);
@@ -119,14 +123,18 @@ class _MomentsScreenState extends State<MomentsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Momentos', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.moments,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         actions: [
           IconButton(
-            tooltip: 'Atualizar',
+            tooltip: l10n.refresh,
             onPressed: _loading ? null : _load,
             icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
           ),
@@ -145,6 +153,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
   }
 
   Widget _composer() {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       decoration: BoxDecoration(
@@ -165,9 +174,9 @@ class _MomentsScreenState extends State<MomentsScreen> {
                 minLines: 1,
                 maxLength: 280,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Compartilhe um momento…',
-                  hintStyle: TextStyle(color: Colors.white38),
+                decoration: InputDecoration(
+                  hintText: l10n.shareMomentHint,
+                  hintStyle: const TextStyle(color: Colors.white38),
                   counterText: '',
                   border: InputBorder.none,
                 ),
@@ -180,7 +189,10 @@ class _MomentsScreenState extends State<MomentsScreen> {
                     child: SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: _kAccent),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _kAccent,
+                      ),
                     ),
                   )
                 : Material(
@@ -191,7 +203,11 @@ class _MomentsScreenState extends State<MomentsScreen> {
                       onTap: _publish,
                       child: const Padding(
                         padding: EdgeInsets.all(10),
-                        child: Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                        child: Icon(
+                          Icons.send_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                       ),
                     ),
                   ),
@@ -202,22 +218,22 @@ class _MomentsScreenState extends State<MomentsScreen> {
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar os momentos. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.errorLoading,
+        message: l10n.momentsLoadFail,
+        actionLabel: l10n.retry,
         actionIcon: Icons.refresh_rounded,
         onAction: _load,
       );
     }
     if (_all.isEmpty && _mine.isEmpty) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.auto_awesome_outlined,
-        title: 'Nenhum momento por aqui',
-        message:
-            'Compartilhe um momento no campo acima — ele some após 24 horas.',
+        title: l10n.momentsEmptyTitle,
+        message: l10n.momentsEmptyBody,
       );
     }
     return RefreshIndicator(
@@ -226,15 +242,23 @@ class _MomentsScreenState extends State<MomentsScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: Row(
               children: [
-                Icon(Icons.hourglass_bottom_rounded, color: _kAccent, size: 18),
-                SizedBox(width: 6),
+                const Icon(
+                  Icons.hourglass_bottom_rounded,
+                  color: _kAccent,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
                 Text(
-                  'Agora',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+                  l10n.momentsNow,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
                 ),
               ],
             ),
@@ -251,6 +275,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
 
   Widget _momentCard(KlayKMoment m) {
     final colors = kc(context);
+    final l10n = AppLocalizations.of(context)!;
     final remaining = m.remainingLabel;
     return KlayKCard(
       padding: const EdgeInsets.all(14),
@@ -271,38 +296,60 @@ class _MomentsScreenState extends State<MomentsScreen> {
                           child: Text(
                             m.authorName,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
                         if (m.authorVerified) ...[
                           const SizedBox(width: 4),
-                          const Icon(Icons.verified_rounded, color: _kAccent, size: 15),
+                          const Icon(
+                            Icons.verified_rounded,
+                            color: _kAccent,
+                            size: 15,
+                          ),
                         ],
                         if (m.isMine) ...[
                           const SizedBox(width: 4),
-                          const Icon(Icons.person_pin_rounded, color: Colors.white38, size: 14),
+                          const Icon(
+                            Icons.person_pin_rounded,
+                            color: Colors.white38,
+                            size: 14,
+                          ),
                         ],
                       ],
                     ),
                     const SizedBox(height: 1),
                     Text(
                       remaining ?? '',
-                      style: const TextStyle(color: Colors.white38, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
               ),
               if (m.isMine)
                 IconButton(
-                  tooltip: 'Excluir momento',
+                  tooltip: l10n.deleteMoment,
                   onPressed: _deleting.contains(m.id) ? null : () => _delete(m),
                   icon: _deleting.contains(m.id)
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white54,
+                          ),
                         )
-                      : const Icon(Icons.delete_outline_rounded, color: Colors.white38, size: 20),
+                      : const Icon(
+                          Icons.delete_outline_rounded,
+                          color: Colors.white38,
+                          size: 20,
+                        ),
                 ),
             ],
           ),
@@ -313,15 +360,23 @@ class _MomentsScreenState extends State<MomentsScreen> {
           ],
           Text(
             m.text,
-            style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.45),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              height: 1.45,
+            ),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              Icon(Icons.hourglass_bottom_rounded, color: colors.primarySoft, size: 15),
+              Icon(
+                Icons.hourglass_bottom_rounded,
+                color: colors.primarySoft,
+                size: 15,
+              ),
               const SizedBox(width: 4),
               Text(
-                m.isMine ? 'Só você vê que é seu' : 'Desaparece em breve',
+                m.isMine ? l10n.onlyYouSeeIt : l10n.disappearsSoon,
                 style: const TextStyle(color: Colors.white38, fontSize: 12),
               ),
             ],

@@ -17,13 +17,146 @@ interface RichGift {
   featured_end: string | null;
 }
 
+interface LiveRow {
+  id: string;
+  streamer_id: string;
+  status: string;
+}
+
+interface ExistingGift {
+  id: string;
+  gift_id: string;
+  gift_name: string;
+  receiver_id: string | null;
+  amount: number | string;
+  credits_total: number | string;
+  balance_after: number | string;
+}
+
+interface SpendResult {
+  ok?: unknown;
+  duplicate?: unknown;
+  transaction_id?: unknown;
+  amount?: unknown;
+  credits_spent?: unknown;
+  balance?: unknown;
+  unlimited?: unknown;
+  earnings_processed?: unknown;
+}
+
+interface ServiceQuery {
+  select(columns: string): ServiceQuery;
+  eq(column: string, value: string): ServiceQuery;
+  maybeSingle(): Promise<{ data: unknown; error: unknown }>;
+}
+
+interface ServiceClientShape {
+  from(table: string): ServiceQuery;
+  rpc(
+    name: string,
+    params?: Record<string, unknown>,
+  ): Promise<{ data: unknown; error: unknown }>;
+}
+
 const MAX_AMOUNT = 999;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function giftAvailable(g: RichGift, now: number): boolean {
   if (g.status !== "active") return false;
-  if (g.featured_start && new Date(g.featured_start).getTime() > now) return false;
+  if (g.featured_start && new Date(g.featured_start).getTime() > now) {
+    return false;
+  }
   if (g.featured_end && new Date(g.featured_end).getTime() < now) return false;
   return true;
+}
+
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
+function optionalUuid(
+  body: Record<string, unknown>,
+  key: string,
+): { value: string | null; invalid: boolean } {
+  const raw = body[key];
+  if (raw === undefined || raw === null) return { value: null, invalid: false };
+  if (typeof raw !== "string") return { value: null, invalid: true };
+  const value = raw.trim();
+  if (value.length === 0) return { value: null, invalid: false };
+  return { value: value.toLowerCase(), invalid: !isUuid(value) };
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+async function findExistingGift(
+  svc: unknown,
+  senderId: string,
+  requestId: string,
+): Promise<ExistingGift | null> {
+  const client = svc as ServiceClientShape;
+  const { data, error } = await client
+    .from("gift_transactions")
+    .select(
+      "id,gift_id,gift_name,receiver_id,amount,credits_total,balance_after",
+    )
+    .eq("request_id", requestId)
+    .eq("user_id", senderId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("gift duplicate lookup failed");
+    return null;
+  }
+  return (data as ExistingGift | null) ?? null;
+}
+
+function duplicateResponse(
+  g: RichGift,
+  existing: ExistingGift,
+): Record<string, unknown> {
+  return {
+    ok: true,
+    duplicate: true,
+    transaction_id: existing.id,
+    gift: {
+      id: existing.gift_id,
+      name: existing.gift_name,
+      icon: g.icon,
+      animation_key: g.animation_key,
+    },
+    amount: finiteNumber(existing.amount) ?? 1,
+    credits_spent: finiteNumber(existing.credits_total) ?? 0,
+    balance: finiteNumber(existing.balance_after) ?? 0,
+    unlimited: false,
+  };
+}
+
+async function earningsSucceeded(
+  svc: unknown,
+  transactionId: string,
+  receiverId: string,
+  grossCredits: number,
+): Promise<boolean> {
+  try {
+    const client = svc as ServiceClientShape;
+    const result = await client.rpc("process_gift_earnings", {
+      p_gift_tx_id: transactionId,
+      p_receiver_id: receiverId,
+      p_gross_credits: grossCredits,
+    });
+    const data = result.data as { ok?: unknown } | null;
+    return result.error === null && data?.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -35,25 +168,61 @@ Deno.serve(async (req) => {
 
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    const parsed: unknown = await req.json();
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return json({ error: "invalid_json" }, 400);
+    }
+    body = parsed as Record<string, unknown>;
   } catch {
     return json({ error: "invalid_json" }, 400);
   }
 
   const giftId = typeof body.gift_id === "string" ? body.gift_id.trim() : "";
-  const amountRaw =
-    typeof body.amount === "number" ? Math.floor(body.amount) : 1;
-  const amount = Math.max(1, Math.min(amountRaw, MAX_AMOUNT));
-  const liveId = typeof body.live_id === "string" ? body.live_id : null;
-  const receiverId = typeof body.receiver_id === "string"
-    ? body.receiver_id
-    : null;
-  const requestId = typeof body.request_id === "string" &&
-      body.request_id.trim().length >= 8 && body.request_id.trim().length <= 64
-    ? body.request_id.trim()
-    : null;
-
   if (!giftId) return json({ error: "gift_required" }, 400);
+
+  let amount = 1;
+  if (body.amount !== undefined && body.amount !== null) {
+    if (typeof body.amount !== "number" || !Number.isFinite(body.amount)) {
+      return json({ error: "amount_invalid" }, 400);
+    }
+    amount = Math.floor(body.amount);
+    if (amount < 1 || amount > MAX_AMOUNT) {
+      return json({ error: "amount_invalid" }, 400);
+    }
+  }
+
+  const liveField = body.live_id !== undefined ? body.live_id : body.liveId;
+  const liveParsed = optionalUuid({ live_id: liveField }, "live_id");
+  if (liveParsed.invalid) return json({ error: "invalid_live_id" }, 400);
+  const liveId = liveParsed.value;
+
+  const receiverParsed = optionalUuid(body, "receiver_id");
+  if (receiverParsed.invalid) {
+    return json({ error: "invalid_receiver_id" }, 400);
+  }
+  const receiverId = receiverParsed.value;
+
+  if (liveId !== null && receiverId === null) {
+    return json({ error: "receiver_id_required" }, 400);
+  }
+  if (receiverId !== null && receiverId === user.id) {
+    return json({ error: "cannot_send_to_self" }, 400);
+  }
+
+  let requestId: string | null = null;
+  if (body.request_id !== undefined && body.request_id !== null) {
+    if (typeof body.request_id !== "string") {
+      return json({ error: "invalid_request_id" }, 400);
+    }
+    requestId = body.request_id.trim();
+    if (requestId.length < 8 || requestId.length > 64) {
+      return json({ error: "invalid_request_id" }, 400);
+    }
+  }
 
   const svc = createClient(
     Deno.env.get("SUPABASE_URL") as string,
@@ -63,7 +232,7 @@ Deno.serve(async (req) => {
   const { data: gift, error: giftErr } = await svc
     .from("gifts")
     .select(
-      "id,name,credits,status,icon,animation_key,rarity_id,is_tradable,is_limited,event_id,featured_start,featured_end,event_id",
+      "id,name,credits,status,icon,animation_key,rarity_id,is_tradable,is_limited,event_id,featured_start,featured_end",
     )
     .eq("id", giftId)
     .maybeSingle();
@@ -77,180 +246,174 @@ Deno.serve(async (req) => {
     return json({ error: "gift_unavailable" }, 400);
   }
 
-  const senderId = user.id;
-  if (receiverId && receiverId === senderId) {
-    return json({ error: "cannot_send_to_self" }, 400);
-  }
+  const hasExisting =
+    requestId !== null &&
+    (await findExistingGift(svc, user.id, requestId)) !== null;
 
-  const totalCredits = g.credits * amount;
+  if (liveId !== null && !hasExisting) {
+    const { data: liveData, error: liveError } = await svc
+      .from("lives")
+      .select("id,streamer_id,status")
+      .eq("id", liveId)
+      .maybeSingle();
 
-  // Idempotência: o request_id é "clamado" primeiro (RPC atômica security
-  // definer). Somente o vencedor debita/envia; uma nova tentativa com o mesmo
-  // id reaproveita a transação gravada, evitando débito duplo em retry.
-  if (requestId) {
-    const { data: claimed, error: claimErr } = await svc.rpc(
-      "claim_gift_request",
-      { p_request_id: requestId, p_user_id: senderId },
-    );
+    if (liveError) {
+      console.error("live lookup failed");
+      return json({ error: "live_lookup_failed" }, 500);
+    }
 
-    if (claimErr || claimed !== true) {
-      const { data: existing } = await svc.from("gift_transactions").select(
-        "id,gift_id,gift_name,amount,credits_total,balance_after",
-      ).eq("request_id", requestId).maybeSingle();
-
-      if (existing) {
-        return json({
-          ok: true,
-          duplicate: true,
-          transaction_id: existing.id,
-          gift: {
-            id: existing.gift_id,
-            name: existing.gift_name,
-            icon: g.icon,
-            animation_key: g.animation_key,
-          },
-          amount: existing.amount,
-          credits_spent: existing.credits_total,
-          balance: existing.balance_after,
-        });
-      }
-      // Request clameado antes do débito mas ainda sem transação gravada:
-      // cliente deve tentar de novo com um request_id novo (sem efeito).
-      return json({ error: "duplicate_in_progress" }, 409);
+    const live = liveData as LiveRow | null;
+    if (!live) return json({ error: "live_not_found" }, 400);
+    if (live.status !== "live") return json({ error: "live_not_active" }, 400);
+    if (receiverId === null || live.streamer_id !== receiverId) {
+      return json({ error: "receiver_not_streamer" }, 403);
     }
   }
 
-  // Fundador com créditos ilimitados (flag server-side): NÃO debita saldo, mas
-  // ainda registra a transação (balance_after = saldo atual, inalterado). A
-  // decisão de dar créditos ilimitados é exclusiva do backend (founder flag),
-  // nunca do cliente.
-  const { data: founderProfile } = await svc
+  const { data: founderProfile, error: founderError } = await svc
     .from("profiles")
     .select("founder_unlimited_currency")
-    .eq("id", senderId)
+    .eq("id", user.id)
     .maybeSingle();
+
+  if (founderError) {
+    console.error("founder profile lookup failed");
+    return json({ error: "gift_processing_error" }, 500);
+  }
   const unlimited =
-    typeof founderProfile?.founder_unlimited_currency === "boolean"
-      ? founderProfile.founder_unlimited_currency
-      : false;
+    (founderProfile as { founder_unlimited_currency?: unknown } | null)
+      ?.founder_unlimited_currency === true;
 
-  let balanceAfter: number;
-  if (unlimited) {
-    const { data: cur } = await svc
-      .from("user_wallets")
-      .select("credits")
-      .eq("user_id", senderId)
-      .maybeSingle();
-    balanceAfter = typeof cur?.credits === "number" ? cur.credits : 0;
-  } else {
-    // Deduz créditos de forma atômica num RPC do Postgres (saldos garantidos
-    // pelo banco: só prossegue se houver saldo suficiente).
-    const { data: debit, error: debitErr } = await svc.rpc("debit_credits", {
-      p_user_id: senderId,
-      p_delta: totalCredits,
+  let res: { data: unknown; error: { message?: string } | null };
+  try {
+    res = await svc.rpc("process_gift_spend", {
+      p_request_id: requestId,
+      p_user_id: user.id,
+      p_gift_id: g.id,
+      p_gift_name: g.name,
+      p_gift_icon: g.icon,
+      p_gift_animation: g.animation_key,
+      p_rarity_id: g.rarity_id,
+      p_credits_per_unit: g.credits,
+      p_amount: amount,
+      p_live_id: liveId,
+      p_receiver_id: receiverId,
+      p_sender_name: user.name ?? null,
+      p_unlimited: unlimited,
     });
-
-    if (debitErr || !debit || typeof debit.balance !== "number") {
-      console.error("debit_credits error:", debitErr?.message ?? "no balance");
-      return json({ error: "insufficient_credits", reason: debitErr?.message }, 400);
-    }
-    balanceAfter = debit.balance;
+  } catch {
+    console.error("process_gift_spend exception");
+    return json({ error: "gift_processing_error" }, 500);
   }
 
-  // Registra o ledger de créditos (débito 0 para o fundador ilimitado —
-  // transação registrada, saldo intacto).
-  await svc.from("credit_transactions").insert({
-    user_id: senderId,
-    delta: unlimited ? 0 : -totalCredits,
-    balance_after: balanceAfter,
-    kind: "spend",
-    ref_type: "gift",
-    ref_id: `${giftId}:${amount}`,
-    note: `Envio de ${g.name} x${amount}${unlimited ? " (fundador ilimitado)" : ""}`,
-  });
-
-  // Registra o histórico financeiro autoritativo do envio.
-  const { data: tx } = await svc.from("gift_transactions").insert({
-    user_id: senderId,
-    receiver_id: receiverId,
-    live_id: liveId,
-    gift_id: g.id,
-    gift_name: g.name,
-    amount,
-    credits_per_unit: g.credits,
-    credits_total: totalCredits,
-    balance_after: balanceAfter,
-    request_id: requestId,
-  }).select("id").single();
-
-  // Se o envio ocorreu numa live, registra o presente recebido (feed real do
-  // app usa live_gifts + live_events) e o evento do chat.
-  if (liveId) {
-    const chatLine =
-      `🎁 ${user.name ?? "Alguém"} enviou ${g.icon} ${g.name} x${amount}`;
-    await svc.from("live_chat").insert({
-      live_id: liveId,
-      user_id: senderId,
-      message: chatLine,
-    });
-    await svc.from("live_gifts").insert({
-      live_id: liveId,
-      sender_id: senderId,
-      receiver_id: receiverId,
-      gift_id: g.id,
-      gift_name: g.name,
-      gift_amount: amount,
-    });
-    await svc.from("live_events").insert({
-      live_id: liveId,
-      event_type: "GIFT_RECEIVED",
-      user_id: senderId,
-      username: user.name ?? null,
-      metadata: {
-        gift_id: g.id,
-        gift_name: g.name,
-        gift_icon: g.icon,
-        gift_amount: amount,
-        gift_animation: g.animation_key,
-        rarity_id: g.rarity_id,
-        message: chatLine,
-      },
-    });
-
-    // Notificação ao streamer/usuário que recebeu.
-    if (receiverId) {
-      await svc.from("notifications").insert({
-        user_id: receiverId,
-        actor_id: senderId,
-        type: "gift",
-        ref_id: tx?.id ?? null,
-        message: `${user.name ?? "Alguém"} enviou ${g.icon} ${g.name} x${amount}`,
-      });
+  if (res.error) {
+    const message = res.error.message ?? "";
+    console.error("process_gift_spend failed");
+    if (message.includes("insufficient_credits")) {
+      return json({ error: "insufficient_credits" }, 400);
     }
+    if (message.includes("live_not_found")) {
+      return json({ error: "live_not_found" }, 400);
+    }
+    if (message.includes("live_not_active")) {
+      return json({ error: "live_not_active" }, 400);
+    }
+    if (message.includes("receiver_id_required")) {
+      return json({ error: "receiver_id_required" }, 400);
+    }
+    if (message.includes("receiver_not_streamer")) {
+      return json({ error: "receiver_not_streamer" }, 403);
+    }
+    if (message.includes("cannot_send_to_self")) {
+      return json({ error: "cannot_send_to_self" }, 400);
+    }
+    if (message.includes("invalid_request_id")) {
+      return json({ error: "invalid_request_id" }, 400);
+    }
+    if (message.includes("gift_unavailable")) {
+      return json({ error: "gift_unavailable" }, 400);
+    }
+    if (message.includes("request_id_conflict")) {
+      return json({ error: "request_id_conflict" }, 409);
+    }
+    if (message.includes("duplicate_in_progress")) {
+      return json({ error: "duplicate_in_progress" }, 409);
+    }
+    if (message.includes("gift_earnings_failed")) {
+      return json({ error: "creator_earnings_failed" }, 500);
+    }
+    if (requestId && message.includes("duplicate key")) {
+      const existing = await findExistingGift(svc, user.id, requestId);
+      if (existing) {
+        const existingCredits = finiteNumber(existing.credits_total) ?? 0;
+        if (
+          existing.receiver_id !== null &&
+          existingCredits > 0 &&
+          !(await earningsSucceeded(
+            svc,
+            existing.id,
+            existing.receiver_id,
+            existingCredits,
+          ))
+        ) {
+          console.error("process_gift_earnings failed for duplicate");
+          return json({ error: "creator_earnings_failed" }, 500);
+        }
+        return json(duplicateResponse(g, existing));
+      }
+    }
+    return json({ error: "gift_processing_error" }, 500);
   }
 
-  // Atualiza estatísticas do presente (populares/tendências/recomendados).
-  const { data: stats } = await svc.from("gift_usage_stats").select("sent_count")
-    .eq("gift_id", g.id).maybeSingle();
-  const sentCount = (stats?.sent_count ?? 0) + amount;
-  await svc.from("gift_usage_stats").upsert({
-    gift_id: g.id,
-    sent_count: sentCount,
-    last_sent_at: new Date().toISOString(),
-  });
+  const out = (res.data ?? {}) as SpendResult;
+  const transactionId =
+    typeof out.transaction_id === "string" ? out.transaction_id : "";
+  const resultAmount = finiteNumber(out.amount);
+  const creditsSpent = finiteNumber(out.credits_spent);
+  const balance = finiteNumber(out.balance);
+  if (
+    out.ok !== true ||
+    transactionId.length === 0 ||
+    resultAmount === null ||
+    creditsSpent === null ||
+    balance === null ||
+    resultAmount < 0 ||
+    creditsSpent < 0 ||
+    balance < 0
+  ) {
+    console.error("process_gift_spend returned an invalid result");
+    return json({ error: "gift_processing_error" }, 500);
+  }
+
+  const resultUnlimited =
+    typeof out.unlimited === "boolean" ? out.unlimited : unlimited;
+  const needsEarnings =
+    receiverId !== null &&
+    creditsSpent > 0 &&
+    !resultUnlimited &&
+    out.earnings_processed !== true;
+
+  if (
+    needsEarnings &&
+    !(await earningsSucceeded(svc, transactionId, receiverId, creditsSpent))
+  ) {
+    console.error("process_gift_earnings failed");
+    return json({ error: "creator_earnings_failed" }, 500);
+  }
 
   return json({
     ok: true,
-    transaction_id: tx?.id ?? null,
+    duplicate: out.duplicate === true,
+    transaction_id: transactionId,
     gift: {
       id: g.id,
       name: g.name,
       icon: g.icon,
       animation_key: g.animation_key,
     },
-    amount,
-    credits_spent: unlimited ? 0 : totalCredits,
-    balance: balanceAfter,
-    unlimited,
+    amount: resultAmount,
+    credits_spent: creditsSpent,
+    balance,
+    unlimited: resultUnlimited,
   });
 });

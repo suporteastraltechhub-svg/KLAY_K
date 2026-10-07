@@ -68,6 +68,8 @@ class RisingCreator {
       if (followers7d > 0) '$followers7d seguidores',
       if (posts7d > 0) '$posts7d posts',
     ];
-    return parts.isEmpty ? 'Sem atividade nos últimos 7 dias' : parts.join(' · ');
+    return parts.isEmpty
+        ? 'Sem atividade nos últimos 7 dias'
+        : parts.join(' · ');
   }
 }

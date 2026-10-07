@@ -24,14 +24,14 @@ class InviteRecord {
   bool get isValidated => status == 'validated';
 
   factory InviteRecord.fromRpc(Map<String, dynamic> json) => InviteRecord(
-        id: json['id']?.toString() ?? '',
-        invitedUserId: json['invited_user_id']?.toString() ?? '',
-        inviteCode: json['invite_code']?.toString() ?? '',
-        status: json['status']?.toString() ?? 'pending',
-        validatedAt: json['validated_at'] != null
-            ? DateTime.tryParse(json['validated_at'].toString())
-            : null,
-      );
+    id: json['id']?.toString() ?? '',
+    invitedUserId: json['invited_user_id']?.toString() ?? '',
+    inviteCode: json['invite_code']?.toString() ?? '',
+    status: json['status']?.toString() ?? 'pending',
+    validatedAt: json['validated_at'] != null
+        ? DateTime.tryParse(json['validated_at'].toString())
+        : null,
+  );
 }
 
 /// Resumo do programa de convites do usuário (código + contadores).
@@ -51,12 +51,12 @@ class InviteSummary {
   });
 
   factory InviteSummary.fromMap(Map<String, dynamic> json) => InviteSummary(
-        code: json['code']?.toString() ?? '',
-        invited: (json['invited'] as num?)?.toInt() ?? 0,
-        validated: (json['validated'] as num?)?.toInt() ?? 0,
-        rewarded: (json['rewarded'] as num?)?.toInt() ?? 0,
-        pendingRewards: (json['pending_rewards'] as num?)?.toInt() ?? 0,
-      );
+    code: json['code']?.toString() ?? '',
+    invited: (json['invited'] as num?)?.toInt() ?? 0,
+    validated: (json['validated'] as num?)?.toInt() ?? 0,
+    rewarded: (json['rewarded'] as num?)?.toInt() ?? 0,
+    pendingRewards: (json['pending_rewards'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// Resultado da validação de um código de convite (antes do cadastro).
@@ -249,7 +249,6 @@ class InviteService {
     return const {};
   }
 
-  Map<String, dynamic> _stringMap(Map<dynamic, dynamic> m) => m.map(
-        (k, v) => MapEntry(k.toString(), v),
-      );
+  Map<String, dynamic> _stringMap(Map<dynamic, dynamic> m) =>
+      m.map((k, v) => MapEntry(k.toString(), v));
 }

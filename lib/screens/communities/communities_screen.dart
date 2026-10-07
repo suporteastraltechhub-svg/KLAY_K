@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../design/klayk_design.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/community_models.dart';
 import '../../services/community_service.dart';
 import '../../services/supabase_service.dart';
@@ -90,22 +91,23 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
   }
 
   Future<void> _openCreate() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CreateCommunityScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const CreateCommunityScreen()));
     _load(category: _selectedCategory);
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text(
-          'Comunidades',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        title: Text(
+          l10n.communitiesTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
           KlayKIconButton(
@@ -120,27 +122,27 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: _searchField(),
+            child: _searchField(l10n),
           ),
-          _categoryStrip(),
+          _categoryStrip(context, l10n),
           const SizedBox(height: 4),
           Expanded(
             child: _loading
                 ? const KlaykListSkeleton(rows: 6)
-                : _buildBody(colors),
+                : _buildBody(colors, l10n),
           ),
         ],
       ),
     );
   }
 
-  Widget _searchField() {
+  Widget _searchField(AppLocalizations l10n) {
     return TextField(
       controller: _searchCtrl,
       onChanged: _onSearch,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
-        hintText: 'Buscar comunidades…',
+        hintText: l10n.communitiesSearchHint,
         hintStyle: const TextStyle(color: Colors.white38),
         prefixIcon: const Icon(Icons.search, color: Colors.white38),
         suffixIcon: _searchCtrl.text.trim().isEmpty
@@ -170,7 +172,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     );
   }
 
-  Widget _categoryStrip() {
+  Widget _categoryStrip(BuildContext context, AppLocalizations l10n) {
     final cats = [..._categories];
     return SizedBox(
       height: 46,
@@ -182,7 +184,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
         itemBuilder: (context, i) {
           if (i == 0) {
             return KlayKChip(
-              label: 'Todas',
+              label: l10n.communitiesAllCategories,
               selected: _selectedCategory == null,
               onTap: _selectCategory,
             );
@@ -203,13 +205,13 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     _load(category: category);
   }
 
-  Widget _buildBody(KlaykColors colors) {
+  Widget _buildBody(KlaykColors colors, AppLocalizations l10n) {
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar as comunidades. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.communitiesLoadError,
+        message: l10n.communitiesLoadErrorMsg,
+        actionLabel: l10n.communitiesLoadErrorAction,
         actionIcon: Icons.refresh_rounded,
         onAction: () => _load(category: _selectedCategory),
       );
@@ -217,10 +219,9 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     if (_all.isEmpty) {
       return KlaykEmptyState(
         icon: Icons.groups_outlined,
-        title: 'Nenhuma comunidade',
-        message:
-            'Crie a primeira comunidade do KLAY K ou tente outra busca.',
-        actionLabel: 'Criar comunidade',
+        title: l10n.communitiesEmpty,
+        message: l10n.communitiesEmptyMsg,
+        actionLabel: l10n.communitiesEmptyAction,
         actionIcon: Icons.add_rounded,
         onAction: _openCreate,
       );
@@ -229,11 +230,11 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       itemCount: _all.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, i) => _communityCard(_all[i]),
+      itemBuilder: (context, i) => _communityCard(_all[i], l10n),
     );
   }
 
-  Widget _communityCard(Community c) {
+  Widget _communityCard(Community c, AppLocalizations l10n) {
     final colors = kcolors(context);
     return KlayKCard(
       onTap: () => _openDetail(c),
@@ -272,7 +273,11 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                 const SizedBox(height: 3),
                 Text(
                   c.description.isEmpty
-                      ? '${c.memberCount} membros · ${c.categoryIcon} ${c.category}'
+                      ? l10n.communitiesMemberCountCat(
+                          c.category,
+                          c.memberCount,
+                          c.categoryIcon,
+                        )
                       : c.description,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -281,13 +286,15 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    Icon(Icons.groups_rounded,
-                        size: 14, color: colors.primarySoft),
+                    Icon(
+                      Icons.groups_rounded,
+                      size: 14,
+                      color: colors.primarySoft,
+                    ),
                     const SizedBox(width: 4),
                     Text(
-                      '${c.memberCount} membros',
-                      style:
-                          TextStyle(color: colors.primarySoft, fontSize: 12),
+                      l10n.communitiesMemberCount(c.memberCount),
+                      style: TextStyle(color: colors.primarySoft, fontSize: 12),
                     ),
                   ],
                 ),

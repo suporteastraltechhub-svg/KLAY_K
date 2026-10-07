@@ -4,7 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Callback de ações vindas do painel nativo da bolinha flutuante.
-typedef OverlayAction = void Function(String action, Map<String, dynamic>? payload);
+typedef OverlayAction =
+    void Function(String action, Map<String, dynamic>? payload);
 
 /// Controlador Dart da bolinha flutuante da Live de Jogo.
 ///
@@ -18,8 +19,9 @@ class KlayLiveGameOverlay {
 
   static final KlayLiveGameOverlay instance = KlayLiveGameOverlay._();
 
-  static const MethodChannel _overlayChannel =
-      MethodChannel('klayk/live_game_overlay');
+  static const MethodChannel _overlayChannel = MethodChannel(
+    'klayk/live_game_overlay',
+  );
 
   OverlayAction? _onAction;
   bool _listening = false;

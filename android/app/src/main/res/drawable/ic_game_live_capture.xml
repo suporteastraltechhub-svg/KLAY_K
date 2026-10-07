@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone central da bolinha flutuante da Live de Jogo (controle/captura).
+     Mesmo formato do ícone "sports_esports" usado em todo o KLAY K (hub de
+     lives, sala e tela "Criar live"). Vetorial, escala perfeita em qualquer
+     densidade e não é texto. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#F5F3FF">
+    <path
+        android:fillColor="#F5F3FF"
+        android:pathData="M20,5H4C2.9,5 2,5.9 2,7v10c0,1.1 0.9,2 2,2h1c1.1,0 2,-0.9 2,-2v-0.5h10V17c0,1.1 0.9,2 2,2h1c1.1,0 2,-0.9 2,-2V7C22,5.9 21.1,5 20,5zM6,11h-2v-1h2V8h1v2h2v1H7v2H6V11zM10,9.5C10,9.22 9.78,9 9.5,9c-0.28,0 -0.5,0.22 -0.5,0.5S9.22,10 9.5,10s0.5,-0.22 0.5,-0.5zM11.5,11.5c-0.28,0 -0.5,0.22 -0.5,0.5s0.22,0.5 0.5,0.5 0.5,-0.5S11.78,11.5 11.5,11.5zM13,9.5c0,-0.28 -0.22,-0.5 -0.5,-0.5s-0.5,0.22 -0.5,0.5s0.22,0.5 0.5,0.5S13,9.78 13,9.5zM13.5,13.5c-0.28,0 -0.5,0.22 -0.5,0.5s0.22,0.5 0.5,0.5s0.5,-0.22 0.5,-0.5S13.78,13.5 13.5,13.5zM18,11h-2v-1h2V8h1v2h2v1h-2v2h-1V11zM8.5,11.5h1v1h-1zM15,11.5h1v1h-1z"/>
+</vector>

@@ -270,8 +270,7 @@ const List<(GiftCategory, String, String)> _categoryTabs = [
 class KlayKGiftPanel extends StatefulWidget {
   final Function(GiftItem) onGiftSent;
 
-  const KlayKGiftPanel({Key? key, required this.onGiftSent})
-      : super(key: key);
+  const KlayKGiftPanel({super.key, required this.onGiftSent});
 
   @override
   State<KlayKGiftPanel> createState() => _KlayKGiftPanelState();
@@ -337,8 +336,10 @@ class _KlayKGiftPanelState extends State<KlayKGiftPanel> {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
-                label: Text('$emoji $label',
-                    style: const TextStyle(color: Colors.white, fontSize: 12)),
+                label: Text(
+                  '$emoji $label',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
                 selected: _tab == cat,
                 backgroundColor: const Color(0xFF1C1C26),
                 selectedColor: kCyan.withValues(alpha: 0.25),
@@ -415,8 +416,7 @@ class _GiftCardState extends State<_GiftCard> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style:
-                    const TextStyle(color: Colors.white, fontSize: 10),
+                style: const TextStyle(color: Colors.white, fontSize: 10),
               ),
               const SizedBox(height: 2),
               Text(
@@ -454,11 +454,11 @@ class KlayGiftOverlay extends StatefulWidget {
   final VoidCallback onComplete;
 
   const KlayGiftOverlay({
-    Key? key,
+    super.key,
     required this.gift,
     this.senderName = '',
     required this.onComplete,
-  }) : super(key: key);
+  });
 
   @override
   State<KlayGiftOverlay> createState() => _KlayGiftOverlayState();
@@ -482,8 +482,8 @@ class _KlayGiftOverlayState extends State<KlayGiftOverlay>
     final duration = _cinematic
         ? const Duration(seconds: 3)
         : vehicle
-            ? const Duration(milliseconds: 2200)
-            : const Duration(milliseconds: 2600);
+        ? const Duration(milliseconds: 2200)
+        : const Duration(milliseconds: 2600);
 
     _controller = AnimationController(vsync: this, duration: duration)
       ..addStatusListener((s) {
@@ -527,7 +527,11 @@ class _KlayGiftOverlayState extends State<KlayGiftOverlay>
               builder: (context, _) {
                 final progress = _controller.value;
                 return CustomPaint(
-                  painter: _EmojiRainPainter(progress, _emoji, widget.gift.emoji),
+                  painter: _EmojiRainPainter(
+                    progress,
+                    _emoji,
+                    widget.gift.emoji,
+                  ),
                 );
               },
             ),
@@ -539,7 +543,9 @@ class _KlayGiftOverlayState extends State<KlayGiftOverlay>
                 padding: const EdgeInsets.only(top: 48),
                 child: FadeTransition(
                   opacity: CurvedAnimation(
-                      parent: _controller, curve: Curves.easeOut),
+                    parent: _controller,
+                    curve: Curves.easeOut,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -591,13 +597,15 @@ class _KlayGiftOverlayState extends State<KlayGiftOverlay>
                 Colors.transparent,
                 const Color(0x66204A6B),
                 Curves.easeOut.transform(
-                    t < 0.25 ? t / 0.25 : (1 - (t - 0.25) / 0.2).clamp(0, 1)),
+                  t < 0.25 ? t / 0.25 : (1 - (t - 0.25) / 0.2).clamp(0, 1),
+                ),
               ),
             ),
             // Emoji gigante do navio com zoom brilhante.
             Center(
               child: Transform.scale(
-                scale: 0.4 + Curves.easeOutBack.transform(t.clamp(0, 0.7)) * 1.6,
+                scale:
+                    0.4 + Curves.easeOutBack.transform(t.clamp(0, 0.7)) * 1.6,
                 child: Opacity(
                   opacity: (1 - (t - 0.75) / 0.25).clamp(0.0, 1.0),
                   child: Text(
@@ -668,10 +676,7 @@ class _EmojiRainPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(
-        canvas,
-        Offset(e.x * size.width + wobble, y),
-      );
+      tp.paint(canvas, Offset(e.x * size.width + wobble, y));
     }
   }
 

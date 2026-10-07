@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/store_models.dart';
 import '../services/store_service.dart';
 import '../services/supabase_service.dart';
@@ -70,40 +71,38 @@ class _StoreScreenState extends State<StoreScreen> {
   Future<void> _refresh() => _load();
 
   Future<void> _openCart() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const StoreCartScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const StoreCartScreen()));
     _refresh();
   }
 
   Future<void> _openOrders() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const StoreOrdersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const StoreOrdersScreen()));
   }
 
   Future<void> _openManage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const StoreManageScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const StoreManageScreen()));
     _refresh();
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text(
-          'Loja',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        title: Text(
+          l10n.store,
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
-          KlayKIconButton(
-            onTap: _openManage,
-            icon: Icons.storefront_outlined,
-          ),
+          KlayKIconButton(onTap: _openManage, icon: Icons.storefront_outlined),
           KlayKIconButton(
             onTap: _openOrders,
             icon: Icons.receipt_long_outlined,
@@ -120,16 +119,16 @@ class _StoreScreenState extends State<StoreScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  _searchField(),
+                  _searchField(l10n),
                   const SizedBox(height: 12),
-                  _categoryChips(),
+                  _categoryChips(l10n),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Produtos',
-                          style: TextStyle(
+                          l10n.productsLabel,
+                          style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
                             fontSize: 16,
@@ -137,28 +136,30 @@ class _StoreScreenState extends State<StoreScreen> {
                         ),
                       ),
                       Text(
-                        '${_products.length} itens',
+                        l10n.storeProductCount(_products.length),
                         style: const TextStyle(
-                            color: Colors.white38, fontSize: 12),
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   if (!SupabaseService.instance.isConfigured)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 32),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
                       child: Center(
                         child: Text(
-                          'Configura o Supabase para acessar a Loja',
-                          style: TextStyle(color: Colors.white54),
+                          l10n.storeConfigureSupabase,
+                          style: const TextStyle(color: Colors.white54),
                         ),
                       ),
                     )
                   else if (_products.isEmpty)
-                    const KlaykEmptyState(
+                    KlaykEmptyState(
                       icon: Icons.shopping_bag_outlined,
-                      title: 'Nenhum produto encontrado',
-                      message: 'Tente outra busca ou selecione outra categoria.',
+                      title: l10n.noProductsFound,
+                      message: l10n.noProductsFoundBody,
                     )
                   else
                     GridView.builder(
@@ -166,14 +167,14 @@ class _StoreScreenState extends State<StoreScreen> {
                       physics: const NeverScrollableScrollPhysics(),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.72,
-                      ),
+                            crossAxisCount: 2,
+                            mainAxisSpacing: 12,
+                            crossAxisSpacing: 12,
+                            childAspectRatio: 0.72,
+                          ),
                       itemCount: _products.length,
                       itemBuilder: (context, i) =>
-                          _productCard(_products[i]),
+                          _productCard(l10n, _products[i]),
                     ),
                   const SizedBox(height: 24),
                 ],
@@ -198,9 +199,10 @@ class _StoreScreenState extends State<StoreScreen> {
                 child: Text(
                   '$_cartCount',
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700),
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               )
             : null,
@@ -208,7 +210,7 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  Widget _searchField() {
+  Widget _searchField(AppLocalizations l10n) {
     return TextField(
       controller: _searchCtrl,
       textInputAction: TextInputAction.search,
@@ -225,7 +227,7 @@ class _StoreScreenState extends State<StoreScreen> {
         });
       },
       decoration: InputDecoration(
-        hintText: 'Buscar produtos…',
+        hintText: l10n.storeSearchHint,
         hintStyle: const TextStyle(color: Colors.white38),
         prefixIcon: const Icon(Icons.search, color: Colors.white38),
         suffixIcon: TextButton(
@@ -236,7 +238,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   _searchTick++;
                   _refresh();
                 },
-          child: const Text('Limpar'),
+          child: Text(l10n.clear),
         ),
         filled: true,
         fillColor: const Color(0xFF17141F),
@@ -248,8 +250,8 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  Widget _categoryChips() {
-    const all = StoreCategory(id: '', name: 'Todas', icon: '🛍️', slug: 'todas');
+  Widget _categoryChips(AppLocalizations l10n) {
+    const all = StoreCategory(id: '', name: '', icon: '🛍️', slug: 'todas');
     final items = [all, ..._categories];
     return SizedBox(
       height: 44,
@@ -259,10 +261,11 @@ class _StoreScreenState extends State<StoreScreen> {
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
           final c = items[i];
-          final selected = (c.id.isEmpty && _selectedCategory == null) ||
+          final selected =
+              (c.id.isEmpty && _selectedCategory == null) ||
               (_selectedCategory == c.id && c.id.isNotEmpty);
           return KlayKChip(
-            label: '${c.icon} ${c.name}',
+            label: '${c.icon} ${c.id.isEmpty ? l10n.allCategory : c.name}',
             selected: selected,
             onTap: () {
               setState(() {
@@ -276,90 +279,96 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  Widget _productCard(StoreProduct p) {
+  Widget _productCard(AppLocalizations l10n, StoreProduct p) {
     return RepaintBoundary(
       child: InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () => _showProductDetail(p),
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF17141F),
-          border: Border.all(color: const Color(0xFF2A2540)),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (p.imageUrl.isNotEmpty)
-                    Image.network(
-                      p.imageUrl,
-                      fit: BoxFit.cover,
-                      cacheWidth: imageDecodeWidth(context, 140),
-                      errorBuilder: (_, _, _) => _imageFallback(p),
-                    )
-                  else
-                    _imageFallback(p),
-                  if (p.outOfStock)
-                    Container(
-                      color: Colors.black54,
-                      alignment: Alignment.center,
-                      child: const Text(
-                        'ESGOTADO',
-                        style: TextStyle(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _showProductDetail(l10n, p),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF17141F),
+            border: Border.all(color: const Color(0xFF2A2540)),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (p.imageUrl.isNotEmpty)
+                      Image.network(
+                        p.imageUrl,
+                        fit: BoxFit.cover,
+                        cacheWidth: imageDecodeWidth(context, 140),
+                        errorBuilder: (_, _, _) => _imageFallback(p),
+                      )
+                    else
+                      _imageFallback(p),
+                    if (p.outOfStock)
+                      Container(
+                        color: Colors.black54,
+                        alignment: Alignment.center,
+                        child: Text(
+                          l10n.outOfStockChip,
+                          style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
                             fontSize: 13,
-                            letterSpacing: 1),
+                            letterSpacing: 1,
+                          ),
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    p.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      p.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
-                        fontSize: 13),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        formatPrice(p.price),
-                        style: const TextStyle(
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          formatPrice(p.price),
+                          style: const TextStyle(
                             color: _kAccent,
                             fontWeight: FontWeight.w900,
-                            fontSize: 15),
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (p.stock > 0 && p.stock < 5) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        l10n.lowStockCount(p.stock),
+                        style: const TextStyle(
+                          color: Colors.amber,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
-                  ),
-                  if (p.stock > 0 && p.stock < 5) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      'Restam ${p.stock}',
-                      style: const TextStyle(color: Colors.amber, fontSize: 11),
-                    ),
                   ],
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -375,7 +384,7 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  Future<void> _showProductDetail(StoreProduct p) async {
+  Future<void> _showProductDetail(AppLocalizations l10n, StoreProduct p) async {
     var qty = 1;
     await showModalBottomSheet(
       context: context,
@@ -423,15 +432,19 @@ class _StoreScreenState extends State<StoreScreen> {
               Text(
                 p.title,
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800),
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 formatPrice(p.price),
                 style: const TextStyle(
-                    color: _kAccent, fontSize: 20, fontWeight: FontWeight.w900),
+                  color: _kAccent,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
               if (p.description.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -443,21 +456,22 @@ class _StoreScreenState extends State<StoreScreen> {
               const SizedBox(height: 14),
               Row(
                 children: [
-                  const Text('Quantidade',
-                      style: TextStyle(color: Colors.white70)),
+                  Text(
+                    l10n.quantityLabel,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
                   const Spacer(),
                   IconButton(
-                    onPressed: qty > 1
-                        ? () => setModal(() => qty--)
-                        : null,
+                    onPressed: qty > 1 ? () => setModal(() => qty--) : null,
                     icon: const Icon(Icons.remove_circle_outline),
                   ),
                   Text(
                     '$qty',
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800),
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   IconButton(
                     onPressed: p.stock > qty
@@ -476,20 +490,20 @@ class _StoreScreenState extends State<StoreScreen> {
                       : () async {
                           try {
                             Navigator.of(ctx).pop();
-                            await StoreService.instance
-                                .addToCart(p.id, quantity: qty);
+                            await StoreService.instance.addToCart(
+                              p.id,
+                              quantity: qty,
+                            );
                             _refresh();
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Adicionado ao carrinho')),
+                                SnackBar(content: Text(l10n.addedToCart)),
                               );
                             }
                           } catch (e) {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                    content: Text('Erro ao adicionar: $e')),
+                                SnackBar(content: Text(l10n.addToCartError(e))),
                               );
                             }
                           }
@@ -500,7 +514,8 @@ class _StoreScreenState extends State<StoreScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   child: Text(
-                      p.outOfStock ? 'Esgotado' : 'Adicionar ao carrinho'),
+                    p.outOfStock ? l10n.outOfStockLabel : l10n.addToCartButton,
+                  ),
                 ),
               ),
             ],

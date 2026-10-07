@@ -22,7 +22,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import io.flutter.plugin.common.MethodChannel
@@ -49,7 +51,7 @@ class LiveGameOverlayService : Service() {
     private var windowManager: WindowManager? = null
     private var bubbleView: View? = null
     private var panelView: View? = null
-    private var minimizedView: View? = null
+    private var hiddenIndicatorView: View? = null
 
     private var bubbleCollapsedX = 24
     private var bubbleCollapsedY = 320
@@ -57,6 +59,13 @@ class LiveGameOverlayService : Service() {
     // Dimensões atuais da tela (recalculadas em onConfigurationChanged).
     private var screenWidth = 0
     private var screenHeight = 0
+
+    // Áreas seguras do display (status bar, navigation bar, cutout) em pixels.
+    // A bolinha/indicador/painel nunca podem entrar nessas regiões.
+    private var safeTop = 0
+    private var safeBottom = 0
+    private var safeLeft = 0
+    private var safeRight = 0
 
     // Estado refletido pelo painel (espelha o que o Flutter informa).
     @Volatile
@@ -74,6 +83,22 @@ class LiveGameOverlayService : Service() {
         private const val TAG = "KLAYK_OVERLAY"
         private const val NOTIFICATION_ID = 9002
         private const val CHANNEL_ID = "klayk_live_game_overlay"
+
+        /** Dimensão da janela da bolinha (dp) — área de toque/arrastar. */
+        private const val BUBBLE_SIZE_DP = 64
+        /** Diâmetro do círculo visível (dentro da janela, com espaço p/ o halo). */
+        private const val BUBBLE_CIRCLE_DP = 52
+        /** Botões menores do painel compacto (grade 2×4). */
+        private const val CHIP_WIDTH_DP = 52
+        private const val CHIP_HEIGHT_DP = 46
+
+        // Paleta neon da bolinha (identidade KLAY K).
+        private val COLOR_NEON_BORDER = 0xFFB794FF.toInt()
+        private val COLOR_NEON_GLOW = 0xFF8B5CF6.toInt()
+        private val COLOR_LIVE_DOT = 0xFFFF2E4D.toInt()
+        // Halo do brilho (preset com transparência já embutida).
+        private val GLOW_STRONG = 0x4D8B5CF6.toInt()
+
         const val ACTION_START = "start"
         const val ACTION_HIDE = "hide"
         const val ACTION_RESTORE = "restore"
@@ -104,12 +129,18 @@ class LiveGameOverlayService : Service() {
         instance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         updateScreenSize()
+        refreshSafeInsets()
+        // Posição inicial da bolinha: canto direito, abaixo da status bar.
+        bubbleCollapsedX = dp(24)
+        bubbleCollapsedY = safeTop + dp(180)
+        clampBubbleToBounds()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         // Mantém a posição da bolinha dentro da nova área após rotação.
         updateScreenSize()
+        refreshSafeInsets()
         clampBubbleToBounds()
         bubbleView?.let { v ->
             val params = bubbleLayoutParams()
@@ -117,7 +148,7 @@ class LiveGameOverlayService : Service() {
             params.y = bubbleCollapsedY
             try { windowManager?.updateViewLayout(v, params) } catch (_: Exception) {}
         }
-        repositionMinimized()
+        repositionHiddenIndicator()
     }
 
     private fun updateScreenSize() {
@@ -125,6 +156,47 @@ class LiveGameOverlayService : Service() {
         screenWidth = metrics.widthPixels
         screenHeight = metrics.heightPixels
     }
+
+    /** Mede as áreas seguras do sistema para o OVERLAY (coordenada da tela
+     *  inteira, consistente com FLAG_LAYOUT_NO_LIMITS): status bar, navigation
+     *  bar e cutout. API 30+ usa [WindowManager.currentWindowMetrics]; antes,
+     *  cai para dimensões de recurso do sistema. */
+    private fun refreshSafeInsets() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val wm = windowManager ?: return
+            val metrics = wm.currentWindowMetrics
+            val insets = metrics.windowInsets.getInsets(
+                android.view.WindowInsets.Type.systemBars() or
+                    android.view.WindowInsets.Type.displayCutout()
+            )
+            safeTop = insets.top
+            safeBottom = insets.bottom
+            safeLeft = insets.left
+            safeRight = insets.right
+        } else {
+            safeTop = systemBarDimen("status_bar_height")
+            safeBottom = navBarHeightCompat()
+            safeLeft = 0
+            safeRight = 0
+        }
+    }
+
+    private fun systemBarDimen(id: String): Int {
+        val identifier =
+            resources.getIdentifier(id, "dimen", "android")
+        return if (identifier > 0) resources.getDimensionPixelSize(identifier) else 0
+    }
+
+    private fun navBarHeightCompat(): Int {
+        val landscape =
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val id = if (landscape) "navigation_bar_height_landscape" else "navigation_bar_height"
+        var h = systemBarDimen(id)
+        if (h == 0) h = systemBarDimen("navigation_bar_height")
+        return h
+    }
+
+    private fun safeMargin(): Int = dp(4)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         handleIntent(intent)
@@ -135,10 +207,10 @@ class LiveGameOverlayService : Service() {
         when (intent?.action) {
             ACTION_START, null -> {
                 showForegroundNotification()
-                if (hidden) showMinimized() else showBubble()
+                if (hidden) showHiddenIndicator() else showBubble()
             }
-            ACTION_HIDE -> hideBubble()
-            ACTION_RESTORE -> { hidden = false; showBubble() }
+            ACTION_HIDE -> setHidden(true)
+            ACTION_RESTORE -> setHidden(false)
             ACTION_STOP -> { stopSelf() }
         }
     }
@@ -173,8 +245,8 @@ class LiveGameOverlayService : Service() {
                 voiceBotEnabled = argBool("enabled", false)
                 refreshControls()
             }
-            "hide" -> hideBubble()
-            "restore" -> { hidden = false; showBubble() }
+            "hide" -> setHidden(true)
+            "restore" -> setHidden(false)
             "stop" -> stopSelf()
         }
     }
@@ -226,8 +298,17 @@ class LiveGameOverlayService : Service() {
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Encerrar", stopPi)
                 .build()
 
-            startForeground(NOTIFICATION_ID, notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            try {
+                startForeground(NOTIFICATION_ID, notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } catch (t: Throwable) {
+                Log.e(TAG, "showForegroundNotification: FGS especial falhou — caindo para simples", t)
+                try {
+                    startForeground(NOTIFICATION_ID, notification)
+                } catch (t2: Throwable) {
+                    Log.e(TAG, "showForegroundNotification: FGS simples também falhou", t2)
+                }
+            }
         } else {
             startForeground(NOTIFICATION_ID,
                 Notification.Builder(this)
@@ -261,28 +342,65 @@ class LiveGameOverlayService : Service() {
             Log.i(TAG, "showBubble: bolinha ADICIONADA ao WindowManager (${bubbleLayoutParams().x},${bubbleLayoutParams().y})")
         } catch (t: Throwable) {
             Log.e(TAG, "showBubble: falha ao adicionar bolinha ao WindowManager", t)
+            bubbleView = null
         }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun createBubbleView(wm: WindowManager): View {
-        val size = dp(58)
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.HORIZONTAL
-        layout.gravity = Gravity.CENTER
-        layout.setBackgroundResource(android.R.color.transparent)
+        val size = bubbleSize()
+        val root = FrameLayout(this)
+        root.clipChildren = false
+        root.setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
-        val badge = TextView(this)
-        badge.text = "🎮"
-        badge.textSize = 24f
-        val lp = LinearLayout.LayoutParams(size, size)
-        layout.addView(badge, lp)
+        // Halo de brilho neon difuso (suave e estático — sem efeitos de piscar).
+        val glow = View(this)
+        val glowBg = android.graphics.drawable.GradientDrawable()
+        glowBg.shape = android.graphics.drawable.GradientDrawable.OVAL
+        glowBg.gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
+        glowBg.setColors(intArrayOf(GLOW_STRONG, 0x148B5CF6.toInt(), 0x008B5CF6.toInt()))
+        glowBg.setGradientRadius(size * 0.5f)
+        glow.background = glowBg
+        root.addView(glow, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
 
-        layout.setOnClickListener {
+        // Círculo principal: gradiente escuro-roxo profundo + borda neon suave +
+        // sombra sutil (profundidade discreta).
+        val circle = FrameLayout(this)
+        val circleLp = FrameLayout.LayoutParams(dp(BUBBLE_CIRCLE_DP), dp(BUBBLE_CIRCLE_DP), Gravity.CENTER)
+        circleLp.setMargins(dp(6), dp(6), dp(6), dp(6))
+        val circleBg = android.graphics.drawable.GradientDrawable()
+        circleBg.shape = android.graphics.drawable.GradientDrawable.OVAL
+        circleBg.gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
+        circleBg.setGradientCenter(0.42f, 0.38f)
+        circleBg.setColors(intArrayOf(0xFF4C37B8.toInt(), 0xFF2A1B70.toInt(), 0xFF150B3A.toInt()))
+        circleBg.setStroke(dp(1), COLOR_NEON_BORDER)
+        circle.background = circleBg
+        circle.elevation = dp(4).toFloat()
+        root.addView(circle, circleLp)
+
+        // Ícone central (controle de jogo/captura — vetorial, sem texto).
+        val icon = ImageView(this)
+        icon.setImageResource(R.drawable.ic_game_live_capture)
+        icon.scaleType = ImageView.ScaleType.CENTER_INSIDE
+        circle.addView(icon, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER))
+
+        // Indicador discreto de transmissão ativa (ponto vivo, estático).
+        val dot = View(this)
+        val dotBg = android.graphics.drawable.GradientDrawable()
+        dotBg.shape = android.graphics.drawable.GradientDrawable.OVAL
+        dotBg.setColor(COLOR_LIVE_DOT)
+        dotBg.setStroke(dp(1), 0xFF3A1B36.toInt())
+        dot.background = dotBg
+        dot.elevation = dp(2).toFloat()
+        val dotLp = FrameLayout.LayoutParams(dp(8), dp(8), Gravity.END or Gravity.BOTTOM)
+        dotLp.setMargins(0, 0, dp(2), dp(2))
+        circle.addView(dot, dotLp)
+
+        root.setOnClickListener {
             // Toggle: painel aberto → fechar (mantém a bolinha); fechado → abrir.
             if (panelView != null) closePanel() else openPanel()
         }
-        layout.setOnTouchListener(object : View.OnTouchListener {
+        root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
@@ -338,19 +456,12 @@ class LiveGameOverlayService : Service() {
             }
         })
 
-        // Círculo arredondado
-        layout.background = android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(0xF0281B70.toInt())
-            setStroke(dp(2), 0xFF8B5CF6.toInt())
-        }
-
-        return layout
+        return root
     }
 
     private fun bubbleLayoutParams(): WindowManager.LayoutParams {
         val density = resources.displayMetrics.density
-        val size = (58 * density).toInt()
+        val size = bubbleSize()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
@@ -369,22 +480,21 @@ class LiveGameOverlayService : Service() {
         }
     }
 
-    private fun bubbleSize(): Int {
-        val density = resources.displayMetrics.density
-        return (58 * density).toInt()
-    }
+    private fun bubbleSize(): Int = dp(BUBBLE_SIZE_DP)
 
     private fun clampX(x: Int): Int {
         val size = bubbleSize()
-        val minX = 0
-        val maxX = (screenWidth - size).coerceAtLeast(0)
+        val margin = safeMargin()
+        val minX = safeLeft + margin
+        val maxX = (screenWidth - safeRight - size - margin).coerceAtLeast(minX)
         return x.coerceIn(minX, maxX)
     }
 
     private fun clampY(y: Int): Int {
         val size = bubbleSize()
-        val minY = 0
-        val maxY = (screenHeight - size).coerceAtLeast(0)
+        val margin = safeMargin()
+        val minY = safeTop + margin
+        val maxY = (screenHeight - safeBottom - size - margin).coerceAtLeast(minY)
         return y.coerceIn(minY, maxY)
     }
 
@@ -404,53 +514,60 @@ class LiveGameOverlayService : Service() {
     }
 
     // -------------------------------------------------------------------------
-    // Indicador minimizado (ocultar NÃO encerra a live)
+    // Indicador de painel ocultado (ocultar NÃO encerra a live)
     // -------------------------------------------------------------------------
 
-    private fun showMinimized() {
+    /** Centraliza a transição mostrar/ocultar: atualiza o estado, reposiciona os
+     *  views e espelha o estado no Flutter (Native → Dart). */
+    private fun setHidden(hide: Boolean) {
+        hidden = hide
+        if (hide) showHiddenIndicator() else showBubble()
+        notifyAction("overlayVisibilityChanged", mapOf("hidden" to hidden))
+    }
+
+    private fun showHiddenIndicator() {
         removeBubble()
         removePanel()
-        if (minimizedView != null) return
+        if (hiddenIndicatorView != null) return
         val wm = windowManager ?: return
         val isOverlayGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
             Settings.canDrawOverlays(this)
         if (!isOverlayGranted) return
 
-        val tab = TextView(this)
-        tab.text = "🎮"
-        tab.textSize = 20f
-        tab.gravity = Gravity.CENTER
-        tab.setTextColor(0xFFFFFFFF.toInt())
-        val w = dp(40)
-        val h = dp(64)
+        val tab = ImageView(this)
+        tab.setImageResource(R.drawable.ic_game_live_capture)
+        tab.scaleType = ImageView.ScaleType.CENTER_INSIDE
+        val w = dp(44)
+        val h = dp(68)
+        tab.setPadding(dp(10), dp(18), dp(10), dp(18))
         tab.background = android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-            cornerRadius = dp(12).toFloat()
-            setColor(0xE0281B70.toInt())
-            setStroke(dp(2), 0xFF8B5CF6.toInt())
+            cornerRadius = dp(14).toFloat()
+            setColor(0xF02A1B70.toInt())
+            setStroke(dp(1), COLOR_NEON_BORDER)
         }
-        tab.setOnClickListener { restoreBubble() }
+        tab.setOnClickListener { setHidden(false) }
 
-        minimizedView = tab
+        hiddenIndicatorView = tab
         try {
-            wm.addView(tab, minimizedLayoutParams())
-            Log.i(TAG, "showMinimized: indicador minimizado ADICIONADO ao WindowManager")
+            wm.addView(tab, hiddenIndicatorLayoutParams())
+            Log.i(TAG, "showHiddenIndicator: indicador ADICIONADO ao WindowManager")
         } catch (t: Throwable) {
-            Log.e(TAG, "showMinimized: falha ao adicionar indicador ao WindowManager", t)
-            minimizedView = null
+            Log.e(TAG, "showHiddenIndicator: falha ao adicionar indicador ao WindowManager", t)
+            hiddenIndicatorView = null
         }
     }
 
-    private fun minimizedLayoutParams(): WindowManager.LayoutParams {
+    private fun hiddenIndicatorLayoutParams(): WindowManager.LayoutParams {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-        val w = dp(40)
-        val h = dp(64)
+        val w = dp(44)
+        val h = dp(68)
         val margin = dp(6)
         val x = if (bubbleCollapsedX + bubbleSize() < screenWidth / 2)
-            margin else (screenWidth - w - margin)
+            safeLeft + margin else (screenWidth - safeRight - w - margin)
         val y = clampY(bubbleCollapsedY + bubbleSize() / 2 - h / 2)
         return WindowManager.LayoutParams(
             w,
@@ -466,25 +583,19 @@ class LiveGameOverlayService : Service() {
         }
     }
 
-    private fun repositionMinimized() {
-        minimizedView?.let { v ->
+    private fun repositionHiddenIndicator() {
+        hiddenIndicatorView?.let { v ->
             try {
-                windowManager?.updateViewLayout(v, minimizedLayoutParams())
+                windowManager?.updateViewLayout(v, hiddenIndicatorLayoutParams())
             } catch (_: Exception) {}
         }
     }
 
-    private fun restoreBubble() {
-        removeMinimized()
-        hidden = false
-        showBubble()
-    }
-
-    private fun removeMinimized() {
-        minimizedView?.let { v ->
+    private fun removeHiddenIndicator() {
+        hiddenIndicatorView?.let { v ->
             try { windowManager?.removeView(v) } catch (_: Exception) {}
         }
-        minimizedView = null
+        hiddenIndicatorView = null
     }
 
     // -------------------------------------------------------------------------
@@ -504,16 +615,18 @@ class LiveGameOverlayService : Service() {
             panelView = null
         }
         refreshControls()
+        notifyAction("panelVisibilityChanged", mapOf("open" to true))
     }
 
     private fun panelLayoutParams(): WindowManager.LayoutParams {
-        val width = (resources.displayMetrics.widthPixels * 0.88f).toInt()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        // Compacto: acompanha o conteúdo (grade 2×4), nunca ocupa a maior
+        // parte da tela — o vídeo/jogo continua visível ao redor.
         return WindowManager.LayoutParams(
-            width,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
@@ -531,35 +644,30 @@ class LiveGameOverlayService : Service() {
     private fun createPanelView(wm: WindowManager): View {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(20), dp(20), dp(20), dp(20))
-        root.setBackgroundResource(android.R.color.transparent)
-
-        // Fundo do painel arredondado
+        root.setPadding(dp(12), dp(14), dp(12), dp(14))
         root.background = android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-            cornerRadius = dp(20).toFloat()
-            setColor(0xF0181429.toInt())
-            setStroke(dp(1), 0xFF8B5CF6.toInt())
+            cornerRadius = dp(18).toFloat()
+            setColor(0xF2100C22.toInt())
+            setStroke(dp(1), COLOR_NEON_BORDER)
         }
+        root.elevation = dp(12).toFloat()
 
-        // Título
+        // Título compacto
         val title = TextView(this)
-        title.text = "🎮 Painel da Live de Jogo"
+        title.text = "🎮 Controles da Live"
         title.setTextColor(0xFFFFFFFF.toInt())
-        title.textSize = 16f
+        title.textSize = 13f
         title.setTypeface(null, Typeface.BOLD)
-        title.gravity = Gravity.START
-        root.addView(title, matchWrap())
+        title.gravity = Gravity.CENTER
+        root.addView(title, compactContainer())
 
-        // Linha de botões (mic, pausar, voz, mais)
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER
-
+        // Grade 2×4 de botões menores (ícones claros + rótulo pequeno).
         micButton = controlChip("🎤", "Mic")
         pauseButton = controlChip("⏸️", "Pausar")
         voiceButton = controlChip("🤖", "Voz")
         val moreButton = controlChip("⚙️", "Mais")
+        val homeButton = controlChip("🏠", "Voltar")
 
         micButton!!.setOnClickListener {
             micEnabled = !micEnabled
@@ -579,59 +687,57 @@ class LiveGameOverlayService : Service() {
         moreButton.setOnClickListener {
             notifyAction("morePressed", null)
         }
+        homeButton.setOnClickListener {
+            closePanel()
+            notifyAction("backToAppRequested", null)
+        }
 
-        row.addView(micButton, weightWrap())
-        row.addView(pauseButton, weightWrap())
-        row.addView(voiceButton, weightWrap())
-        row.addView(moreButton, weightWrap())
-        root.addView(row, matchWrap())
+        root.addView(chipRow(micButton!!, pauseButton!!, voiceButton!!, moreButton, homeButton), compactContainer())
 
-        // Linha de ações secundárias (ocultar, encerrar)
-        val row2 = LinearLayout(this)
-        row2.orientation = LinearLayout.HORIZONTAL
-        row2.gravity = Gravity.CENTER
-
-        val chatButton = controlChip("💬", "Chat", small = true)
-        val hideButton = controlChip("🙈", "Ocultar", small = true)
-        val endButton = controlChip("🔴", "Encerrar", small = true)
-        val closeButton = controlChip("✕", "Fechar", small = true)
+        val chatButton = controlChip("💬", "Chat")
+        val hideButton = controlChip("🙈", "Ocultar")
+        val endButton = controlChip("🔴", "Encerrar")
+        val closeButton = controlChip("✕", "Fechar")
 
         chatButton.setOnClickListener {
             closePanel()
             notifyAction("chatRequested", null)
         }
-        hideButton.setOnClickListener { hideBubble() }
+        hideButton.setOnClickListener { setHidden(true) }
         endButton.setOnClickListener { confirmEnd() }
         closeButton.setOnClickListener { closePanel() }
 
-        row2.addView(chatButton, weightWrap())
-        row2.addView(hideButton, weightWrap())
-        row2.addView(endButton, weightWrap())
-        row2.addView(closeButton, weightWrap())
-        root.addView(row2, matchWrap())
-
-        // Dica de arrasto
-        val hint = TextView(this)
-        hint.text = "Arraste a bolinha 🎮 para movê-la pela tela. Você ainda pode usar o app."
-        hint.setTextColor(0xAAFFFFFF.toInt())
-        hint.textSize = 12f
-        root.addView(hint, matchWrap())
+        root.addView(chipRow(chatButton, hideButton, endButton, closeButton), compactContainer())
 
         return root
     }
 
-    private fun controlChip(emoji: String, label: String, small: Boolean = false): TextView {
+    private fun chipRow(vararg chips: TextView): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER
+        for (chip in chips) {
+            val lp = LinearLayout.LayoutParams(dp(CHIP_WIDTH_DP), dp(CHIP_HEIGHT_DP))
+            lp.setMargins(dp(2), 0, dp(2), 0)
+            row.addView(chip, lp)
+        }
+        return row
+    }
+
+    private fun controlChip(emoji: String, label: String): TextView {
         val tv = TextView(this)
-        tv.text = if (small) "$emoji $label" else "  $emoji $label  "
+        tv.text = "$emoji\n$label"
         tv.setTextColor(0xFFFFFFFF.toInt())
-        tv.textSize = if (small) 12f else 14f
+        tv.textSize = 11f
         tv.setTypeface(null, Typeface.BOLD)
         tv.gravity = Gravity.CENTER
-        tv.setPadding(dp(8), dp(10), dp(8), dp(10))
+        tv.setPadding(dp(2), dp(4), dp(2), dp(4))
+        tv.setLineSpacing(0f, 0.9f)
         tv.background = android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-            cornerRadius = dp(14).toFloat()
-            setColor(0xFF2A2A45.toInt())
+            cornerRadius = dp(12).toFloat()
+            setColor(0xFF1A1630.toInt())
+            setStroke(dp(1), 0x338B5CF6.toInt())
         }
         return tv
     }
@@ -644,29 +750,28 @@ class LiveGameOverlayService : Service() {
     }
 
     private fun updateChip(tv: TextView, emoji: String, label: String, active: Boolean) {
-        tv.text = "$emoji $label"
-        (tv.background as? android.graphics.drawable.GradientDrawable)?.setColor(
-            if (active) 0xFF8B5CF6.toInt() else 0xFF2A2A45.toInt()
-        )
+        tv.text = "$emoji\n$label"
+        (tv.background as? android.graphics.drawable.GradientDrawable)?.apply {
+            if (active) {
+                setColor(0xFF6D28D9.toInt())
+                setStroke(dp(1), COLOR_NEON_BORDER)
+            } else {
+                setColor(0xFF1A1630.toInt())
+                setStroke(dp(1), 0x338B5CF6.toInt())
+            }
+        }
     }
 
     private fun closePanel() {
         Log.d(TAG, "closePanel: ocultando painel (bolinha permanece)")
         removePanel()
+        notifyAction("panelVisibilityChanged", mapOf("open" to false))
     }
 
     private fun confirmEnd() {
         // A confirmação final acontece no app (Flutter), que exibe um dialog.
         closePanel()
         notifyAction("endRequested", null)
-    }
-
-    private fun hideBubble() {
-        hidden = true
-        // Ocultar NÃO encerra a live: mantém a transmissão e mostra um
-        // indicador discreto na borda para o usuário voltar aos controles.
-        showMinimized()
-        // A notificação permanece — outra forma de restaurar os controles.
     }
 
     private fun removeBubble() {
@@ -686,14 +791,20 @@ class LiveGameOverlayService : Service() {
     private fun removeViews() {
         removeBubble()
         removePanel()
-        removeMinimized()
+        removeHiddenIndicator()
     }
 
     override fun onDestroy() {
         Log.d(TAG, "onDestroy: removendo views e encerrando service de overlay")
         removeViews()
+        // Espelho Native → Dart: a bolinha saiu. O Dart decide o que fazer com
+        // a live (que continua no ar) — por isso SEMPRE avisamos aqui, inclusive
+        // quando o Android/usuário encerrou o service sem passar pelo app.
+        notifyAction("overlayStopped", null)
         instance = null
-        if (pendingChannel === channel) pendingChannel = null
+        // Garante que o canal não fique preso em referências de uma instância
+        // morta (o onDestroy corre ANTES de qualquer start subsequente).
+        if (channel == null || pendingChannel === channel) pendingChannel = null
         super.onDestroy()
     }
 
@@ -701,18 +812,12 @@ class LiveGameOverlayService : Service() {
     // Helpers de layout / dimensão
     // -------------------------------------------------------------------------
 
-    private fun matchWrap(): LinearLayout.LayoutParams {
+    private fun compactContainer(): LinearLayout.LayoutParams {
         val lp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
         )
-        lp.setMargins(0, dp(8), 0, dp(8))
-        return lp
-    }
-
-    private fun weightWrap(): LinearLayout.LayoutParams {
-        val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        lp.setMargins(dp(4), 0, dp(4), 0)
+        lp.setMargins(0, dp(6), 0, 0)
         return lp
     }
 

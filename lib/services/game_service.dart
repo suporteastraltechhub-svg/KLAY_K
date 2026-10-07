@@ -10,6 +10,7 @@ class GameInfo {
   final String emoji;
   final String category;
   final String status;
+  final String engine;
   final Map<String, dynamic> rules;
   final int maxScore;
   final int sortOrder;
@@ -21,6 +22,7 @@ class GameInfo {
     required this.emoji,
     required this.category,
     required this.status,
+    this.engine = 'trivia',
     this.rules = const {},
     this.maxScore = 100,
     this.sortOrder = 0,
@@ -28,6 +30,21 @@ class GameInfo {
 
   bool get isActive => status == 'active';
   bool get isSoon => status == 'soon';
+
+  /// Dificuldade configurada pelo backend (1–5). Fallback: 2.
+  int get difficulty {
+    final d = rules['difficulty'];
+    return (d is num) ? d.toInt().clamp(1, 5) : 2;
+  }
+
+  /// Duração de referência (segundos) configurada no backend.
+  int get durationSeconds => (rules['duration_seconds'] as num?)?.toInt() ?? 60;
+
+  /// Configuração específica da engine (ex.: perguntas, rodadas, tema).
+  Map<String, dynamic> get engineConfig {
+    final raw = rules['engine_config'];
+    return raw is Map ? raw.map((k, v) => MapEntry(k.toString(), v)) : const {};
+  }
 
   factory GameInfo.fromMap(Map<String, dynamic> json) {
     final rulesRaw = json['rules'];
@@ -38,6 +55,7 @@ class GameInfo {
       emoji: json['emoji']?.toString() ?? '🎮',
       category: json['category']?.toString() ?? 'arcade',
       status: json['status']?.toString() ?? 'soon',
+      engine: json['engine']?.toString() ?? 'trivia',
       rules: rulesRaw is Map
           ? rulesRaw.map((k, v) => MapEntry(k.toString(), v))
           : const {},
@@ -70,15 +88,15 @@ class GameRankEntry {
   });
 
   factory GameRankEntry.fromMap(Map<String, dynamic> json) => GameRankEntry(
-        rank: (json['rank'] as num?)?.toInt() ?? 0,
-        userId: json['user_id']?.toString() ?? '',
-        displayName: json['display_name']?.toString() ?? '',
-        username: json['username']?.toString() ?? '',
-        avatarUrl: json['avatar_url']?.toString() ?? '',
-        bestScore: (json['best_score'] as num?)?.toInt() ?? 0,
-        durationSeconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
-        isVerified: json['is_verified'] == true,
-      );
+    rank: (json['rank'] as num?)?.toInt() ?? 0,
+    userId: json['user_id']?.toString() ?? '',
+    displayName: json['display_name']?.toString() ?? '',
+    username: json['username']?.toString() ?? '',
+    avatarUrl: json['avatar_url']?.toString() ?? '',
+    bestScore: (json['best_score'] as num?)?.toInt() ?? 0,
+    durationSeconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
+    isVerified: json['is_verified'] == true,
+  );
 }
 
 /// Resultado da submissão de pontuação (retorno do backend).
@@ -95,7 +113,8 @@ class GameSubmitResult {
     this.bestScore = 0,
   });
 
-  factory GameSubmitResult.fromMap(Map<String, dynamic> json) => GameSubmitResult(
+  factory GameSubmitResult.fromMap(Map<String, dynamic> json) =>
+      GameSubmitResult(
         score: (json['score'] as num?)?.toInt() ?? 0,
         reward: (json['reward'] as num?)?.toInt() ?? 0,
         improved: json['improved'] as bool? ?? false,
@@ -177,7 +196,37 @@ class GameService {
     if (r is! Map) {
       return GameSubmitResult(score: score);
     }
-    return GameSubmitResult.fromMap(_stringMap(r));
+    final result = GameSubmitResult.fromMap(_stringMap(r));
+    _notifyGameResult(result);
+    return result;
+  }
+
+  /// Notificação real de resultado de jogo (novo recorde / recompensa), gerada
+  /// APENAS quando o backend confirma o evento — nunca crédito fictício.
+  Future<void> _notifyGameResult(GameSubmitResult result) async {
+    try {
+      final me = SupabaseService.instance.client.auth.currentUser?.id;
+      if (me == null || me.isEmpty) return;
+      if (result.improved) {
+        await SupabaseService.instance.client.from('notifications').insert({
+          'user_id': me,
+          'actor_id': me,
+          'type': 'record',
+          'ref_id': null,
+          'message': '${result.score} pontos',
+        });
+        return;
+      }
+      if (result.reward > 0) {
+        await SupabaseService.instance.client.from('notifications').insert({
+          'user_id': me,
+          'actor_id': me,
+          'type': 'reward',
+          'ref_id': null,
+          'message': '${result.reward} cristais',
+        });
+      }
+    } catch (_) {}
   }
 
   // ---------------------------------------------------------------------------
@@ -201,7 +250,34 @@ class GameService {
     return _db.rpc(name, params: params);
   }
 
-  Map<String, dynamic> _stringMap(Map<dynamic, dynamic> m) => m.map(
-        (k, v) => MapEntry(k.toString(), v),
-      );
+  /// Popularidade real dos jogos (partidas registradas por jogo, RPC
+  /// `game_popularity` security definer). Usada pela seção "Em alta".
+  Future<List<GamePopularity>> popularity() async {
+    try {
+      final r = await _rpc('game_popularity');
+      if (r is! List) return const [];
+      return r
+          .whereType<Map>()
+          .map((m) => GamePopularity.fromMap(_stringMap(m)))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Map<String, dynamic> _stringMap(Map<dynamic, dynamic> m) =>
+      m.map((k, v) => MapEntry(k.toString(), v));
+}
+
+/// Contagem real de partidas por jogo (para a seção "Em alta").
+class GamePopularity {
+  final String gameId;
+  final int plays;
+
+  const GamePopularity({required this.gameId, this.plays = 0});
+
+  factory GamePopularity.fromMap(Map<String, dynamic> json) => GamePopularity(
+    gameId: json['game_id']?.toString() ?? '',
+    plays: (json['plays'] as num?)?.toInt() ?? 0,
+  );
 }

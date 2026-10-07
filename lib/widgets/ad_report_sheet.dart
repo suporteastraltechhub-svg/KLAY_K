@@ -33,8 +33,11 @@ class _AdReportSheetState extends State<AdReportSheet> {
       _error = null;
     });
     try {
-      await AdsService.instance
-          .reportCreative(widget.creativeId, cat, description: _desc.text.trim());
+      await AdsService.instance.reportCreative(
+        widget.creativeId,
+        cat,
+        description: _desc.text.trim(),
+      );
       if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -93,7 +96,10 @@ class _AdReportSheetState extends State<AdReportSheet> {
                   borderRadius: BorderRadius.circular(12),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: selected
                           ? const Color(0x228B5CF6)
@@ -121,7 +127,9 @@ class _AdReportSheetState extends State<AdReportSheet> {
                           c,
                           style: TextStyle(
                             color: selected ? Colors.white : Colors.white70,
-                            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
                           ),
                         ),
                       ],

@@ -30,15 +30,15 @@ class LiveRankRecord {
   });
 
   factory LiveRankRecord.fromJson(Map<String, dynamic> json) => LiveRankRecord(
-        rank: (json['rank'] as num?)?.toInt() ?? 0,
-        userId: json['user_id']?.toString() ?? '',
-        username: json['username']?.toString() ?? '',
-        displayName: json['display_name']?.toString(),
-        avatarUrl: json['avatar_url']?.toString(),
-        value: (json['value'] as num?)?.toDouble() ?? 0,
-        scope: json['scope']?.toString() ?? 'global',
-        isVerified: json['is_verified'] == true,
-      );
+    rank: (json['rank'] as num?)?.toInt() ?? 0,
+    userId: json['user_id']?.toString() ?? '',
+    username: json['username']?.toString() ?? '',
+    displayName: json['display_name']?.toString(),
+    avatarUrl: json['avatar_url']?.toString(),
+    value: (json['value'] as num?)?.toDouble() ?? 0,
+    scope: json['scope']?.toString() ?? 'global',
+    isVerified: json['is_verified'] == true,
+  );
 }
 
 /// Preferências da bolinha flutuante premium (persistidas em `user_settings`).
@@ -59,8 +59,9 @@ class LiveBubblePrefs {
   factory LiveBubblePrefs.fromSettings(Map<String, dynamic>? s) {
     if (s == null) return const LiveBubblePrefs();
     bool b(dynamic v, bool d) => v is bool ? v : d;
-    double d(dynamic v, double fallback) =>
-        v is num ? v.toDouble() : (v is String ? double.tryParse(v) ?? fallback : fallback);
+    double d(dynamic v, double fallback) => v is num
+        ? v.toDouble()
+        : (v is String ? double.tryParse(v) ?? fallback : fallback);
     return LiveBubblePrefs(
       enabled: b(s['live_bubble_enabled'], false),
       positionX: d(s['live_bubble_x'], 0),
@@ -74,20 +75,19 @@ class LiveBubblePrefs {
     double? positionX,
     double? positionY,
     bool? minimized,
-  }) =>
-      LiveBubblePrefs(
-        enabled: enabled ?? this.enabled,
-        positionX: positionX ?? this.positionX,
-        positionY: positionY ?? this.positionY,
-        minimized: minimized ?? this.minimized,
-      );
+  }) => LiveBubblePrefs(
+    enabled: enabled ?? this.enabled,
+    positionX: positionX ?? this.positionX,
+    positionY: positionY ?? this.positionY,
+    minimized: minimized ?? this.minimized,
+  );
 
   Map<String, dynamic> toSettings() => {
-        'live_bubble_enabled': enabled,
-        'live_bubble_x': positionX,
-        'live_bubble_y': positionY,
-        'live_bubble_minimized': minimized,
-      };
+    'live_bubble_enabled': enabled,
+    'live_bubble_x': positionX,
+    'live_bubble_y': positionY,
+    'live_bubble_minimized': minimized,
+  };
 }
 
 /// Configuração HONESTA do bot de voz da live. O app só habilita a opção se um
@@ -110,10 +110,10 @@ class VoiceBotConfig {
   }
 
   Map<String, dynamic> toSettings() => {
-        'voice_bot_enabled': enabled,
-        'voice_bot_provider': provider,
-        'voice_bot_voice': voice,
-      };
+    'voice_bot_enabled': enabled,
+    'voice_bot_provider': provider,
+    'voice_bot_voice': voice,
+  };
 }
 
 /// Camada premium de lives do KLAY K: chat validado no backend, reações,
@@ -192,11 +192,7 @@ class LivePremiumService {
     await _db.ensureAuthenticated();
     final res = await _client.rpc(
       'live_ranking',
-      params: {
-        'p_live_id': liveId,
-        'p_currency': currency,
-        'p_limit': limit,
-      },
+      params: {'p_live_id': liveId, 'p_currency': currency, 'p_limit': limit},
     );
     return _parseRanking(res);
   }
@@ -231,8 +227,7 @@ class LivePremiumService {
     if (res is! List) return const [];
     return res
         .whereType<Map<dynamic, dynamic>>()
-        .map((r) => LiveRankRecord.fromJson(
-            Map<String, dynamic>.from(r)))
+        .map((r) => LiveRankRecord.fromJson(Map<String, dynamic>.from(r)))
         .toList();
   }
 

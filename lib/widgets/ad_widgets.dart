@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../design/klayk_design.dart';
+import '../l10n/app_localizations.dart';
 import '../models/ad_models.dart';
 import '../services/ads_service.dart';
+import '../services/link_guard_service.dart';
 import 'ad_report_sheet.dart';
 
 /// ============================================================================
@@ -52,14 +53,16 @@ Future<void> openAdCta(BuildContext context, AdCreative ad) async {
     uri = null;
   }
   final scheme = uri?.scheme.toLowerCase() ?? '';
-  final isSafe = (scheme == 'http' || scheme == 'https') &&
+  final isSafe =
+      (scheme == 'http' || scheme == 'https') &&
       (uri?.host.isNotEmpty ?? false);
 
   if (!isSafe) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Este anúncio contém um link inválido.')),
-      );
+      final l10n = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.adInvalidLinkSnack)));
     }
     return;
   }
@@ -67,16 +70,15 @@ Future<void> openAdCta(BuildContext context, AdCreative ad) async {
   // Só conta o clique se o backend aceitar (security definer filtra APPROVED).
   AdsService.instance.trackEvent(ad.id, 'click');
 
-  final available = await canLaunchUrl(uri!);
-  if (!available) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Não foi possível abrir o destino.')),
-      );
-    }
-    return;
+  // Proteção de links: confirma que o usuário está saindo do KLAY K e mostra
+  // o domínio antes de abrir o destino externo.
+  final l10n = AppLocalizations.of(context)!;
+  final opened = await LinkGuard.instance.openExternal(context, url);
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(l10n.adOpenFailedSnack)));
   }
-  await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
 /// ---------------------------------------------------------------------------
@@ -87,10 +89,11 @@ class AdBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     // Badge único para identificar publicidade em qualquer contexto; nunca
     // depende só de cor ("não depender apenas de cor para indicar anúncio").
     return Semantics(
-      label: 'Anúncio',
+      label: l10n.adBadge,
       container: true,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -99,14 +102,14 @@ class AdBadge extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: const Color(0xFF3A3355)),
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.campaign_rounded, color: kAdPurple, size: 13),
-            SizedBox(width: 5),
+            const Icon(Icons.campaign_rounded, color: kAdPurple, size: 13),
+            const SizedBox(width: 5),
             Text(
-              'ANÚNCIO',
-              style: TextStyle(
+              l10n.adBadge.toUpperCase(),
+              style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
@@ -139,8 +142,9 @@ class VerifiedAdSeal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Semantics(
-      label: 'KLAY K OFICIAL ANÚNCIO VERIFICADO',
+      label: l10n.adVerifiedSemantics,
       image: true,
       child: Image.asset(
         _sealAsset,
@@ -151,14 +155,15 @@ class VerifiedAdSeal extends StatelessWidget {
         // ~3x density sem carregar o PNG de 1.9 MB em memória cheia.
         cacheWidth: 160,
         errorBuilder: (_, _, _) => compact
-            ? _sealFallbackCompact()
-            : _sealFallbackFull(),
+            ? _sealFallbackCompact(context)
+            : _sealFallbackFull(context),
       ),
     );
   }
 
   /// Fallback discreto se o PNG oficial não puder ser exibido.
-  Widget _sealFallbackCompact() {
+  Widget _sealFallbackCompact(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -166,14 +171,14 @@ class VerifiedAdSeal extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: kAdGold, width: 1),
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.verified, color: kAdGold, size: 12),
-          SizedBox(width: 4),
+          const Icon(Icons.verified, color: kAdGold, size: 12),
+          const SizedBox(width: 4),
           Text(
-            'KLAY K · OFICIAL',
-            style: TextStyle(
+            l10n.adVerifiedSealFallback,
+            style: const TextStyle(
               color: kAdGold,
               fontSize: 9,
               fontWeight: FontWeight.w800,
@@ -184,18 +189,20 @@ class VerifiedAdSeal extends StatelessWidget {
     );
   }
 
-  Widget _sealFallbackFull() {
+  Widget _sealFallbackFull(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return _sealShell(
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.workspace_premium, color: kAdGold, size: 16),
-          SizedBox(width: 6),
+          const Icon(Icons.workspace_premium, color: kAdGold, size: 16),
+          const SizedBox(width: 6),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('KLAY K',
+              const Text(
+                'KLAY K',
                 style: TextStyle(
                   color: kAdGold,
                   fontSize: 12,
@@ -204,8 +211,8 @@ class VerifiedAdSeal extends StatelessWidget {
                 ),
               ),
               Text(
-                'OFICIAL · ANÚNCIO VERIFICADO',
-                style: TextStyle(
+                l10n.adVerifiedSealText,
+                style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 8,
                   fontWeight: FontWeight.w700,
@@ -249,14 +256,18 @@ class AdStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final (label, color) = switch (status) {
-      AdStatus.approved => ('Aprovado', Colors.greenAccent),
-      AdStatus.pendingReview => ('Em análise', const Color(0xFFF59E0B)),
-      AdStatus.rejected => ('Rejeitado', Colors.redAccent),
-      AdStatus.paused => ('Pausado', Colors.orangeAccent),
-      AdStatus.expired => ('Encerrado', Colors.blueGrey),
-      AdStatus.blocked => ('Bloqueado', Colors.redAccent),
-      _ => ('Rascunho', Colors.white54),
+      AdStatus.approved => (l10n.adStatusApproved, Colors.greenAccent),
+      AdStatus.pendingReview => (
+        l10n.statusInProgress,
+        const Color(0xFFF59E0B),
+      ),
+      AdStatus.rejected => (l10n.adStatusRejected, Colors.redAccent),
+      AdStatus.paused => (l10n.adStatusPaused, Colors.orangeAccent),
+      AdStatus.expired => (l10n.adStatusExpired, Colors.blueGrey),
+      AdStatus.blocked => (l10n.adStatusBlocked, Colors.redAccent),
+      _ => (l10n.adStatusDraft, Colors.white54),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
@@ -267,28 +278,32 @@ class AdStatusChip extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800),
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }
 }
 
-String adStatusLabel(AdStatus s) {
+String adStatusLabel(AppLocalizations l10n, AdStatus s) {
   switch (s) {
     case AdStatus.approved:
-      return 'Ativa';
+      return l10n.adStatusLabelApproved;
     case AdStatus.pendingReview:
-      return 'Em análise';
+      return l10n.statusInProgress;
     case AdStatus.rejected:
-      return 'Rejeitada';
+      return l10n.adStatusLabelRejected;
     case AdStatus.paused:
-      return 'Pausada';
+      return l10n.adStatusLabelPaused;
     case AdStatus.expired:
-      return 'Encerrada';
+      return l10n.adStatusLabelExpired;
     case AdStatus.blocked:
-      return 'Bloqueada';
+      return l10n.adStatusLabelBlocked;
     default:
-      return 'Rascunho';
+      return l10n.adStatusDraft;
   }
 }
 
@@ -300,9 +315,12 @@ class AdAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = ad.advertiserName.isNotEmpty ? ad.advertiserName : 'Anunciante';
+    final l10n = AppLocalizations.of(context)!;
+    final name = ad.advertiserName.isNotEmpty
+        ? ad.advertiserName
+        : l10n.advertiser;
     return Semantics(
-      label: 'Logo do anunciante $name',
+      label: l10n.adSemanticsAdvertiserLogo(name),
       image: true,
       child: ad.advertiserLogo.isNotEmpty
           ? ClipRRect(
@@ -368,11 +386,15 @@ class AdCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final advertiser =
-        ad.advertiserName.isNotEmpty ? ad.advertiserName : 'Anunciante';
+    final l10n = AppLocalizations.of(context)!;
+    final advertiser = ad.advertiserName.isNotEmpty
+        ? ad.advertiserName
+        : l10n.advertiser;
     return Semantics(
       container: true,
-      label: 'Anúncio de $advertiser${ad.title.isEmpty ? '' : ' · ${ad.title}'}',
+      label: ad.title.isEmpty
+          ? l10n.adSemanticsAd(advertiser)
+          : '${l10n.adSemanticsAd(advertiser)} · ${ad.title}',
       child: TweenAnimationBuilder<double>(
         tween: Tween(begin: 0, end: 1),
         duration: const Duration(milliseconds: 300),
@@ -385,12 +407,16 @@ class AdCard extends StatelessWidget {
             child: child,
           ),
         ),
-        child: _content(context, advertiser),
+        child: _content(context, l10n, advertiser),
       ),
     );
   }
 
-  Widget _content(BuildContext context, String advertiser) {
+  Widget _content(
+    BuildContext context,
+    AppLocalizations l10n,
+    String advertiser,
+  ) {
     return KlayKCard(
       padding: EdgeInsets.zero,
       child: Column(
@@ -461,9 +487,12 @@ class AdCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const Text(
-                        'Anunciante',
-                        style: TextStyle(color: Colors.white38, fontSize: 11),
+                      Text(
+                        l10n.advertiser,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
@@ -513,7 +542,10 @@ class AdCard extends StatelessWidget {
                   child: SizedBox(
                     width: 24,
                     height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: kAdPurple),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: kAdPurple,
+                    ),
                   ),
                 );
               },
@@ -576,8 +608,9 @@ class _AdPreviewBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Semantics(
-      label: 'Pré-visualização, pendente de revisão. Ainda não publicado.',
+      label: l10n.adPreviewBannerSemantics,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
@@ -585,14 +618,14 @@ class _AdPreviewBanner extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: const Color(0xFF8B5CF6)),
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.preview_rounded, color: kAdPurple, size: 13),
-            SizedBox(width: 5),
+            const Icon(Icons.preview_rounded, color: kAdPurple, size: 13),
+            const SizedBox(width: 5),
             Text(
-              'PRÉ-VISUALIZAÇÃO',
-              style: TextStyle(
+              l10n.adPreviewBanner.toUpperCase(),
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 9,
                 fontWeight: FontWeight.w800,
@@ -610,10 +643,20 @@ class _AdPreviewBanner extends StatelessWidget {
 class AdCampaignCard extends StatelessWidget {
   final AdCampaignRow row;
   final VoidCallback? onTap;
-  const AdCampaignCard({super.key, required this.row, this.onTap});
+
+  /// Callback opcional de "duplicar campanha". Só aparece quando informado.
+  final VoidCallback? onDuplicate;
+
+  const AdCampaignCard({
+    super.key,
+    required this.row,
+    this.onTap,
+    this.onDuplicate,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GestureDetector(
       onTap: onTap,
       child: KlayKCard(
@@ -648,17 +691,39 @@ class AdCampaignCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _metric('${row.impressions}', 'Visualizações'),
-                _metric('${row.clicks}', 'Cliques'),
+                _metric('${row.impressions}', l10n.adsMetricViews),
+                _metric('${row.clicks}', l10n.adsMetricClicks),
                 _metric('${row.ctr.toStringAsFixed(1)}%', 'CTR'),
-                _metric(row.budget.toStringAsFixed(0), 'Investimento'),
+                _metric(
+                  row.budget.toStringAsFixed(0),
+                  l10n.adsMetricInvestment,
+                ),
               ],
             ),
             if (row.rejectionReason.isNotEmpty) ...[
               const SizedBox(height: 10),
               Text(
-                'Motivo: ${row.rejectionReason}',
+                l10n.adsReasonLabel(row.rejectionReason),
                 style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+              ),
+            ],
+            if (onDuplicate != null) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onDuplicate,
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF8B5CF6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: const Icon(Icons.copy_rounded, size: 16),
+                  label: Text(
+                    l10n.adDuplicateAction,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
               ),
             ],
           ],
@@ -679,7 +744,10 @@ class AdCampaignCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white38, fontSize: 11),
+        ),
       ],
     );
   }
@@ -692,6 +760,7 @@ class AdvertiserCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return KlayKCard(
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -706,7 +775,9 @@ class AdvertiserCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      ad.advertiserName.isEmpty ? 'Anunciante' : ad.advertiserName,
+                      ad.advertiserName.isEmpty
+                          ? l10n.advertiser
+                          : ad.advertiserName,
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
@@ -716,7 +787,10 @@ class AdvertiserCard extends StatelessWidget {
                     if (ad.advertiserCategory.isNotEmpty)
                       Text(
                         ad.advertiserCategory,
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
                       ),
                   ],
                 ),
@@ -725,9 +799,13 @@ class AdvertiserCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Este conteúdo é um anúncio exibido pelo KLAY K.',
-            style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+          Text(
+            l10n.adAdvertiserCardBody,
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 13,
+              height: 1.4,
+            ),
           ),
         ],
       ),
@@ -760,10 +838,11 @@ class AdOverflowMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return IconButton(
       onPressed: () => _open(context),
       icon: const Icon(Icons.more_vert, color: Colors.white54, size: 20),
-      tooltip: 'Por que estou vendo este anúncio?',
+      tooltip: l10n.adWhyThisAd,
     );
   }
 }
@@ -781,6 +860,7 @@ class _AdAboutSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -799,18 +879,22 @@ class _AdAboutSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Por que estou vendo este anúncio?',
-              style: TextStyle(
+            Text(
+              l10n.adWhyThisAd,
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w800,
                 fontSize: 16,
               ),
             ),
             const SizedBox(height: 10),
-            const Text(
-              'Este conteúdo é um anúncio exibido pelo KLAY K. Os anúncios aprovados são exibidos para públicos amplos com base em informações gerais do anúncio — nunca em dados pessoais sensíveis.',
-              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+            Text(
+              l10n.adAboutBody,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.5,
+              ),
             ),
             const SizedBox(height: 6),
             Row(
@@ -835,7 +919,7 @@ class _AdAboutSheet extends StatelessWidget {
                   side: const BorderSide(color: Color(0xFF3A3355)),
                 ),
                 icon: const Icon(Icons.visibility_off_outlined),
-                label: const Text('Ocultar este anúncio'),
+                label: Text(l10n.adHideAd),
               ),
             ),
             const SizedBox(height: 8),
@@ -851,7 +935,7 @@ class _AdAboutSheet extends StatelessWidget {
                   side: const BorderSide(color: Color(0x55FF5252)),
                 ),
                 icon: const Icon(Icons.report_gmailerrorred_outlined),
-                label: const Text('Denunciar anúncio'),
+                label: Text(l10n.adReportAd),
               ),
             ),
           ],
@@ -864,11 +948,10 @@ class _AdAboutSheet extends StatelessWidget {
     await AdsService.instance.hideCreative(ad.id);
     onHidden?.call();
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Você não verá este anúncio novamente por enquanto.'),
-      ),
-    );
+    final l10n = AppLocalizations.of(context)!;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(l10n.adHiddenSnack)));
   }
 
   void _openReport(BuildContext context) {

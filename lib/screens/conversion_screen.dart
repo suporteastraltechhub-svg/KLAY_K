@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/conversion_service.dart';
 import '../services/gift_service.dart';
 
@@ -12,9 +13,9 @@ class ConversionScreen extends StatefulWidget {
   const ConversionScreen({super.key});
 
   static Future<void> show(BuildContext context) {
-    return Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ConversionScreen()),
-    );
+    return Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ConversionScreen()));
   }
 
   @override
@@ -65,6 +66,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
   int _balance(String currency) => (_wallet[currency] as num?)?.toInt() ?? 0;
 
   Future<void> _create(Map<String, dynamic> setting) async {
+    final l10n = AppLocalizations.of(context)!;
     final from = setting['from_currency']?.toString() ?? 'credits';
     final balance = _balance(from);
     final min = (setting['min_amount'] as num?)?.toInt() ?? 1;
@@ -76,7 +78,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
         backgroundColor: const Color(0xFF1A1424),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text(
-          'Converter ${setting['name']}',
+          l10n.conversionDialogTitle(setting['name'].toString()),
           style: const TextStyle(color: Colors.white, fontSize: 16),
         ),
         content: TextField(
@@ -84,7 +86,7 @@ class _ConversionScreenState extends State<ConversionScreen> {
           keyboardType: TextInputType.number,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            hintText: 'Mín $min • Máx $max',
+            hintText: l10n.conversionAmountHint(max, min),
             hintStyle: const TextStyle(color: Colors.white38),
             filled: true,
             fillColor: const Color(0xFF2A2A35),
@@ -97,22 +99,27 @@ class _ConversionScreenState extends State<ConversionScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar',
-                style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8B5CF6),
+            ),
             onPressed: () =>
                 Navigator.of(ctx).pop(int.tryParse(controller.text.trim())),
-            child: const Text('Reservar'),
+            child: Text(l10n.conversionReserve),
           ),
         ],
       ),
     );
     if (amount == null || !mounted) return;
     if (amount < min || amount > max) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Quantia fora do intervalo (mín $min, máx $max).')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.conversionAmountOutOfRange(max, min))),
+      );
       return;
     }
     try {
@@ -120,53 +127,59 @@ class _ConversionScreenState extends State<ConversionScreen> {
       if (!mounted) return;
       if (res['ok'] == true) {
         GiftService.instance.invalidateWalletCache();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Pedido criado! O saldo foi reservado e aguarda '
-                'aprovação da equipe.')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.conversionCreated)));
         _load();
       } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(_msg(res['error']))));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_msg(l10n, res['error']))));
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(_msg(e))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_msg(l10n, e))));
     }
   }
 
   Future<void> _cancel(Map<String, dynamic> request) async {
+    final l10n = AppLocalizations.of(context)!;
     try {
       final res = await _svc.cancel(request['id']);
       if (!mounted) return;
       if (res['ok'] == true) {
         GiftService.instance.invalidateWalletCache();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Pedido cancelado e saldo reembolsado.')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.conversionCancelled)));
         _load();
       } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(_msg(res['error']))));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_msg(l10n, res['error']))));
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(_msg(e))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_msg(l10n, e))));
     }
   }
 
-  String _statusLabel(String s) {
+  String _statusLabel(AppLocalizations l10n, String s) {
     switch (s) {
       case 'pending':
-        return 'Aguardando aprovação';
+        return l10n.conversionStatusPending;
       case 'approved':
-        return 'Aprovado';
+        return l10n.conversionStatusApproved;
       case 'rejected':
-        return 'Rejeitado';
+        return l10n.conversionStatusRejected;
       case 'cancelled':
-        return 'Cancelado';
+        return l10n.conversionStatusCancelled;
       case 'executed':
-        return 'Convertido';
+        return l10n.conversionStatusExecuted;
       default:
         return s;
     }
@@ -174,62 +187,101 @@ class _ConversionScreenState extends State<ConversionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0D0B14),
       appBar: AppBar(
         backgroundColor: const Color(0xFF12101A),
-        title: const Text('Conversão de moedas',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.conversionTitle,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF8B5CF6)))
+              child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+            )
           : _error != null
-              ? _buildError()
-              : RefreshIndicator(
-                  color: const Color(0xFF8B5CF6),
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      const Text('Regras de conversão',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15)),
-                      const SizedBox(height: 8),
-                      if (_settings.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Text(
-                              'Nenhuma conversão ativa no momento.',
-                              style: TextStyle(color: Colors.white38)),
-                        )
-                      else
-                        ..._settings.map((s) => _settingCard(context, s)),
-                      const SizedBox(height: 24),
-                      const Text('Meus pedidos',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15)),
-                      const SizedBox(height: 8),
-                      if (_history.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Text('Nenhum pedido ainda.',
-                              style: TextStyle(color: Colors.white38)),
-                        )
-                      else
-                        ..._history.map((h) => _requestCard(h)),
-                    ],
+          ? _buildError(l10n)
+          : RefreshIndicator(
+              color: const Color(0xFF8B5CF6),
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    l10n.conversionRulesTitle,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  if (_settings.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Column(
+                        children: [
+                          const Icon(
+                            Icons.lock_clock_rounded,
+                            color: Colors.white24,
+                            size: 30,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            l10n.conversionNoSettingsTitle,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            l10n.conversionNoSettingsBody,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white30,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ..._settings.map((s) => _settingCard(context, s)),
+                  const SizedBox(height: 24),
+                  Text(
+                    l10n.conversionMyRequests,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_history.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        l10n.conversionNoRequests,
+                        style: const TextStyle(color: Colors.white38),
+                      ),
+                    )
+                  else
+                    ..._history.map((h) => _requestCard(context, h)),
+                ],
+              ),
+            ),
     );
   }
 
   Widget _settingCard(BuildContext context, Map<String, dynamic> s) {
+    final l10n = AppLocalizations.of(context)!;
     final from = s['from_currency']?.toString() ?? '?';
     final to = s['to_currency']?.toString() ?? '?';
     final rate = (s['rate'] as num?)?.toDouble() ?? 1;
@@ -248,29 +300,42 @@ class _ConversionScreenState extends State<ConversionScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.swap_horiz_rounded,
-                    color: Color(0xFF8B5CF6), size: 18),
+                const Icon(
+                  Icons.swap_horiz_rounded,
+                  color: Color(0xFF8B5CF6),
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     '${s['name']} • $from → $to',
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              '1 $from = $rate $to  •  taxa ${fee.toStringAsFixed(0)}%  •  mín $min / máx $max',
+              l10n.conversionRateLine(
+                fee.toStringAsFixed(0),
+                from,
+                max,
+                min,
+                rate,
+                to,
+              ),
               style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
             if ((s['description']?.toString() ?? '').isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(s['description'].toString(),
-                  style: const TextStyle(color: Colors.white38, fontSize: 11)),
+              Text(
+                s['description'].toString(),
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ),
             ],
             const SizedBox(height: 10),
             SizedBox(
@@ -278,11 +343,14 @@ class _ConversionScreenState extends State<ConversionScreen> {
               child: FilledButton.icon(
                 onPressed: hasBalance ? () => _create(s) : null,
                 style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF8B5CF6)),
+                  backgroundColor: const Color(0xFF8B5CF6),
+                ),
                 icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                label: Text(hasBalance
-                    ? 'Converter (saldo ${_balance(from)})'
-                    : 'Saldo insuficiente em $from'),
+                label: Text(
+                  hasBalance
+                      ? l10n.conversionConvertBalance(_balance(from))
+                      : l10n.conversionInsufficientIn(from),
+                ),
               ),
             ),
           ],
@@ -291,7 +359,8 @@ class _ConversionScreenState extends State<ConversionScreen> {
     );
   }
 
-  Widget _requestCard(Map<String, dynamic> h) {
+  Widget _requestCard(BuildContext context, Map<String, dynamic> h) {
+    final l10n = AppLocalizations.of(context)!;
     final status = h['status']?.toString() ?? 'pending';
     final from = h['from_currency']?.toString() ?? '?';
     final to = h['to_currency']?.toString() ?? '?';
@@ -301,10 +370,10 @@ class _ConversionScreenState extends State<ConversionScreen> {
     final color = isPending
         ? const Color(0xFFFFD700)
         : status == 'executed'
-            ? const Color(0xFF34D399)
-            : status == 'cancelled'
-                ? Colors.white54
-                : const Color(0xFFFF6B81);
+        ? const Color(0xFF34D399)
+        : status == 'cancelled'
+        ? Colors.white54
+        : const Color(0xFFFF6B81);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -319,48 +388,61 @@ class _ConversionScreenState extends State<ConversionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('$amount $from → $received $to',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13)),
+                Text(
+                  '$amount $from → $received $to',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(_statusLabel(status),
-                    style: TextStyle(color: color, fontSize: 12)),
+                Text(
+                  _statusLabel(l10n, status),
+                  style: TextStyle(color: color, fontSize: 12),
+                ),
               ],
             ),
           ),
           if (isPending)
             TextButton(
               onPressed: () => _cancel(h),
-              child: const Text('Cancelar',
-                  style: TextStyle(color: Color(0xFFFF6B81), fontSize: 12)),
+              child: Text(
+                l10n.cancel,
+                style: const TextStyle(color: Color(0xFFFF6B81), fontSize: 12),
+              ),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildError() {
+  Widget _buildError(AppLocalizations l10n) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded,
-                color: Colors.white38, size: 32),
+            const Icon(
+              Icons.cloud_off_rounded,
+              color: Colors.white38,
+              size: 32,
+            ),
             const SizedBox(height: 10),
-            const Text('Não foi possível carregar as conversões.',
-                style: TextStyle(color: Colors.white54),
-                textAlign: TextAlign.center),
+            Text(
+              l10n.conversionLoadError,
+              style: const TextStyle(color: Colors.white54),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 14),
             FilledButton.icon(
               onPressed: _load,
               style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B5CF6)),
+                backgroundColor: const Color(0xFF8B5CF6),
+              ),
               icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Tentar novamente'),
+              label: Text(l10n.conversionRetry),
             ),
           ],
         ),
@@ -368,14 +450,26 @@ class _ConversionScreenState extends State<ConversionScreen> {
     );
   }
 
-  String _msg(Object? e) {
+  String _msg(AppLocalizations l10n, Object? e) {
     final s = e?.toString() ?? '';
-    if (s.contains('insufficient_funds')) return 'Saldo insuficiente.';
-    if (s.contains('amount_out_of_range')) return 'Quantia fora do intervalo permitido.';
-    if (s.contains('setting_not_active')) return 'Regra de conversão indisponível.';
-    if (s.contains('received_zero')) return 'Valor de conversão muito baixo.';
-    if (s.contains('not_found_or_not_pending')) return 'Pedido não encontrado ou já decidido.';
-    if (s.contains('not_authenticated')) return 'Faça login para converter.';
+    if (s.contains('insufficient_funds')) {
+      return l10n.conversionErrInsufficientFunds;
+    }
+    if (s.contains('amount_out_of_range')) {
+      return l10n.conversionErrAmountOutOfRange;
+    }
+    if (s.contains('setting_not_active')) {
+      return l10n.conversionErrSettingNotActive;
+    }
+    if (s.contains('received_zero')) {
+      return l10n.conversionErrReceivedZero;
+    }
+    if (s.contains('not_found_or_not_pending')) {
+      return l10n.conversionErrNotFound;
+    }
+    if (s.contains('not_authenticated')) {
+      return l10n.conversionErrNotAuthenticated;
+    }
     return s;
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/user_profile.dart';
 import '../../services/profile_service.dart';
 import '../../services/supabase_service.dart';
@@ -62,15 +63,14 @@ class _ProfileListsScreenState extends State<ProfileListsScreen> {
 
   void _open(UserProfile user) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => UserProfileScreen(userId: user.id),
-      ),
+      MaterialPageRoute(builder: (_) => UserProfileScreen(userId: user.id)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.following ? 'Seguindo' : 'Seguidores';
+    final l10n = AppLocalizations.of(context)!;
+    final title = widget.following ? l10n.following : l10n.followers;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -80,48 +80,43 @@ class _ProfileListsScreenState extends State<ProfileListsScreen> {
       ),
       body: switch (_users) {
         null => const KlaykListSkeleton(rows: 8, withAvatar: true),
-        final users when users.isEmpty => _empty(),
+        final users when users.isEmpty => _empty(l10n),
         final users => RefreshIndicator(
-            onRefresh: _load,
-            color: kProfileAccent,
-            backgroundColor: const Color(0xFF1B1A26),
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: users.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(color: Colors.white10, height: 1),
-              itemBuilder: (context, i) => _row(users[i]),
-            ),
+          onRefresh: _load,
+          color: kProfileAccent,
+          backgroundColor: const Color(0xFF1B1A26),
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: users.length,
+            separatorBuilder: (_, __) =>
+                const Divider(color: Colors.white10, height: 1),
+            itemBuilder: (context, i) => _row(users[i], l10n),
           ),
+        ),
       },
     );
   }
 
-  Widget _empty() {
+  Widget _empty(AppLocalizations l10n) {
     final msg = _error
-        ? 'Não foi possível carregar a lista.'
+        ? l10n.profileListsLoadFail
         : widget.following
-            ? 'Este usuário ainda não segue ninguém.'
-            : 'Ainda não há seguidores por aqui.';
-    return KlaykEmptyState(
-      icon: Icons.people_outline,
-      title: msg,
-    );
+        ? l10n.profileListsEmptyFollowing
+        : l10n.profileListsEmptyFollowers;
+    return KlaykEmptyState(icon: Icons.people_outline, title: msg);
   }
 
-  Widget _row(UserProfile user) {
+  Widget _row(UserProfile user, AppLocalizations l10n) {
     final me = ProfileService.instance.myId;
-    final showButton =
-        user.id.isNotEmpty && user.id != me && !user.isSelf;
+    final showButton = user.id.isNotEmpty && user.id != me && !user.isSelf;
     return ListTile(
       onTap: () => _open(user),
       leading: CircleAvatar(
         radius: 22,
         backgroundColor: const Color(0xFF2A2740),
-        backgroundImage:
-            (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
-                ? NetworkImage(user.avatarUrl!)
-                : null,
+        backgroundImage: (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
+            ? NetworkImage(user.avatarUrl!)
+            : null,
         child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)
             ? const Icon(Icons.person, color: Colors.white54)
             : null,
@@ -172,7 +167,7 @@ class _ProfileListsScreenState extends State<ProfileListsScreen> {
                   ),
                 ),
                 child: Text(
-                  user.isFollowing ? 'Seguindo' : 'Seguir',
+                  user.isFollowing ? l10n.following : l10n.follow,
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,

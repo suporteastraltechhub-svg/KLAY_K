@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/game_service.dart';
 import '../../theme/klayk_theme.dart';
 
@@ -70,12 +71,13 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
     if (!mounted || _gameOver) return;
     final empty = <int>[
       for (int i = 0; i < 9; i++)
-        if (_board[i] == '') i
+        if (_board[i] == '') i,
     ];
     if (empty.isEmpty) return;
 
     int? pick = _findWinningMove('O');
-    pick ??= _findWinningMove('X') ?? (_board[4] == '' ? 4 : _findCorner(empty));
+    pick ??=
+        _findWinningMove('X') ?? (_board[4] == '' ? 4 : _findCorner(empty));
 
     setState(() {
       _board[pick as int] = 'O';
@@ -110,20 +112,22 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
   }
 
   Future<void> _finish(String? winner) async {
-    final elapsed = (DateTime.now().millisecondsSinceEpoch - _startedMs) ~/ 1000;
+    final l10n = AppLocalizations.of(context)!;
+    final elapsed =
+        (DateTime.now().millisecondsSinceEpoch - _startedMs) ~/ 1000;
     final score = winner == 'X'
         ? 10
         : winner == 'O'
-            ? 0
-            : 2;
+        ? 0
+        : 2;
     setState(() {
       _gameOver = true;
       _submitting = true;
       _result = winner == 'X'
-          ? 'Você venceu! 🎉'
+          ? l10n.gameYouWon
           : winner == 'O'
-              ? 'KLAY K venceu!'
-              : 'Empate!';
+          ? l10n.gameKlkWon
+          : l10n.gameDraw;
     });
     try {
       final sessionId = await _svc.startSession('velha');
@@ -135,10 +139,10 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
       if (mounted) {
         setState(() {
           _result = winner == 'X'
-              ? 'Você venceu! 🎉\n${r.improved ? '+${r.reward} 🔮 cristais!' : ''}'
+              ? '${l10n.gameYouWon}${r.improved ? '\n+${r.reward} 🔮 cristais!' : ''}'
               : winner == 'O'
-                  ? 'KLAY K venceu!'
-                  : 'Empate!';
+              ? l10n.gameKlkWon
+              : l10n.gameDraw;
           _submitting = false;
         });
       }
@@ -161,15 +165,16 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: colors.bg,
-      appBar: AppBar(title: const Text('Jogo da Velha')),
+      appBar: AppBar(title: Text(l10n.gameVelhaTitle)),
       body: SafeArea(
         child: Column(
           children: [
             const SizedBox(height: 8),
             Text(
-              _result ?? (_gameOver ? '' : 'Você joga com ✖️'),
+              _result ?? (_gameOver ? '' : l10n.gameYouPlayX),
               style: const TextStyle(
                 fontSize: 16,
                 color: Color(0xFFB28DFF),
@@ -185,10 +190,10 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
                     physics: const NeverScrollableScrollPhysics(),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      mainAxisSpacing: 8,
-                      crossAxisSpacing: 8,
-                    ),
+                          crossAxisCount: 3,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                        ),
                     itemCount: 9,
                     itemBuilder: (context, index) {
                       final value = _board[index];
@@ -200,8 +205,8 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
                             color: value.isEmpty
                                 ? const Color(0xFF1E1B2E)
                                 : value == 'X'
-                                    ? const Color(0xFF8A2BE2)
-                                    : const Color(0xFFFF4D6A),
+                                ? const Color(0xFF8A2BE2)
+                                : const Color(0xFFFF4D6A),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: Text(
@@ -231,10 +236,12 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : const Icon(Icons.refresh_rounded),
-                    label: const Text('Reiniciar'),
+                    label: Text(l10n.gameRestart),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF8A2BE2),
                       foregroundColor: Colors.white,

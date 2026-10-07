@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/gift_models.dart';
 import '../services/gift_service.dart';
 import '../widgets/gift_animations.dart';
@@ -18,7 +19,7 @@ class GiftCatalogScreen extends StatefulWidget {
     super.key,
     this.liveId,
     this.receiverId,
-    this.title = 'Presentes',
+    this.title = '',
   });
 
   @override
@@ -36,7 +37,8 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   String? _categoryId;
   String? _rarityId;
 
-  int _tab = 0; // 0 recomendados, 1 populares, 2 tendências, 3 novos, 4 favoritos
+  int _tab =
+      0; // 0 recomendados, 1 populares, 2 tendências, 3 novos, 4 favoritos
   final List<Gift> _items = [];
   Set<String> _favs = {};
   int? _wallet;
@@ -158,8 +160,7 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   }
 
   void _onScroll() {
-    if (_scroll.position.pixels >=
-        _scroll.position.maxScrollExtent - 400) {
+    if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 400) {
       _loadMore();
     }
   }
@@ -244,11 +245,11 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   Future<void> _send(Gift g, int amount) async {
     try {
       if (widget.liveId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Você pode enviar presentes dentro de uma LIVE.'),
-          ),
-        );
+        final l10n = AppLocalizations.of(context);
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n!.sendGiftsOnlyInLive)));
         return;
       }
       final result = await _gift.sendGift(
@@ -262,20 +263,21 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
       Navigator.of(context).pop(result);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF14141B),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1C1C26),
         title: Text(
-          widget.title,
+          widget.title.isEmpty ? l10n.giftsTitle : widget.title,
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
@@ -299,6 +301,7 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   }
 
   Widget _buildSearchBar() {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
       child: TextField(
@@ -306,7 +309,7 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
         onSubmitted: _onSearch,
         style: const TextStyle(color: Colors.white),
         decoration: InputDecoration(
-          hintText: 'Buscar presentes...',
+          hintText: l10n.searchGiftsHint,
           hintStyle: const TextStyle(color: Colors.white38),
           prefixIcon: const Icon(Icons.search, color: Colors.white38),
           suffixIcon: IconButton(
@@ -329,13 +332,14 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   }
 
   Widget _buildCategoryRow() {
+    final l10n = AppLocalizations.of(context)!;
     return SizedBox(
       height: 40,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         children: [
-          _chip('Todas', null, _categoryId == null),
+          _chip(l10n.giftAllFilter, null, _categoryId == null),
           for (final c in _categories)
             _chip('${c.emoji} ${c.name}', c.id, _categoryId == c.id),
         ],
@@ -347,7 +351,10 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ChoiceChip(
-        label: Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+        label: Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+        ),
         selected: selected,
         backgroundColor: const Color(0xFF23232E),
         selectedColor: const Color(0xFF7C4DFF),
@@ -358,13 +365,14 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   }
 
   Widget _buildRarityRow() {
+    final l10n = AppLocalizations.of(context)!;
     return SizedBox(
       height: 40,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         children: [
-          _rarityChip('Todas', null, _rarityId == null),
+          _rarityChip(l10n.giftAllFilter, null, _rarityId == null),
           for (final r in _rarities)
             _rarityChip('${r.emoji} ${r.name}', r.id, _rarityId == r.id),
         ],
@@ -376,7 +384,10 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ChoiceChip(
-        label: Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+        label: Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+        ),
         selected: selected,
         backgroundColor: const Color(0xFF2A2A35),
         selectedColor: const Color(0xFFB388FF),
@@ -387,7 +398,14 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   }
 
   Widget _buildTabs() {
-    const tabs = ['Recomendados', 'Populares', 'Tendências', 'Novos', 'Favoritos'];
+    final l10n = AppLocalizations.of(context)!;
+    final tabs = [
+      l10n.giftRecommended,
+      l10n.giftPopular,
+      l10n.giftTrending,
+      l10n.giftNew,
+      l10n.giftFavorites,
+    ];
     return SizedBox(
       height: 42,
       child: ListView(
@@ -398,7 +416,10 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
-                label: Text(tabs[i], style: const TextStyle(color: Colors.white, fontSize: 12)),
+                label: Text(
+                  tabs[i],
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
                 selected: _tab == i,
                 backgroundColor: const Color(0xFF1C1C26),
                 selectedColor: const Color(0xFF00E5FF),
@@ -411,12 +432,13 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
   }
 
   Widget _buildGrid() {
+    final l10n = AppLocalizations.of(context)!;
     if (_error != null && _items.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'Não foi possível carregar o catálogo.\n\n$_error',
+            l10n.giftCatalogLoadFail(_error!),
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white54),
           ),
@@ -425,12 +447,15 @@ class GiftCatalogScreenState extends State<GiftCatalogScreen> {
     }
     if (_loading && _items.isEmpty) {
       return const Center(
-          child: CircularProgressIndicator(color: Color(0xFF8B5CF6)));
+        child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+      );
     }
     if (_items.isEmpty) {
-      return const Center(
-        child: Text('Nenhum presente encontrado.',
-            style: TextStyle(color: Colors.white54)),
+      return Center(
+        child: Text(
+          l10n.noGiftsFound,
+          style: const TextStyle(color: Colors.white54),
+        ),
       );
     }
     return GridView.builder(
@@ -480,6 +505,7 @@ class _GiftCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
@@ -506,7 +532,9 @@ class _GiftCard extends StatelessWidget {
                         padding: const EdgeInsets.all(4),
                         child: Icon(
                           isFav ? Icons.favorite : Icons.favorite_border,
-                          color: isFav ? const Color(0xFFFF5252) : Colors.white38,
+                          color: isFav
+                              ? const Color(0xFFFF5252)
+                              : Colors.white38,
                           size: 16,
                         ),
                       ),
@@ -527,7 +555,7 @@ class _GiftCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              '${gift.credits} créditos',
+              l10n.creditsCount(gift.credits),
               style: TextStyle(
                 color: gift.rarityColor != null
                     ? _hex(gift.rarityColor!)
@@ -565,6 +593,7 @@ class _GiftDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final afford = wallet != null && wallet! >= gift.credits;
     return SafeArea(
       child: Padding(
@@ -572,24 +601,31 @@ class _GiftDetailSheet extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('${gift.icon} ${gift.name}',
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+            Text(
+              '${gift.icon} ${gift.name}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
             const SizedBox(height: 4),
             if (gift.rarityName != null)
-              Text(gift.rarityName!,
-                  style: TextStyle(
-                    color: gift.rarityColor != null
-                        ? _hex(gift.rarityColor!)
-                        : const Color(0xFFFFD700),
-                    fontWeight: FontWeight.w700,
-                  )),
+              Text(
+                gift.rarityName!,
+                style: TextStyle(
+                  color: gift.rarityColor != null
+                      ? _hex(gift.rarityColor!)
+                      : const Color(0xFFFFD700),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Text(
                 gift.description.isEmpty
-                    ? 'Presente virtual do catálogo KLAY K.'
+                    ? l10n.virtualGiftFromCatalog
                     : gift.description,
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70),
@@ -600,15 +636,16 @@ class _GiftDetailSheet extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 Text(
-                  '${gift.credits} créditos',
+                  l10n.creditsCount(gift.credits),
                   style: const TextStyle(
-                      color: Color(0xFFFFD700),
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16),
+                    color: Color(0xFFFFD700),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
                 ),
                 if (wallet != null)
                   Text(
-                    'Saldo: $wallet',
+                    l10n.balanceOf(wallet!),
                     style: TextStyle(
                       color: afford ? Colors.white70 : const Color(0xFFFF5252),
                     ),
@@ -617,11 +654,18 @@ class _GiftDetailSheet extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             if (!canSend)
-              const Text('Para enviar, entre em uma LIVE.',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                l10n.enterLiveToSend,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
             if (canSend) ...[
-              const Text('Quantidade',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              Text(
+                l10n.quantityLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 10,
@@ -643,8 +687,10 @@ class _GiftDetailSheet extends StatelessWidget {
             ],
             TextButton(
               onPressed: onFavorite,
-              child: const Text('Favoritar / Desfavoritar',
-                  style: TextStyle(color: Color(0xFFFF5252))),
+              child: Text(
+                l10n.favoriteToggle,
+                style: const TextStyle(color: Color(0xFFFF5252)),
+              ),
             ),
           ],
         ),

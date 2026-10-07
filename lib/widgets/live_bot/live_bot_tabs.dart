@@ -14,29 +14,37 @@ const _voiceOptions = [
 ];
 
 Widget _sectionTitle(String title) => Padding(
-      padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
-      child: Text(title,
-          style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5)),
-    );
+  padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+  child: Text(
+    title,
+    style: const TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w800,
+      letterSpacing: 0.5,
+    ),
+  ),
+);
 
 Widget _card({required Widget child}) => Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF17141F),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: child,
-    );
+  width: double.infinity,
+  margin: const EdgeInsets.symmetric(vertical: 5),
+  padding: const EdgeInsets.all(14),
+  decoration: BoxDecoration(
+    color: const Color(0xFF17141F),
+    borderRadius: BorderRadius.circular(14),
+    border: Border.all(color: Colors.white12),
+  ),
+  child: child,
+);
 
-Widget _label(String t) => Text(t,
-    style: const TextStyle(
-        color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600));
+Widget _label(String t) => Text(
+  t,
+  style: const TextStyle(
+    color: Colors.white70,
+    fontSize: 12,
+    fontWeight: FontWeight.w600,
+  ),
+);
 
 class _TabScaffold extends StatelessWidget {
   final Widget child;
@@ -88,30 +96,39 @@ class VoiceTab extends StatelessWidget {
                   children: [
                     for (final o in _voiceOptions)
                       ChoiceChip(
-                        label: Text(o.label,
-                            style: TextStyle(
-                              color: o.value == (settings.voice.voiceType ?? 'auto')
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                            )),
-                        selected: o.value == (settings.voice.voiceType ?? 'auto'),
+                        label: Text(
+                          o.label,
+                          style: TextStyle(
+                            color:
+                                o.value == (settings.voice.voiceType ?? 'auto')
+                                ? Colors.white
+                                : Colors.white70,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                        selected:
+                            o.value == (settings.voice.voiceType ?? 'auto'),
                         selectedColor: const Color(0xFF8B5CF6),
                         backgroundColor: const Color(0xFF1E1A2B),
                         side: BorderSide(
-                            color: o.value == (settings.voice.voiceType ?? 'auto')
-                                ? const Color(0xFF8B5CF6)
-                                : Colors.white12),
+                          color: o.value == (settings.voice.voiceType ?? 'auto')
+                              ? const Color(0xFF8B5CF6)
+                              : Colors.white12,
+                        ),
                         onSelected: onChange == null
                             ? null
-                            : (_) => onChange!(settings.copyWithVoiceType(o.value)),
+                            : (_) => onChange!(
+                                settings.copyWithVoiceType(o.value),
+                              ),
                       ),
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Text('O bot escolhe a melhor voz em português automaticamente.',
-                    style: TextStyle(color: Colors.white38, fontSize: 11)),
+                const Text(
+                  'O bot escolhe a melhor voz em português automaticamente.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
               ],
             ),
           ),
@@ -123,9 +140,13 @@ class VoiceTab extends StatelessWidget {
                   children: [
                     _label('Velocidade'),
                     const Spacer(),
-                    Text('${settings.voice.speed.toStringAsFixed(1)}x',
-                        style: const TextStyle(
-                            color: Color(0xFF8B5CF6), fontWeight: FontWeight.w800)),
+                    Text(
+                      '${settings.voice.speed.toStringAsFixed(1)}x',
+                      style: const TextStyle(
+                        color: Color(0xFF8B5CF6),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ],
                 ),
                 Slider(
@@ -144,9 +165,13 @@ class VoiceTab extends StatelessWidget {
                   children: [
                     _label('Volume'),
                     const Spacer(),
-                    Text('${(settings.voice.volume * 100).round()}%',
-                        style: const TextStyle(
-                            color: Color(0xFF8B5CF6), fontWeight: FontWeight.w800)),
+                    Text(
+                      '${(settings.voice.volume * 100).round()}%',
+                      style: const TextStyle(
+                        color: Color(0xFF8B5CF6),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ],
                 ),
                 Slider(
@@ -176,9 +201,10 @@ class VoiceTab extends StatelessWidget {
                         ? tts.currentVoiceName!
                         : 'Verificando…',
                     style: const TextStyle(
-                        color: Color(0xFF38BDF8),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13),
+                      color: Color(0xFF38BDF8),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
                   ),
                 ],
               ),
@@ -190,15 +216,21 @@ class VoiceTab extends StatelessWidget {
               foregroundColor: const Color(0xFF38BDF8),
               side: const BorderSide(color: Color(0xFF38BDF8)),
               minimumSize: const Size.fromHeight(46),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             icon: const Icon(Icons.play_circle_fill_rounded, size: 20),
-            label: const Text('TESTAR VOZ',
-                style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+            label: const Text(
+              'TESTAR VOZ',
+              style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.5),
+            ),
           ),
           const SizedBox(height: 8),
-          const Text('Prévia usa TTS gratuito do dispositivo. A transmissão aos espectadores é feita pelo bot na sala.',
-              style: TextStyle(color: Colors.white38, fontSize: 11)),
+          const Text(
+            'Prévia usa TTS gratuito do dispositivo. A transmissão aos espectadores é feita pelo bot na sala.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
         ],
       ),
     );
@@ -243,17 +275,27 @@ class CommentsTab extends StatelessWidget {
                       m.icon,
                       color: sel ? const Color(0xFF8B5CF6) : Colors.white30,
                     ),
-                    title: Text(m.label,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13)),
-                    subtitle: Text(m.description,
-                        style:
-                            const TextStyle(color: Colors.white38, fontSize: 11)),
+                    title: Text(
+                      m.label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    subtitle: Text(
+                      m.description,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                      ),
+                    ),
                     trailing: sel
-                        ? const Icon(Icons.check_circle_rounded,
-                            color: Color(0xFF22C55E), size: 20)
+                        ? const Icon(
+                            Icons.check_circle_rounded,
+                            color: Color(0xFF22C55E),
+                            size: 20,
+                          )
                         : null,
                     onTap: onChange == null
                         ? null
@@ -267,16 +309,24 @@ class CommentsTab extends StatelessWidget {
           _card(
             child: Row(
               children: [
-                Icon(settings.commentsEnabled
-                    ? Icons.volume_up_rounded
-                    : Icons.volume_off_rounded,
-                    color: settings.commentsEnabled
-                        ? const Color(0xFF38BDF8)
-                        : Colors.white30),
+                Icon(
+                  settings.commentsEnabled
+                      ? Icons.volume_up_rounded
+                      : Icons.volume_off_rounded,
+                  color: settings.commentsEnabled
+                      ? const Color(0xFF38BDF8)
+                      : Colors.white30,
+                ),
                 const SizedBox(width: 10),
                 const Expanded(
-                    child: Text('Ler comentários',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700))),
+                  child: Text(
+                    'Ler comentários',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
                 Switch(
                   value: settings.commentsEnabled,
                   activeThumbColor: const Color(0xFF38BDF8),
@@ -294,15 +344,21 @@ class CommentsTab extends StatelessWidget {
               foregroundColor: const Color(0xFF8B5CF6),
               side: const BorderSide(color: Color(0xFF8B5CF6)),
               minimumSize: const Size.fromHeight(44),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             icon: const Icon(Icons.record_voice_over_rounded, size: 20),
-            label: const Text('TESTAR LEITURA EM VOZ ALTA',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+            label: const Text(
+              'TESTAR LEITURA EM VOZ ALTA',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+            ),
           ),
           const SizedBox(height: 8),
-          const Text('Selecione um comentário no chat para o bot lê-lo. O bot de backend fala na sala.',
-              style: TextStyle(color: Colors.white38, fontSize: 11)),
+          const Text(
+            'Selecione um comentário no chat para o bot lê-lo. O bot de backend fala na sala.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
         ],
       ),
     );
@@ -337,20 +393,29 @@ class ModerationTab extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.shield_rounded,
-                        color: Color(0xFF8B5CF6), size: 22),
+                    const Icon(
+                      Icons.shield_rounded,
+                      color: Color(0xFF8B5CF6),
+                      size: 22,
+                    ),
                     const SizedBox(width: 10),
                     const Expanded(
-                        child: Text('Moderação ativa',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700))),
+                      child: Text(
+                        'Moderação ativa',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                     Switch(
                       value: settings.moderationEnabled,
                       activeThumbColor: const Color(0xFF8B5CF6),
                       onChanged: onChange == null
                           ? null
-                          : (v) => onChange!(settings.copyWithModerationEnabled(v)),
+                          : (v) => onChange!(
+                              settings.copyWithModerationEnabled(v),
+                            ),
                     ),
                   ],
                 ),
@@ -367,35 +432,52 @@ class ModerationTab extends StatelessWidget {
           _card(
             child: const Row(
               children: [
-                Icon(Icons.priority_high_rounded,
-                    color: Color(0xFFFFD700), size: 22),
+                Icon(
+                  Icons.priority_high_rounded,
+                  color: Color(0xFFFFD700),
+                  size: 22,
+                ),
                 SizedBox(width: 10),
                 Expanded(
-                    child: Text('Avisos têm prioridade máxima',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700))),
-                Icon(Icons.arrow_upward_rounded,
-                    color: Color(0xFFFFD700), size: 20),
+                  child: Text(
+                    'Avisos têm prioridade máxima',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_upward_rounded,
+                  color: Color(0xFFFFD700),
+                  size: 20,
+                ),
               ],
             ),
           ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
-            onPressed: () => onTestSpeak('Atenção, esta é uma moderação de teste.'),
+            onPressed: () =>
+                onTestSpeak('Atenção, esta é uma moderação de teste.'),
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFFFFD700),
               side: const BorderSide(color: Color(0xFFFFD700)),
               minimumSize: const Size.fromHeight(44),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             icon: const Icon(Icons.campaign_rounded, size: 20),
-            label: const Text('TESTAR AVISO',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+            label: const Text(
+              'TESTAR AVISO',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+            ),
           ),
           const SizedBox(height: 8),
-          const Text('Os logs de moderação são registrados no backend e visíveis apenas a moderadores/staff.',
-              style: TextStyle(color: Colors.white38, fontSize: 11)),
+          const Text(
+            'Os logs de moderação são registrados no backend e visíveis apenas a moderadores/staff.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
         ],
       ),
     );
@@ -438,7 +520,10 @@ class _AnnouncementsTabState extends State<AnnouncementsTab> {
     if (text.isEmpty) return;
     try {
       await widget.service.addAnnouncement(
-          widget.liveId, text, intervalSeconds: _interval);
+        widget.liveId,
+        text,
+        intervalSeconds: _interval,
+      );
       final updated = await widget.service.listAnnouncements(widget.liveId);
       widget.onChange(updated);
       _controller.clear();
@@ -492,8 +577,11 @@ class _AnnouncementsTabState extends State<AnnouncementsTab> {
                   Icon(Icons.campaign_rounded, color: Colors.white24, size: 22),
                   SizedBox(width: 10),
                   Expanded(
-                      child: Text('Nenhum anúncio ainda. Crie um para o bot anunciar na sala.',
-                          style: TextStyle(color: Colors.white54, fontSize: 12))),
+                    child: Text(
+                      'Nenhum anúncio ainda. Crie um para o bot anunciar na sala.',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ),
                 ],
               ),
             )
@@ -506,15 +594,22 @@ class _AnnouncementsTabState extends State<AnnouncementsTab> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(a.message,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13)),
+                          Text(
+                            a.message,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
                           const SizedBox(height: 4),
-                          Text('A cada ${a.intervalSeconds}s',
-                              style: const TextStyle(
-                                  color: Colors.white38, fontSize: 11)),
+                          Text(
+                            'A cada ${a.intervalSeconds}s',
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 11,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -525,8 +620,11 @@ class _AnnouncementsTabState extends State<AnnouncementsTab> {
                     ),
                     IconButton(
                       onPressed: () => _delete(a),
-                      icon: const Icon(Icons.delete_outline_rounded,
-                          color: Color(0xFFFF4D6A), size: 20),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Color(0xFFFF4D6A),
+                        size: 20,
+                      ),
                     ),
                   ],
                 ),
@@ -580,11 +678,15 @@ class _AnnouncementsTabState extends State<AnnouncementsTab> {
                     foregroundColor: const Color(0xFF38BDF8),
                     side: const BorderSide(color: Color(0xFF38BDF8)),
                     minimumSize: const Size.fromHeight(44),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                   icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('ADICIONAR ANÚNCIO',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                  label: const Text(
+                    'ADICIONAR ANÚNCIO',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                  ),
                 ),
               ],
             ),
@@ -617,40 +719,58 @@ class SettingsTab extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.campaign_rounded,
-                        color: Color(0xFF38BDF8), size: 20),
+                    const Icon(
+                      Icons.campaign_rounded,
+                      color: Color(0xFF38BDF8),
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     const Expanded(
-                        child: Text('Anúncios automáticos',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700))),
+                      child: Text(
+                        'Anúncios automáticos',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                     Switch(
                       value: settings.announcementsEnabled,
                       activeThumbColor: const Color(0xFF38BDF8),
                       onChanged: onChange == null
                           ? null
-                          : (v) => onChange!(settings.copyWithAnnouncementsEnabled(v)),
+                          : (v) => onChange!(
+                              settings.copyWithAnnouncementsEnabled(v),
+                            ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.auto_awesome_rounded,
-                        color: Color(0xFF8B5CF6), size: 20),
+                    const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: Color(0xFF8B5CF6),
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     const Expanded(
-                        child: Text('Respostas automáticas',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700))),
+                      child: Text(
+                        'Respostas automáticas',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                     Switch(
                       value: settings.autoRepliesEnabled,
                       activeThumbColor: const Color(0xFF8B5CF6),
                       onChanged: onChange == null
                           ? null
-                          : (v) => onChange!(settings.copyWithAutoRepliesEnabled(v)),
+                          : (v) => onChange!(
+                              settings.copyWithAutoRepliesEnabled(v),
+                            ),
                     ),
                   ],
                 ),
@@ -664,9 +784,11 @@ class SettingsTab extends StatelessWidget {
               child: const Row(
                 children: [
                   Expanded(
-                      child: Text('Nenhuma resposta configurada.',
-                          style: TextStyle(
-                              color: Colors.white38, fontSize: 12))),
+                    child: Text(
+                      'Nenhuma resposta configurada.',
+                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
+                  ),
                 ],
               ),
             )
@@ -681,21 +803,31 @@ class SettingsTab extends StatelessWidget {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.question_answer_rounded,
-                              color: Color(0xFF8B5CF6), size: 16),
+                          const Icon(
+                            Icons.question_answer_rounded,
+                            color: Color(0xFF8B5CF6),
+                            size: 16,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Q: ${ar.question}',
-                                    style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12)),
-                                Text('R: ${ar.answer}',
-                                    style: const TextStyle(
-                                        color: Colors.white38, fontSize: 11)),
+                                Text(
+                                  'Q: ${ar.question}',
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Text(
+                                  'R: ${ar.answer}',
+                                  style: const TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 11,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -706,8 +838,10 @@ class SettingsTab extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 10),
-          const Text('As respostas automáticas e anúncios são processados pelo bot de backend na sala.',
-              style: TextStyle(color: Colors.white38, fontSize: 11)),
+          const Text(
+            'As respostas automáticas e anúncios são processados pelo bot de backend na sala.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
         ],
       ),
     );

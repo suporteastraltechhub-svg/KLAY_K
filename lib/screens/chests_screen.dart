@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/admin_service.dart';
 import '../services/supabase_service.dart';
 
@@ -36,7 +37,7 @@ class _ChestsScreenState extends State<ChestsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   Future<void> _load() async {
@@ -44,7 +45,7 @@ class _ChestsScreenState extends State<ChestsScreen> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Modo demo: conecte-se para abrir baús.';
+          _error = AppLocalizations.of(context)!.chestsDemoMode;
         });
       }
       return;
@@ -91,11 +92,14 @@ class _ChestsScreenState extends State<ChestsScreen> {
   }
 
   Future<void> _claimDaily() async {
+    final l10n = AppLocalizations.of(context)!;
     try {
       final res = await AdminService.instance.claimDailyChest();
-      _toast(res['daily'] != null
-          ? 'Baú diário coletado! Abra em Baús.'
-          : 'Já coletado hoje.');
+      _toast(
+        res['daily'] != null
+            ? l10n.dailyChestCollectedToast
+            : l10n.dailyChestAlreadyCollected,
+      );
       await _load();
     } catch (e) {
       _toast(AdminService.instance.friendlyError(e), error: true);
@@ -103,6 +107,7 @@ class _ChestsScreenState extends State<ChestsScreen> {
   }
 
   Future<void> _openChest(Map<String, dynamic> chest) async {
+    final l10n = AppLocalizations.of(context)!;
     final id = chest['id']?.toString();
     if (id == null) return;
     try {
@@ -110,12 +115,14 @@ class _ChestsScreenState extends State<ChestsScreen> {
       final drops = res['drops'];
       if (drops is List && drops.isNotEmpty) {
         final parts = drops
-            .map<String>((d) =>
-                '${d is Map ? d['item_type'] ?? '?' : '?'} +${d is Map ? d['amount'] ?? 0 : 0}')
+            .map<String>(
+              (d) =>
+                  '${d is Map ? d['item_type'] ?? '?' : '?'} +${d is Map ? d['amount'] ?? 0 : 0}',
+            )
             .toList();
-        _toast('Você ganhou: ${parts.join(', ')}');
+        _toast(l10n.chestOpenedRewards(parts.join(', ')));
       } else {
-        _toast('Baú aberto!');
+        _toast(l10n.chestOpenedToast);
       }
       await _load();
     } catch (e) {
@@ -129,7 +136,9 @@ class _ChestsScreenState extends State<ChestsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: error ? const Color(0xFFE4183C) : const Color(0xFF0F8A4D),
+        backgroundColor: error
+            ? const Color(0xFFE4183C)
+            : const Color(0xFF0F8A4D),
       ),
     );
   }
@@ -141,6 +150,7 @@ class _ChestsScreenState extends State<ChestsScreen> {
       initialChildSize: 0.85,
       maxChildSize: 0.95,
       builder: (context, scrollController) {
+        final l10n = AppLocalizations.of(context)!;
         return Column(
           children: [
             const SizedBox(height: 10),
@@ -152,11 +162,11 @@ class _ChestsScreenState extends State<ChestsScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 14, 20, 6),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
               child: Text(
-                '🎁 Baús',
-                style: TextStyle(
+                '🎁 ${l10n.chests}',
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
@@ -176,43 +186,44 @@ class _ChestsScreenState extends State<ChestsScreen> {
                       ),
                     )
                   : _loading
-                      ? const Center(
-                          child:
-                              CircularProgressIndicator(color: Color(0xFF8B5CF6)),
-                        )
-                      : RefreshIndicator(
-                          color: const Color(0xFF8B5CF6),
-                          onRefresh: _load,
-                          child: ListView(
-                            controller: scrollController,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 30),
-                            children: [
-                              _dailyCard(),
-                              const SizedBox(height: 14),
-                              _sectionTitle('Meus baús'),
-                              const SizedBox(height: 8),
-                              if (_mine.isEmpty)
-                                _emptyText('Nenhum baú ainda — colete o diário!')
-                              else
-                                ..._mine.map(_chestTile),
-                              const SizedBox(height: 14),
-                              _sectionTitle('Catálogo'),
-                              const SizedBox(height: 8),
-                              if (_catalog.isEmpty)
-                                _emptyText('Sem baús disponíveis.')
-                              else
-                                ..._catalog.map(_catalogTile),
-                              const SizedBox(height: 14),
-                              _sectionTitle('Histórico de aberturas'),
-                              const SizedBox(height: 8),
-                              if (_opens.isEmpty)
-                                _emptyText('Nenhuma abertura registrada.')
-                              else
-                                ..._opens.map(_openTile),
-                            ],
-                          ),
-                        ),
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF8B5CF6),
+                      ),
+                    )
+                  : RefreshIndicator(
+                      color: const Color(0xFF8B5CF6),
+                      onRefresh: _load,
+                      child: ListView(
+                        controller: scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 30),
+                        children: [
+                          _dailyCard(),
+                          const SizedBox(height: 14),
+                          _sectionTitle(l10n.myChestsTitle),
+                          const SizedBox(height: 8),
+                          if (_mine.isEmpty)
+                            _emptyText(l10n.noChestsYet)
+                          else
+                            ..._mine.map(_chestTile),
+                          const SizedBox(height: 14),
+                          _sectionTitle(l10n.catalogLabel),
+                          const SizedBox(height: 8),
+                          if (_catalog.isEmpty)
+                            _emptyText(l10n.noChestsAvailable)
+                          else
+                            ..._catalog.map(_catalogTile),
+                          const SizedBox(height: 14),
+                          _sectionTitle(l10n.chestOpensHistory),
+                          const SizedBox(height: 8),
+                          if (_opens.isEmpty)
+                            _emptyText(l10n.noChestOpens)
+                          else
+                            ..._opens.map(_openTile),
+                        ],
+                      ),
+                    ),
             ),
           ],
         );
@@ -221,22 +232,23 @@ class _ChestsScreenState extends State<ChestsScreen> {
   }
 
   Widget _sectionTitle(String text) => Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w800,
-        ),
-      );
+    text,
+    style: const TextStyle(
+      color: Colors.white,
+      fontSize: 14,
+      fontWeight: FontWeight.w800,
+    ),
+  );
 
   Widget _emptyText(String text) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Center(
-          child: Text(text, style: const TextStyle(color: Colors.white38)),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 14),
+    child: Center(
+      child: Text(text, style: const TextStyle(color: Colors.white38)),
+    ),
+  );
 
   Widget _dailyCard() {
+    final l10n = AppLocalizations.of(context)!;
     final collected = _collectedToday;
     return Container(
       padding: const EdgeInsets.all(14),
@@ -245,7 +257,9 @@ class _ChestsScreenState extends State<ChestsScreen> {
           colors: [Color(0xFF2A1B54), Color(0xFF151126)],
         ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.5)),
+        border: Border.all(
+          color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
+        ),
       ),
       child: Row(
         children: [
@@ -255,9 +269,9 @@ class _ChestsScreenState extends State<ChestsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Baú Diário',
-                  style: TextStyle(
+                Text(
+                  l10n.dailyChestTitle,
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
@@ -266,8 +280,8 @@ class _ChestsScreenState extends State<ChestsScreen> {
                 const SizedBox(height: 2),
                 Text(
                   collected
-                      ? 'Coletado hoje. Volte amanhã!'
-                      : 'Uma abertura grátis por dia com moedas raras.',
+                      ? l10n.dailyChestCollectedHint
+                      : l10n.dailyChestHint,
                   style: const TextStyle(color: Colors.white60, fontSize: 11),
                 ),
               ],
@@ -275,8 +289,10 @@ class _ChestsScreenState extends State<ChestsScreen> {
           ),
           FilledButton(
             onPressed: collected ? null : _claimDaily,
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
-            child: Text(collected ? 'Coletado' : 'Coletar'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8B5CF6),
+            ),
+            child: Text(collected ? l10n.collectedLabel : l10n.collectLabel),
           ),
         ],
       ),
@@ -284,18 +300,19 @@ class _ChestsScreenState extends State<ChestsScreen> {
   }
 
   Widget _chestTile(Map<String, dynamic> c) {
+    final l10n = AppLocalizations.of(context)!;
     final status = c['status']?.toString() ?? 'unlocked';
     final unlocked = status == 'unlocked';
     String label;
     switch (status) {
       case 'opened':
-        label = 'aberto';
+        label = l10n.chestStatusOpened;
         break;
       case 'locked':
-        label = 'bloqueado';
+        label = l10n.blockedSuffix;
         break;
       default:
-        label = 'pronto para abrir';
+        label = l10n.chestStatusReady;
     }
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -340,7 +357,7 @@ class _ChestsScreenState extends State<ChestsScreen> {
                 backgroundColor: const Color(0xFF8B5CF6),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
               ),
-              child: const Text('Abrir'),
+              child: Text(l10n.openAction),
             ),
         ],
       ),
@@ -351,8 +368,10 @@ class _ChestsScreenState extends State<ChestsScreen> {
     return ListTile(
       dense: true,
       contentPadding: EdgeInsets.zero,
-      leading: Text(c['emoji']?.toString() ?? '📦',
-          style: const TextStyle(fontSize: 18)),
+      leading: Text(
+        c['emoji']?.toString() ?? '📦',
+        style: const TextStyle(fontSize: 18),
+      ),
       title: Text(
         c['name']?.toString() ?? c['id']?.toString() ?? '—',
         style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -367,14 +386,17 @@ class _ChestsScreenState extends State<ChestsScreen> {
   }
 
   Widget _openTile(Map<String, dynamic> o) {
+    final l10n = AppLocalizations.of(context)!;
     final drops = (o['drops'] as List?) ?? const [];
     String summary;
     if (drops.isEmpty) {
-      summary = 'Vazio';
+      summary = l10n.emptyReward;
     } else {
       summary = drops
-          .map<String>((d) =>
-              '${d is Map ? d['item_type'] ?? '?' : '?'} +${d is Map ? d['amount'] ?? 0 : 0}')
+          .map<String>(
+            (d) =>
+                '${d is Map ? d['item_type'] ?? '?' : '?'} +${d is Map ? d['amount'] ?? 0 : 0}',
+          )
           .join(', ');
     }
     return Container(
@@ -386,8 +408,11 @@ class _ChestsScreenState extends State<ChestsScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.lock_open_rounded,
-              color: Color(0xFF34D399), size: 16),
+          const Icon(
+            Icons.lock_open_rounded,
+            color: Color(0xFF34D399),
+            size: 16,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -398,7 +423,7 @@ class _ChestsScreenState extends State<ChestsScreen> {
             ),
           ),
           Text(
-            _daysAgo(o['opened_at']?.toString()),
+            _daysAgo(o['opened_at']?.toString(), l10n),
             style: const TextStyle(color: Colors.white38, fontSize: 10),
           ),
         ],
@@ -406,13 +431,13 @@ class _ChestsScreenState extends State<ChestsScreen> {
     );
   }
 
-  String _daysAgo(String? iso) {
+  String _daysAgo(String? iso, AppLocalizations l10n) {
     final d = DateTime.tryParse(iso ?? '');
     if (d == null) return '';
     final diff = DateTime.now().difference(d);
-    if (diff.inMinutes < 1) return 'agora';
-    if (diff.inHours < 1) return '${diff.inMinutes} min';
-    if (diff.inDays < 1) return '${diff.inHours} h';
-    return '${diff.inDays} d';
+    if (diff.inMinutes < 1) return l10n.justNow;
+    if (diff.inHours < 1) return l10n.msTimeMin(diff.inMinutes);
+    if (diff.inDays < 1) return l10n.msTimeH(diff.inHours);
+    return l10n.msTimeD(diff.inDays);
   }
 }

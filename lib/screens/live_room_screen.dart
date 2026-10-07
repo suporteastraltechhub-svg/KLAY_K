@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart';
@@ -20,6 +21,7 @@ import '../services/social_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/verified_badge.dart';
 import '../widgets/gift_animations.dart';
+import '../widgets/live_diagnostics_panel.dart';
 import '../widgets/live_bot/live_bot_panel.dart';
 import '../services/live_bot_speech_queue.dart';
 import '../services/live_bot_tts.dart';
@@ -39,19 +41,31 @@ class LiveRoomScreen extends StatefulWidget {
   /// Quando `true` e o participante é o streamer, o app solicita a captura de
   /// tela e oferece a bolinha flutuante de controles sobre outros apps.
   final bool isGameLive;
+  final String? gamePackage;
 
   const LiveRoomScreen({
     super.key,
     required this.live,
     this.role = LiveRole.viewer,
     this.isGameLive = false,
+    this.gamePackage,
   });
 
   @override
   State<LiveRoomScreen> createState() => _LiveRoomScreenState();
 }
 
-enum _ModerationAction { report, block, silence, delete, banLive, muteLive, edit, copy, readOutLoud }
+enum _ModerationAction {
+  report,
+  block,
+  silence,
+  delete,
+  banLive,
+  muteLive,
+  edit,
+  copy,
+  readOutLoud,
+}
 
 /// Ciclo de vida da transmissão: ANTES (aguardando início, configuração da
 /// captura), DURANTE (ao vivo) e DEPOIS (encerrada/recap).
@@ -85,6 +99,16 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   bool _recapDismissed = false;
 
   bool _chatOpen = false;
+
+  /// Mede a altura do rodapé (lista + barra) para a área de "tocar fora".
+  ///
+  /// A altura muda conforme o estado (compositor ativo/inativo, uma ou várias
+  /// mensagens, teclado aberto). Medir em runtime é mais seguro do que um valor
+  /// fixo: se o valor chutado errasse, a área de toque invadiria a lista ou os
+  /// botões.
+  final GlobalKey _chatOverlayKey = GlobalKey(debugLabel: 'liveChatOverlay');
+  double? _chatOverlayHeight;
+
   final List<LiveChatMessage> _messages = [];
   final TextEditingController _chatController = TextEditingController();
   final FocusNode _chatFocus = FocusNode();
@@ -101,6 +125,15 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   int _activeGiftAmount = 1;
   String? _lastGiftTxId;
   int _wallet = 0;
+  bool _walletLoaded = false;
+  String? _walletError;
+  bool _chatRealtimeReady = false;
+  bool _liveRealtimeReady = false;
+  String? _realtimeError;
+  int _subscribedRealtimeChannels = 0;
+  String? _pendingGiftRequestId;
+  String? _pendingGiftFingerprint;
+  final List<String> _diagnosticEvents = [];
 
   // Premium: reações rápidas (contadores por mensagem + minhas reações).
   final Map<String, Map<String, int>> _reactions = {};
@@ -113,11 +146,13 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   List<LiveRankRecord> _topSupporters = const [];
   final List<_RoomAlert> _alerts = [];
 
-  // Espectadores: participantes remotos do LiveKit + o host (1). Quando ainda
-  // não há conexão, usa a contagem real persistida no backend (`viewer_count`).
   int get _viewerCount {
-    final lk = _lk.participantsCount.value;
-    if (lk > 0) return lk + 1;
+    if (_lk.isConnected) {
+      if (widget.role == LiveRole.streamer) return _lk.guests.length;
+      return _lk.guests
+          .where((participant) => participant.identity != _live.streamerId)
+          .length;
+    }
     return _live.viewerCount;
   }
 
@@ -127,6 +162,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     _live = widget.live;
     _liveId = widget.live.id;
     _roomName = widget.live.roomName;
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    // Tocar direto no campo também precisa ativar o composer: é o que faz a
+    // barra subir junto com o teclado.
+    _chatFocus.addListener(_onChatFocusChanged);
     _join();
   }
 
@@ -135,6 +174,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       final user = await _db.ensureAuthenticated();
       if (!mounted) return;
       _myId = user.id;
+      _recordDiagnostic('Sessão autenticada para $_myId.');
 
       // Estado real §1/§16: se a live já terminou no backend, não conecta e
       // mostra "Esta Live terminou" (nunca uma sala simulada).
@@ -146,8 +186,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       }
 
       if (widget.role == LiveRole.viewer && _live.ageRestricted) {
-        final allowed = await SecurityService.instance
-            .liveViewAllowed(_liveId);
+        final allowed = await SecurityService.instance.liveViewAllowed(_liveId);
         if (!mounted) return;
         if (!allowed) {
           await _showAgeGate();
@@ -156,30 +195,93 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       }
 
       try {
-        _following = await ContentService.instance.isFollowing(_live.streamerId);
+        _following = await ContentService.instance.isFollowing(
+          _live.streamerId,
+        );
         if (mounted) setState(() {});
       } catch (_) {}
 
       try {
         _wallet = await GiftService.instance.fetchWallet();
-      } catch (_) {}
+        _walletLoaded = true;
+        _walletError = null;
+        _recordDiagnostic('Carteira carregada: $_wallet créditos.');
+      } catch (error) {
+        _walletError = 'Falha ao ler o saldo real.';
+        _recordDiagnostic('Carteira indisponível: ${error.runtimeType}');
+      }
 
       await _db.recordParticipant(
         _liveId,
         isStreamer: widget.role == LiveRole.streamer,
       );
 
-      _channels.add(_db.subscribeToChat(_liveId, _onChatInserted));
-      _channels.add(_db.subscribeToLiveEvents(_liveId, _onRoomEvent));
-      _channels
-          .add(_db.subscribeToBroadcast(_liveId, 'gift', _onGiftBroadcast));
       _channels.add(
-          _db.subscribeToBroadcast(_liveId, 'chat:delete', _onChatDelete));
+        _db.subscribeToChat(
+          _liveId,
+          _onChatInserted,
+          onStatus: (status, error) => _onRealtimeStatus('chat', status, error),
+        ),
+      );
       _channels.add(
-          _db.subscribeToBroadcast(_liveId, 'chat:edit', _onChatEdit));
-      _channels.add(_db.subscribeToBroadcast(_liveId, 'chat:ban', _onChatBan));
-      _channels.add(_db.subscribeToBroadcast(_liveId, 'chat:mute', _onChatMute));
-      _channels.add(_db.subscribeToLiveChanges(_liveId, _onLiveRowChanged));
+        _db.subscribeToLiveEvents(
+          _liveId,
+          _onRoomEvent,
+          onStatus: (status, error) =>
+              _onRealtimeStatus('events', status, error),
+        ),
+      );
+      _channels.add(
+        _db.subscribeToBroadcast(
+          _liveId,
+          'gift',
+          _onGiftBroadcast,
+          onStatus: (status, error) => _onRealtimeStatus('gift', status, error),
+        ),
+      );
+      _channels.add(
+        _db.subscribeToBroadcast(
+          _liveId,
+          'chat:delete',
+          _onChatDelete,
+          onStatus: (status, error) =>
+              _onRealtimeStatus('chat:delete', status, error),
+        ),
+      );
+      _channels.add(
+        _db.subscribeToBroadcast(
+          _liveId,
+          'chat:edit',
+          _onChatEdit,
+          onStatus: (status, error) =>
+              _onRealtimeStatus('chat:edit', status, error),
+        ),
+      );
+      _channels.add(
+        _db.subscribeToBroadcast(
+          _liveId,
+          'chat:ban',
+          _onChatBan,
+          onStatus: (status, error) =>
+              _onRealtimeStatus('chat:ban', status, error),
+        ),
+      );
+      _channels.add(
+        _db.subscribeToBroadcast(
+          _liveId,
+          'chat:mute',
+          _onChatMute,
+          onStatus: (status, error) =>
+              _onRealtimeStatus('chat:mute', status, error),
+        ),
+      );
+      _channels.add(
+        _db.subscribeToLiveChanges(
+          _liveId,
+          _onLiveRowChanged,
+          onStatus: (status, error) => _onRealtimeStatus('live', status, error),
+        ),
+      );
       _subscribeReactions();
 
       if (widget.role != LiveRole.viewer ||
@@ -201,8 +303,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       _applyChatFilters();
 
       try {
-        final reactions =
-            await LivePremiumService.instance.fetchRoomReactions(_liveId);
+        final reactions = await LivePremiumService.instance.fetchRoomReactions(
+          _liveId,
+        );
         if (mounted) setState(() => _reactions.addAll(reactions));
       } catch (_) {}
 
@@ -215,10 +318,299 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       // removeListener antes evita duplicidade num eventual retry (§16).
       _lk.reconnecting.removeListener(_onReconnectingChanged);
       _lk.reconnecting.addListener(_onReconnectingChanged);
-    } catch (e) {
+      _lk.lastError.removeListener(_onLiveKitError);
+      _lk.lastError.addListener(_onLiveKitError);
+      _recordDiagnostic(
+        'Sala conectada: $_roomName (${_lk.connectionState?.toString().split('.').last ?? 'connected'}).',
+      );
+    } catch (error) {
+      _recordDiagnostic('Falha ao entrar na Live: ${error.runtimeType}');
       if (!mounted) return;
-      setState(() => _error = '$e');
+      setState(() {
+        _connected = false;
+        _error = 'Não foi possível entrar na Live. Tente novamente.';
+      });
     }
+  }
+
+  void _recordDiagnostic(String message) {
+    if (!kDebugMode) return;
+    final stamp = DateTime.now().toIso8601String().substring(11, 19);
+    final entry = '$stamp $message';
+    _diagnosticEvents.add(entry);
+    if (_diagnosticEvents.length > 40) {
+      _diagnosticEvents.removeRange(0, _diagnosticEvents.length - 40);
+    }
+    debugPrint('[KLayK][Live] $entry');
+  }
+
+  void _onRealtimeStatus(
+    String name,
+    RealtimeSubscribeStatus status,
+    Object? error,
+  ) {
+    if (!kDebugMode) return;
+    final subscribed = status == RealtimeSubscribeStatus.subscribed;
+    if (subscribed) {
+      _subscribedRealtimeChannels++;
+      if (name == 'chat') _chatRealtimeReady = true;
+      if (name == 'events' || name == 'live') _liveRealtimeReady = true;
+      _realtimeError = null;
+      _recordDiagnostic('Realtime $name: subscribed');
+    } else {
+      if (name == 'chat') _chatRealtimeReady = false;
+      if (name == 'events' || name == 'live') _liveRealtimeReady = false;
+      _realtimeError = error == null
+          ? '$name: ${status.toString().split('.').last}'
+          : '$name: ${error.runtimeType}';
+      _recordDiagnostic('Realtime $name: ${_realtimeError!}');
+    }
+    if (mounted) setState(() {});
+  }
+
+  List<LiveDiagnosticItem> _diagnosticItems() {
+    final connectionState =
+        _lk.connectionState?.toString().split('.').last ?? 'sem sala';
+    final connectionStatus = _lk.isConnected
+        ? LiveDiagnosticStatus.healthy
+        : _lk.reconnecting.value
+        ? LiveDiagnosticStatus.warning
+        : LiveDiagnosticStatus.error;
+    final cameraActive = widget.role == LiveRole.streamer
+        ? _lk.cameraInUse
+        : _lk.remoteVideoPublished;
+    final micActive = widget.role == LiveRole.streamer
+        ? _lk.micInUse
+        : _lk.remoteAudioPublished;
+    final screenActive = widget.role == LiveRole.streamer
+        ? _lk.localScreenSharePublished
+        : _lk.remoteScreenSharePublished;
+    final screenAudioActive = widget.role == LiveRole.streamer
+        ? _lk.localScreenShareAudioPublished
+        : _lk.remoteScreenShareAudioPublished;
+    return [
+      LiveDiagnosticItem(
+        label: 'Conexão LiveKit',
+        value: _lk.isConnected ? 'conectado' : connectionState,
+        icon: _lk.isConnected
+            ? Icons.cloud_done_rounded
+            : Icons.cloud_off_rounded,
+        status: connectionStatus,
+      ),
+      LiveDiagnosticItem(
+        label: 'Câmera / vídeo',
+        value: cameraActive ? 'publicada e ativa' : 'sem publicação',
+        icon: cameraActive
+            ? Icons.videocam_rounded
+            : Icons.videocam_off_rounded,
+        status: cameraActive
+            ? LiveDiagnosticStatus.healthy
+            : LiveDiagnosticStatus.warning,
+      ),
+      LiveDiagnosticItem(
+        label: 'Microfone / áudio',
+        value: micActive ? 'publicado e ativo' : 'sem publicação',
+        icon: micActive ? Icons.mic_rounded : Icons.mic_off_rounded,
+        status: micActive
+            ? LiveDiagnosticStatus.healthy
+            : LiveDiagnosticStatus.warning,
+      ),
+      LiveDiagnosticItem(
+        label: 'Tela / áudio do jogo',
+        value: screenActive
+            ? 'vídeo${screenAudioActive ? ' + áudio' : ' sem áudio'}'
+            : 'sem captura',
+        icon: screenActive
+            ? Icons.screen_share_rounded
+            : Icons.screen_share_outlined,
+        status: screenActive
+            ? LiveDiagnosticStatus.healthy
+            : LiveDiagnosticStatus.info,
+      ),
+      LiveDiagnosticItem(
+        label: 'Chat Realtime',
+        value: _chatRealtimeReady
+            ? 'inscrito'
+            : (_realtimeError ?? 'aguardando'),
+        icon: _chatRealtimeReady ? Icons.forum_rounded : Icons.forum_outlined,
+        status: _chatRealtimeReady
+            ? LiveDiagnosticStatus.healthy
+            : LiveDiagnosticStatus.warning,
+      ),
+      LiveDiagnosticItem(
+        label: 'Eventos da sala',
+        value: _liveRealtimeReady
+            ? '$_subscribedRealtimeChannels canais inscritos'
+            : 'aguardando inscrição',
+        icon: Icons.bolt_rounded,
+        status: _liveRealtimeReady
+            ? LiveDiagnosticStatus.healthy
+            : LiveDiagnosticStatus.warning,
+      ),
+      LiveDiagnosticItem(
+        label: 'Espectadores',
+        value: '$_viewerCount conectado${_viewerCount == 1 ? '' : 's'}',
+        icon: Icons.people_rounded,
+        status: _lk.isConnected
+            ? LiveDiagnosticStatus.healthy
+            : LiveDiagnosticStatus.warning,
+      ),
+      LiveDiagnosticItem(
+        label: 'Carteira de créditos',
+        value: _walletLoaded
+            ? '$_wallet créditos'
+            : (_walletError ?? 'carregando'),
+        icon: Icons.account_balance_wallet_rounded,
+        status: _walletLoaded
+            ? LiveDiagnosticStatus.healthy
+            : LiveDiagnosticStatus.error,
+      ),
+      LiveDiagnosticItem(
+        label: 'Presentes',
+        value: widget.role == LiveRole.streamer
+            ? 'criador não pode enviar para si mesmo'
+            : 'envio validado pelo backend',
+        icon: Icons.card_giftcard_rounded,
+        status: LiveDiagnosticStatus.info,
+      ),
+    ];
+  }
+
+  Future<void> _probeConnection() async {
+    if (!_lk.isConnected) {
+      throw StateError(
+        _lk.reconnecting.value
+            ? 'LiveKit ainda está reconectando.'
+            : 'LiveKit não está conectado.',
+      );
+    }
+    _recordDiagnostic(
+      'Probe conexão: ${_lk.guests.length} participantes remotos.',
+    );
+  }
+
+  Future<void> _probeCamera() async {
+    final active = widget.role == LiveRole.streamer
+        ? _lk.cameraInUse
+        : _lk.remoteVideoPublished;
+    if (!active) throw StateError('Nenhuma publicação de vídeo ativa.');
+    _recordDiagnostic('Probe câmera: publicação de vídeo confirmada.');
+  }
+
+  Future<void> _probeMicrophone() async {
+    final active = widget.role == LiveRole.streamer
+        ? _lk.micInUse
+        : _lk.remoteAudioPublished;
+    if (!active) throw StateError('Nenhuma publicação de áudio ativa.');
+    _recordDiagnostic('Probe microfone: publicação de áudio confirmada.');
+  }
+
+  Future<void> _probeScreen() async {
+    final active = widget.role == LiveRole.streamer
+        ? _lk.localScreenSharePublished
+        : _lk.remoteScreenSharePublished;
+    if (!active) throw StateError('Nenhuma publicação de tela ativa.');
+    final audio = widget.role == LiveRole.streamer
+        ? _lk.localScreenShareAudioPublished
+        : _lk.remoteScreenShareAudioPublished;
+    _recordDiagnostic(
+      'Probe tela: captura confirmada; áudio ${audio ? 'ativo' : 'inativo'}.',
+    );
+  }
+
+  Future<void> _probeChat() async {
+    final messages = await _db.loadRecentChat(_liveId);
+    _recordDiagnostic('Probe chat: ${messages.length} mensagens carregadas.');
+  }
+
+  Future<void> _probeRealtime() async {
+    if (!_chatRealtimeReady || !_liveRealtimeReady) {
+      throw StateError(_realtimeError ?? 'Realtime ainda não inscrito.');
+    }
+    _recordDiagnostic('Probe Realtime: chat e eventos inscritos.');
+  }
+
+  Future<void> _probeGifts() async {
+    final gifts = await GiftService.instance.fetchGifts(pageSize: 1);
+    if (gifts.isEmpty) throw StateError('Catálogo de presentes vazio.');
+    _recordDiagnostic(
+      'Probe presentes: catálogo respondeu com ${gifts.length}.',
+    );
+  }
+
+  Future<void> _probeWallet() async {
+    final balance = await GiftService.instance.fetchWallet();
+    if (!mounted) return;
+    setState(() {
+      _wallet = balance;
+      _walletLoaded = true;
+      _walletError = null;
+    });
+    _recordDiagnostic('Probe carteira: saldo real $balance.');
+  }
+
+  Future<void> _openDiagnostics() async {
+    if (!kDebugMode || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.78),
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        backgroundColor: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 560,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+          ),
+          child: LiveDiagnosticsPanel(
+            snapshotBuilder: _diagnosticItems,
+            recentEvents: _diagnosticEvents,
+            quickTests: [
+              LiveDiagnosticQuickTest(
+                label: 'Conexão',
+                icon: Icons.cloud_sync_rounded,
+                callback: _probeConnection,
+              ),
+              LiveDiagnosticQuickTest(
+                label: 'Câmera',
+                icon: Icons.videocam_rounded,
+                callback: _probeCamera,
+              ),
+              LiveDiagnosticQuickTest(
+                label: 'Microfone',
+                icon: Icons.mic_rounded,
+                callback: _probeMicrophone,
+              ),
+              LiveDiagnosticQuickTest(
+                label: 'Tela',
+                icon: Icons.screen_share_rounded,
+                callback: _probeScreen,
+              ),
+              LiveDiagnosticQuickTest(
+                label: 'Chat',
+                icon: Icons.forum_rounded,
+                callback: _probeChat,
+              ),
+              LiveDiagnosticQuickTest(
+                label: 'Realtime',
+                icon: Icons.bolt_rounded,
+                callback: _probeRealtime,
+              ),
+              LiveDiagnosticQuickTest(
+                label: 'Presentes',
+                icon: Icons.card_giftcard_rounded,
+                callback: _probeGifts,
+              ),
+              LiveDiagnosticQuickTest(
+                label: 'Carteira',
+                icon: Icons.account_balance_wallet_rounded,
+                callback: _probeWallet,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// Estado "Esta Live terminou" — sem conexão, sem tela estática: informa e
@@ -230,8 +622,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C26),
-        title: const Text('Esta Live terminou',
-            style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Esta Live terminou',
+          style: TextStyle(color: Colors.white),
+        ),
         content: const Text(
           'A transmissão encerrou e não está mais disponível.',
           style: TextStyle(color: Colors.white70),
@@ -259,8 +653,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1B1A26),
         icon: const Icon(Icons.lock_rounded, color: Colors.orange, size: 40),
-        title: const Text('Live para maiores de 18',
-            style: TextStyle(color: Colors.white, fontSize: 18)),
+        title: const Text(
+          'Live para maiores de 18',
+          style: TextStyle(color: Colors.white, fontSize: 18),
+        ),
         content: const Text(
           'Esta live é restrita. O backend exige idade provada de 18+ (data '
           'de nascimento cadastrada) — consentimento não substitui a '
@@ -272,8 +668,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Entendi',
-                style: TextStyle(color: _kAccent, fontWeight: FontWeight.w700)),
+            child: const Text(
+              'Entendi',
+              style: TextStyle(color: _kAccent, fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -284,28 +682,36 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
 
   Future<void> _connectLiveKit() async {
     if (widget.role == LiveRole.streamer) {
-      await _lk.startLive(roomName: _roomName);
+      await _lk.startLive(roomName: _roomName, liveId: _liveId);
       if (!mounted) return;
       setState(() {
-        _connected = true;
-        _camOn = true;
-        _micOn = true;
+        _connected = _lk.isConnected;
+        _camOn = _lk.cameraInUse;
+        _micOn = _lk.micInUse;
         // DURANTE: câmera e áudio já publicados; a fase de jogo entra no
         // estado "live" assim que a captura de tela for iniciada.
         if (!widget.isGameLive) _phase = LivePhase.live;
       });
+      _recordDiagnostic(
+        'Transmissão iniciada. Câmera=${_lk.cameraInUse}, mic=${_lk.micInUse}.',
+      );
       // Live de Jogo: sobe a bolinha flutuante e solicita a captura de tela.
       if (widget.isGameLive) {
         unawaited(_startGameLive());
       }
     } else {
-      await _lk.connectToLive(roomName: _roomName, isStreamer: false);
+      await _lk.connectToLive(
+        roomName: _roomName,
+        isStreamer: false,
+        liveId: _liveId,
+      );
       if (!mounted) return;
       setState(() {
-        _connected = true;
+        _connected = _lk.isConnected;
         _phase = LivePhase.live;
       });
       _wireRoomEvents();
+      _recordDiagnostic('Entrada como espectador concluída.');
     }
   }
 
@@ -330,7 +736,23 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   /// `ConnectionState` fica `reconnecting`, o overlay "Reconectando..." é
   /// exibido; ao voltar, some e o vídeo retorna sozinho.
   void _onReconnectingChanged() {
+    _recordDiagnostic(
+      _lk.reconnecting.value
+          ? 'LiveKit reconectando automaticamente.'
+          : 'LiveKit saiu do estado de reconexão.',
+    );
     if (mounted) setState(() {});
+  }
+
+  void _onLiveKitError() {
+    final message = _lk.lastError.value;
+    if (message == null || message.isEmpty) return;
+    _recordDiagnostic('LiveKit erro: $message');
+    if (!mounted) return;
+    setState(() {
+      _connected = _lk.isConnected;
+      if (!_lk.reconnecting.value) _error = message;
+    });
   }
 
   void _onChatInserted(LiveChatMessage msg) {
@@ -358,7 +780,8 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
               column: 'live_id',
               value: _liveId,
             ),
-            callback: (payload) => _onReactionChanged(payload.newRecord, added: true),
+            callback: (payload) =>
+                _onReactionChanged(payload.newRecord, added: true),
           )
           .onPostgresChanges(
             event: PostgresChangeEvent.delete,
@@ -414,8 +837,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       });
     }
     try {
-      final res =
-          await LivePremiumService.instance.toggleReaction(msg.id, emoji);
+      final res = await LivePremiumService.instance.toggleReaction(
+        msg.id,
+        emoji,
+      );
       final removed = res['removed'] == true;
       final total = (res['total'] as num?)?.toInt();
       if (!mounted) return;
@@ -450,8 +875,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
 
   void _refreshTopSupporters() async {
     try {
-      final top =
-          await LivePremiumService.instance.fetchTopSupporters(liveId: _liveId, limit: 5);
+      final top = await LivePremiumService.instance.fetchTopSupporters(
+        liveId: _liveId,
+        limit: 5,
+      );
       if (!mounted) return;
       setState(() => _topSupporters = top);
     } catch (_) {}
@@ -476,9 +903,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (ctx) => SafeArea(
-        child: _TopSupportersSheet(liveId: _liveId),
-      ),
+      builder: (ctx) => SafeArea(child: _TopSupportersSheet(liveId: _liveId)),
     );
   }
 
@@ -553,48 +978,56 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     final who = event.username ?? '';
     switch (event.type) {
       case 'GIFT_RECEIVED':
-        final giftName =
-            event.metadata['gift_name']?.toString() ?? 'presente';
-        final giftAmount =
-            event.metadata['gift_amount'] as num? ?? 0;
-        _showRoomAlert(_RoomAlert(
-          title: 'Presente na live!',
-          subtitle: '$who enviou $giftName x$giftAmount',
-          icon: Icons.card_giftcard_rounded,
-          color: const Color(0xFFFFD700),
-        ));
+        final giftName = event.metadata['gift_name']?.toString() ?? 'presente';
+        final giftAmount = event.metadata['gift_amount'] as num? ?? 0;
+        _showRoomAlert(
+          _RoomAlert(
+            title: 'Presente na live!',
+            subtitle: '$who enviou $giftName x$giftAmount',
+            icon: Icons.card_giftcard_rounded,
+            color: const Color(0xFFFFD700),
+          ),
+        );
         return;
       case 'FOLLOW':
-        _showRoomAlert(_RoomAlert(
-          title: 'Novo seguidor',
-          subtitle: '$who começou a seguir',
-          icon: Icons.favorite_rounded,
-          color: const Color(0xFFFF2E4D),
-        ));
+        _showRoomAlert(
+          _RoomAlert(
+            title: 'Novo seguidor',
+            subtitle: '$who começou a seguir',
+            icon: Icons.favorite_rounded,
+            color: const Color(0xFFFF2E4D),
+          ),
+        );
         return;
       case 'USER_JOINED':
-        _showRoomAlert(_RoomAlert(
-          title: 'Entrou na live',
-          subtitle: '$who está assistindo',
-          icon: Icons.person_add_alt_1_rounded,
-          color: const Color(0xFF8B5CF6),
-        ));
+        _showRoomAlert(
+          _RoomAlert(
+            title: 'Entrou na live',
+            subtitle: '$who está assistindo',
+            icon: Icons.person_add_alt_1_rounded,
+            color: const Color(0xFF8B5CF6),
+          ),
+        );
         return;
       case 'SHARE':
-        _showRoomAlert(_RoomAlert(
-          title: 'Compartilhou',
-          subtitle: '$who compartilhou a live',
-          icon: Icons.share_rounded,
-          color: const Color(0xFF00E5FF),
-        ));
+        _showRoomAlert(
+          _RoomAlert(
+            title: 'Compartilhou',
+            subtitle: '$who compartilhou a live',
+            icon: Icons.share_rounded,
+            color: const Color(0xFF00E5FF),
+          ),
+        );
         return;
       case 'LIKE':
-        _showRoomAlert(_RoomAlert(
-          title: 'Nova curtida',
-          subtitle: '$who curtiu a transmissão',
-          icon: Icons.thumb_up_rounded,
-          color: const Color(0xFFFFFFFF),
-        ));
+        _showRoomAlert(
+          _RoomAlert(
+            title: 'Nova curtida',
+            subtitle: '$who curtiu a transmissão',
+            icon: Icons.thumb_up_rounded,
+            color: const Color(0xFFFFFFFF),
+          ),
+        );
         return;
       default:
         return;
@@ -603,7 +1036,13 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
 
   void _onLiveRowChanged(Map<String, dynamic> record) {
     final status = record['status'] as String?;
-    if (status == 'ended') _markEnded();
+    final count = (record['viewer_count'] as num?)?.toInt();
+    if (status == 'ended') {
+      _markEnded();
+      return;
+    }
+    if (count == null) return;
+    if (mounted) setState(() => _live = _live.copyWith(viewerCount: count));
   }
 
   void _markEnded() {
@@ -616,10 +1055,14 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C26),
-        title: const Text('Ao vivo encerrado',
-            style: TextStyle(color: Colors.white)),
-        content: const Text('Essa transmissão terminou.',
-            style: TextStyle(color: Colors.white70)),
+        title: const Text(
+          'Ao vivo encerrado',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Essa transmissão terminou.',
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () {
@@ -636,7 +1079,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   void _applyChatFilters() {
     setState(() {
       _messages.removeWhere(
-          (m) => _blockedUsers.contains(m.userId) || _mutedUsers.contains(m.userId));
+        (m) =>
+            _blockedUsers.contains(m.userId) || _mutedUsers.contains(m.userId),
+      );
     });
   }
 
@@ -672,9 +1117,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       }
     } on LiveChatSendException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_friendlyChatError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_friendlyChatError(e))));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -720,31 +1165,66 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _sheetTile(Icons.flag_rounded, 'Denunciar mensagem',
-                _ModerationAction.report, const Color(0xFFFFA53D)),
-            _sheetTile(Icons.block_rounded, 'Bloquear usuário',
-                _ModerationAction.block, Colors.white),
-            _sheetTile(Icons.volume_off_rounded, 'Silenciar usuário',
-                _ModerationAction.silence, Colors.white),
+            _sheetTile(
+              Icons.flag_rounded,
+              'Denunciar mensagem',
+              _ModerationAction.report,
+              const Color(0xFFFFA53D),
+            ),
+            _sheetTile(
+              Icons.block_rounded,
+              'Bloquear usuário',
+              _ModerationAction.block,
+              Colors.white,
+            ),
+            _sheetTile(
+              Icons.volume_off_rounded,
+              'Silenciar usuário',
+              _ModerationAction.silence,
+              Colors.white,
+            ),
             if (isMine) ...[
-              _sheetTile(Icons.copy_rounded, 'Copiar mensagem',
-                  _ModerationAction.copy, Colors.white),
-              _sheetTile(Icons.edit_rounded, 'Editar mensagem',
-                  _ModerationAction.edit, const Color(0xFF8B5CF6)),
+              _sheetTile(
+                Icons.copy_rounded,
+                'Copiar mensagem',
+                _ModerationAction.copy,
+                Colors.white,
+              ),
+              _sheetTile(
+                Icons.edit_rounded,
+                'Editar mensagem',
+                _ModerationAction.edit,
+                const Color(0xFF8B5CF6),
+              ),
             ],
             if (canDelete && msg.userId != _myId) ...[
-              _sheetTile(Icons.remove_circle_rounded, 'Banir da live',
-                  _ModerationAction.banLive, _kLiveRed),
-              _sheetTile(Icons.hearing_disabled_rounded, 'Silenciar na live',
-                  _ModerationAction.muteLive, _kLiveRed),
+              _sheetTile(
+                Icons.remove_circle_rounded,
+                'Banir da live',
+                _ModerationAction.banLive,
+                _kLiveRed,
+              ),
+              _sheetTile(
+                Icons.hearing_disabled_rounded,
+                'Silenciar na live',
+                _ModerationAction.muteLive,
+                _kLiveRed,
+              ),
             ],
             if (canDelete)
-              _sheetTile(Icons.delete_rounded, 'Apagar mensagem',
-                  _ModerationAction.delete, _kLiveRed),
+              _sheetTile(
+                Icons.delete_rounded,
+                'Apagar mensagem',
+                _ModerationAction.delete,
+                _kLiveRed,
+              ),
             if (_isModerator)
-              _sheetTile(Icons.record_voice_over_rounded,
-                  'Ler comentário em voz alta',
-                  _ModerationAction.readOutLoud, const Color(0xFF38BDF8)),
+              _sheetTile(
+                Icons.record_voice_over_rounded,
+                'Ler comentário em voz alta',
+                _ModerationAction.readOutLoud,
+                const Color(0xFF38BDF8),
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -801,15 +1281,17 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         break;
       case _ModerationAction.banLive:
         if (msg.userId != null) {
-          await SocialService.instance.liveModBan(_liveId, msg.userId!,
-              reason: 'Banido da live');
+          await SocialService.instance.liveModBan(
+            _liveId,
+            msg.userId!,
+            reason: 'Banido da live',
+          );
           await SocialService.instance.logModerationAction(
             liveId: _liveId,
             action: 'live_ban',
             reason: 'Banido da live',
           );
-          await _db.sendBroadcast(
-              _liveId, 'chat:ban', {'user_id': msg.userId});
+          await _db.sendBroadcast(_liveId, 'chat:ban', {'user_id': msg.userId});
           setState(() {
             _blockedUsers.add(msg.userId!);
             _mutedUsers.remove(msg.userId!);
@@ -823,15 +1305,20 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         break;
       case _ModerationAction.muteLive:
         if (msg.userId != null) {
-          await SocialService.instance.liveModMute(_liveId, msg.userId!,
-              minutes: 10, reason: 'Silenciado na live');
+          await SocialService.instance.liveModMute(
+            _liveId,
+            msg.userId!,
+            minutes: 10,
+            reason: 'Silenciado na live',
+          );
           await SocialService.instance.logModerationAction(
             liveId: _liveId,
             action: 'live_mute',
             reason: 'Silenciado na live por 10 min',
           );
-          await _db.sendBroadcast(
-              _liveId, 'chat:mute', {'user_id': msg.userId});
+          await _db.sendBroadcast(_liveId, 'chat:mute', {
+            'user_id': msg.userId,
+          });
           setState(() => _mutedUsers.add(msg.userId!));
           _applyChatFilters();
         }
@@ -842,8 +1329,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         break;
       case _ModerationAction.delete:
         await _db.deleteChatMessage(msg.id);
-        await _db.sendBroadcast(
-            _liveId, 'chat:delete', {'message_id': msg.id});
+        await _db.sendBroadcast(_liveId, 'chat:delete', {'message_id': msg.id});
         if (mounted) {
           setState(() => _messages.removeWhere((m) => m.id == msg.id));
         }
@@ -868,7 +1354,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     await tts.init();
     await tts.applySettings(speed: 0.5, volume: 1.0);
     LiveBotSpeechQueue.shared().selectComment(
-        msg.senderDisplayName ?? msg.senderUsername ?? 'Alguém', msg.message);
+      msg.senderDisplayName ?? msg.senderUsername ?? 'Alguém',
+      msg.message,
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Comentário lido em voz alta.')),
@@ -879,9 +1367,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     if (text.isEmpty || !mounted) return;
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Mensagem copiada.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Mensagem copiada.')));
   }
 
   Future<void> _startEditingChat(LiveChatMessage msg) async {
@@ -918,7 +1406,8 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     if (!applied) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Edição indisponível no momento. Tente mais tarde.')),
+          content: Text('Edição indisponível no momento. Tente mais tarde.'),
+        ),
       );
       return;
     }
@@ -944,8 +1433,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       _editingMessageId = null;
       _chatController.clear();
     });
-    await _db.sendBroadcast(
-        _liveId, 'chat:edit', {'message_id': id, 'message': text});
+    await _db.sendBroadcast(_liveId, 'chat:edit', {
+      'message_id': id,
+      'message': text,
+    });
     _chatFocus.unfocus();
   }
 
@@ -963,8 +1454,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
           children: [
             Icon(icon, color: color),
             const SizedBox(width: 14),
-            Text(label,
-                style: const TextStyle(color: Colors.white, fontSize: 15)),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
           ],
         ),
       ),
@@ -972,6 +1465,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   }
 
   Future<void> _openGiftPicker() async {
+    if (widget.role == LiveRole.streamer || _myId == _live.streamerId) {
+      _snack('Você não pode enviar um presente para si mesmo nesta Live.');
+      return;
+    }
     final gift = await showModalBottomSheet<Gift>(
       context: context,
       isScrollControlled: true,
@@ -1009,25 +1506,34 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('${gift.icon} ${gift.name}',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16)),
+              Text(
+                '${gift.icon} ${gift.name}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
               const SizedBox(height: 4),
-              Text('${gift.credits} créditos cada',
-                  style: const TextStyle(color: Color(0xFFFFD700), fontSize: 12)),
+              Text(
+                '${gift.credits} créditos cada',
+                style: const TextStyle(color: Color(0xFFFFD700), fontSize: 12),
+              ),
               const SizedBox(height: 6),
-              Text('Saldo: $_wallet',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                'Saldo: $_wallet',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 10,
                 children: [1, 5, 10, 66, 99].map((n) {
                   final ok = n * gift.credits <= _wallet;
                   return ChoiceChip(
-                    label: Text('x$n',
-                        style: const TextStyle(color: Colors.white)),
+                    label: Text(
+                      'x$n',
+                      style: const TextStyle(color: Colors.white),
+                    ),
                     selected: false,
                     backgroundColor: const Color(0xFF2A2A35),
                     selectedColor: _kAccent,
@@ -1044,10 +1550,60 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     await _sendGift(gift, amount);
   }
 
+  String _giftErrorMessage(Object error) {
+    final raw = error.toString();
+    if (raw.contains('cannot_send_to_self')) {
+      return 'Você não pode enviar um presente para si mesmo.';
+    }
+    if (raw.contains('insufficient_credits')) {
+      return 'Saldo insuficiente para este presente.';
+    }
+    if (raw.contains('live_not_active') || raw.contains('live_not_found')) {
+      return 'Esta Live não está mais ativa.';
+    }
+    if (raw.contains('receiver_not_streamer') ||
+        raw.contains('receiver_id_required')) {
+      return 'O criador desta Live não está mais disponível.';
+    }
+    if (raw.contains('gift_unavailable') || raw.contains('gift_not_found')) {
+      return 'Este presente não está mais disponível.';
+    }
+    if (raw.contains('creator_earnings_failed')) {
+      return 'O presente não foi concluído. Nenhum crédito foi descontado.';
+    }
+    if (raw.contains('duplicate_in_progress') || raw.contains('409')) {
+      return 'Este presente já está sendo processado. Tente novamente em instantes.';
+    }
+    if (raw.contains('401') || raw.contains('unauthorized')) {
+      return 'Faça login novamente para enviar o presente.';
+    }
+    return 'Não foi possível enviar o presente. Tente novamente.';
+  }
+
+  bool _retryGiftWithSameRequest(Object error) {
+    final raw = error.toString();
+    return !raw.contains('cannot_send_to_self') &&
+        !raw.contains('insufficient_credits') &&
+        !raw.contains('live_not_active') &&
+        !raw.contains('live_not_found') &&
+        !raw.contains('receiver_not_streamer') &&
+        !raw.contains('gift_unavailable') &&
+        !raw.contains('gift_not_found') &&
+        !raw.contains('creator_earnings_failed');
+  }
+
   Future<void> _sendGift(Gift gift, int amount) async {
-    // Idempotência: id único por tentativa; se a rede falhar, o usuário pode
-    // reenviar o MESMO id (o backend reaproveita e não debita em dobro).
-    final requestId = '${_myId ?? 'anon'}-${DateTime.now().microsecondsSinceEpoch}';
+    if (widget.role == LiveRole.streamer || _myId == _live.streamerId) {
+      _snack('Você não pode enviar um presente para si mesmo nesta Live.');
+      return;
+    }
+    final fingerprint = '${gift.id}:$amount';
+    if (_pendingGiftFingerprint != fingerprint) {
+      _pendingGiftFingerprint = fingerprint;
+      _pendingGiftRequestId = null;
+    }
+    final requestId = _pendingGiftRequestId ??=
+        '${_myId ?? 'anon'}-${DateTime.now().microsecondsSinceEpoch}';
     try {
       final result = await GiftService.instance.sendGift(
         gift: gift,
@@ -1056,41 +1612,55 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         receiverId: _live.streamerId,
         requestId: requestId,
       );
+      _pendingGiftRequestId = null;
+      _pendingGiftFingerprint = null;
       if (!mounted) return;
       if (result.transactionId != null) _lastGiftTxId = result.transactionId;
       setState(() {
         _wallet = result.balance;
+        _walletLoaded = true;
+        _walletError = null;
         _activeGiftAnim = gift;
         _activeGiftSender = kAppIdentity.displayName;
         _activeGiftAmount = amount;
       });
+      _recordDiagnostic(
+        'Presente ${gift.id} x$amount confirmado (${result.creditsSpent} créditos).',
+      );
       if (!result.duplicate) {
-        await _db.sendBroadcast(_liveId, 'gift', {
-          'tx_id': result.transactionId ?? '',
-          'id': gift.id,
-          'name': gift.name,
-          'icon': gift.icon,
-          'glyph': gift.glyph,
-          'animation_key': gift.animationKey,
-          'effects': gift.effects,
-          'is_exclusive': gift.isExclusive,
-          'gift_amount': amount,
-          'sender': kAppIdentity.displayName,
-          'sender_id': _myId,
-        });
+        try {
+          await _db.sendBroadcast(_liveId, 'gift', {
+            'tx_id': result.transactionId ?? '',
+            'id': gift.id,
+            'name': gift.name,
+            'icon': gift.icon,
+            'glyph': gift.glyph,
+            'animation_key': gift.animationKey,
+            'effects': gift.effects,
+            'is_exclusive': gift.isExclusive,
+            'gift_amount': amount,
+            'sender': kAppIdentity.displayName,
+            'sender_id': _myId,
+          });
+        } catch (error) {
+          _recordDiagnostic(
+            'Presente confirmado, mas broadcast falhou: ${error.runtimeType}',
+          );
+        }
         _refreshTopSupporters();
       }
     } on GiftDuplicateInProgressException {
+      _recordDiagnostic('Presente em processamento; mantendo idempotência.');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Presente já em processamento. Aguarde e tente de novo.')),
-      );
-    } catch (e) {
+      _snack('Presente já em processamento. Aguarde e tente de novo.');
+    } catch (error) {
+      if (!_retryGiftWithSameRequest(error)) {
+        _pendingGiftRequestId = null;
+        _pendingGiftFingerprint = null;
+      }
+      _recordDiagnostic('Falha ao enviar presente: ${error.runtimeType}');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      _snack(_giftErrorMessage(error));
     }
   }
 
@@ -1113,9 +1683,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     } catch (e) {
       setState(() => _following = wasFollowing);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
       return;
     }
     if (!mounted) return;
@@ -1149,21 +1719,23 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   Future<void> _toggleCamera() async {
     if (_camOn) {
       await _lk.stopCamera();
-      setState(() => _camOn = false);
     } else {
       await _lk.publishCamera();
-      setState(() => _camOn = true);
     }
+    if (!mounted) return;
+    setState(() => _camOn = _lk.cameraInUse);
+    _recordDiagnostic('Câmera alternada: $_camOn.');
   }
 
   Future<void> _toggleMicrophone() async {
     if (_micOn) {
       await _lk.stopMicrophone();
-      setState(() => _micOn = false);
     } else {
       await _lk.publishMicrophone();
-      setState(() => _micOn = true);
     }
+    if (!mounted) return;
+    setState(() => _micOn = _lk.micInUse);
+    _recordDiagnostic('Microfone alternado: $_micOn.');
   }
 
   Future<void> _toggleScreenShare() async {
@@ -1174,25 +1746,29 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       } else {
         await _lk.stopScreenShare();
       }
-      setState(() => _shareOn = next);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 2),
-            content: Text(
-              next
-                  ? 'Compartilhando sua tela. Escolha a aba/janela e toque em iniciar.'
-                  : 'Compartilhamento de tela desativado.',
-            ),
+      if (!mounted) return;
+      setState(() => _shareOn = _lk.localScreenSharePublished);
+      _recordDiagnostic(
+        'Compartilhamento de tela: $_shareOn (áudio ${_lk.localScreenShareAudioPublished}).',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text(
+            _shareOn
+                ? 'Compartilhando sua tela. Escolha a aba/janela e toque em iniciar.'
+                : 'Compartilhamento de tela desativado.',
           ),
-        );
-      }
-    } catch (_) {
+        ),
+      );
+    } catch (error) {
+      _recordDiagnostic('Falha na captura de tela: ${error.runtimeType}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                'Não foi possível compartilhar a tela. Verifique a permissão.'),
+              'Não foi possível compartilhar a tela. Verifique a permissão.',
+            ),
           ),
         );
       }
@@ -1235,17 +1811,22 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       await _lk.setScreenShareEnabled(true);
       if (mounted) {
         setState(() {
-          _shareOn = true;
+          _shareOn = _lk.localScreenSharePublished;
           // DURANTE: começa oficialmente a live de jogo (captura no ar).
-          _phase = LivePhase.live;
+          if (_shareOn) _phase = LivePhase.live;
         });
+        _recordDiagnostic(
+          'Captura de tela iniciada: $_shareOn (áudio ${_lk.localScreenShareAudioPublished}).',
+        );
       }
-    } catch (_) {
+    } catch (error) {
+      _recordDiagnostic('Falha ao iniciar captura: ${error.runtimeType}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                'Não foi possível iniciar a captura de tela. Verifique a permissão.'),
+              'Não foi possível iniciar a captura de tela. Verifique a permissão.',
+            ),
           ),
         );
       }
@@ -1291,9 +1872,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   /// usuário abre o chat a partir da bolinha enquanto joga em outro app).
   Future<void> _bringAppToFront() async {
     try {
-      await const MethodChannel('klayk/live_game_overlay').invokeMethod(
-        'bringToFront',
-      );
+      await const MethodChannel(
+        'klayk/live_game_overlay',
+      ).invokeMethod('bringToFront');
     } catch (_) {}
   }
 
@@ -1304,8 +1885,12 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       } else {
         await _lk.stopMicrophone();
       }
-      setState(() => _micOn = on);
-    } catch (_) {}
+      if (!mounted) return;
+      setState(() => _micOn = _lk.micInUse);
+      _recordDiagnostic('Mic via overlay: $_micOn.');
+    } catch (error) {
+      _recordDiagnostic('Falha no mic via overlay: ${error.runtimeType}');
+    }
   }
 
   Future<void> _setPausedFromOverlay(bool paused) async {
@@ -1318,8 +1903,8 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         await _lk.stopScreenShare();
         if (mounted) {
           setState(() {
-            _micOn = false;
-            _shareOn = false;
+            _micOn = _lk.micInUse;
+            _shareOn = _lk.localScreenSharePublished;
           });
         }
       } else {
@@ -1327,12 +1912,15 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         if (widget.isGameLive) await _lk.setScreenShareEnabled(true);
         if (mounted) {
           setState(() {
-            _micOn = true;
-            _shareOn = widget.isGameLive;
+            _micOn = _lk.micInUse;
+            _shareOn = _lk.localScreenSharePublished;
           });
         }
       }
-    } catch (_) {}
+      _recordDiagnostic('Overlay pausado=$paused; estado sincronizado.');
+    } catch (error) {
+      _recordDiagnostic('Falha ao pausar/retomar: ${error.runtimeType}');
+    }
   }
 
   Future<void> _showOverlayMoreOptions() async {
@@ -1346,16 +1934,18 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Mais opções da Live de Jogo',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16)),
+              child: Text(
+                'Mais opções da Live de Jogo',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.chat_rounded, color: _kAccent),
-              title: const Text('Chat',
-                  style: TextStyle(color: Colors.white)),
+              title: const Text('Chat', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.of(ctx).pop();
                 if (mounted) setState(() => _chatOpen = true);
@@ -1363,8 +1953,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.settings_rounded, color: _kAccent),
-              title: const Text('Configurações da live',
-                  style: TextStyle(color: Colors.white)),
+              title: const Text(
+                'Configurações da live',
+                style: TextStyle(color: Colors.white),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
                 _openGameSettings();
@@ -1382,8 +1974,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C26),
-        title: const Text('Configurações da live',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        title: const Text(
+          'Configurações da live',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1394,22 +1988,31 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                 KlayLiveGameOverlay.instance.setVoiceBot(v);
               },
               activeThumbColor: _kAccent,
-              title: const Text('Bot de voz',
-                  style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Ligar/desligar assitência por voz',
-                  style: TextStyle(color: Colors.white54)),
+              title: const Text(
+                'Bot de voz',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                'Ligar/desligar assitência por voz',
+                style: TextStyle(color: Colors.white54),
+              ),
             ),
             if (_isModerator) ...[
               const Divider(color: Color(0xFF2A2540), height: 1),
               ListTile(
-                leading: const Icon(Icons.smart_toy_rounded,
-                    color: _kAccent),
-                title: const Text('KLAY K LIVE BOT',
-                    style: TextStyle(color: Colors.white)),
-                subtitle: const Text('Painel completo de voz, comentários, moderação e anúncios',
-                    style: TextStyle(color: Colors.white54)),
-                trailing: const Icon(Icons.chevron_right_rounded,
-                    color: Colors.white54),
+                leading: const Icon(Icons.smart_toy_rounded, color: _kAccent),
+                title: const Text(
+                  'KLAY K LIVE BOT',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'Painel completo de voz, comentários, moderação e anúncios',
+                  style: TextStyle(color: Colors.white54),
+                ),
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Colors.white54,
+                ),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _openLiveBotPanel();
@@ -1421,8 +2024,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Fechar',
-                style: TextStyle(color: _kAccent, fontWeight: FontWeight.w700)),
+            child: const Text(
+              'Fechar',
+              style: TextStyle(color: _kAccent, fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -1432,8 +2037,11 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   /// Abre o painel premium do KLAY K LIVE BOT (apenas criador/moderador).
   Future<void> _openLiveBotPanel() async {
     if (!mounted) return;
-    await LiveBotPanel.show(context,
-        liveId: _liveId, canModerate: _isModerator);
+    await LiveBotPanel.show(
+      context,
+      liveId: _liveId,
+      canModerate: _isModerator,
+    );
   }
 
   /// Abre o guia de permissão de overlay. Retorna `true` se o usuário escolheu
@@ -1444,10 +2052,15 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C26),
-        icon: const Icon(Icons.settings_suggest_rounded,
-            color: _kAccent, size: 36),
-        title: const Text('Permitir exibição sobre outros apps',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        icon: const Icon(
+          Icons.settings_suggest_rounded,
+          color: _kAccent,
+          size: 36,
+        ),
+        title: const Text(
+          'Permitir exibição sobre outros apps',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
         content: const Text(
           'Para mostrar a bolinha 🎮 de controles da live de jogo sobre outros '
           'aplicativos, o KLAY K precisa da permissão "Exibir sobre outros '
@@ -1457,14 +2070,18 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Agora não',
-                style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Agora não',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: _kAccent),
-            child: const Text('Abrir configurações',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+            child: const Text(
+              'Abrir configurações',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -1509,15 +2126,21 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C26),
-        title: const Text('Encerrar live',
-            style: TextStyle(color: Colors.white)),
-        content: const Text('Todos os espectadores serão desconectados.',
-            style: TextStyle(color: Colors.white70)),
+        title: const Text(
+          'Encerrar live',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Todos os espectadores serão desconectados.',
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child:
-                const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -1529,12 +2152,16 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     if (ok != true || !mounted) return;
     try {
       await _db.endLive(_liveId);
-    } catch (_) {}
+      _recordDiagnostic('Backend confirmou encerramento da Live.');
+    } catch (error) {
+      _recordDiagnostic('Falha ao encerrar no backend: ${error.runtimeType}');
+    }
     if (widget.isGameLive) {
       await _lk.stopScreenShare();
       await KlayLiveGameOverlay.instance.stop();
     }
     await _lk.disconnectFromLive();
+    await _db.recordParticipantLeft(_liveId);
     if (!mounted) return;
     // DEPOIS: entra na fase de recap (estatísticas da live encerrada). O
     // usuário fecha pela tela de recap (ou pop normal em lives não-jogo).
@@ -1553,12 +2180,13 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     _roomListener?.dispose();
     _lk.participantsCount.removeListener(_onParticipantsChanged);
     _lk.reconnecting.removeListener(_onReconnectingChanged);
+    _lk.lastError.removeListener(_onLiveKitError);
     _chatController.dispose();
     _chatFocus.dispose();
-    if (_connected) {
+    if (_myId != null) {
       unawaited(_db.recordParticipantLeft(_liveId));
-      unawaited(_lk.disconnectFromLive());
     }
+    unawaited(_lk.disconnectFromLive());
     if (widget.isGameLive) {
       KlayLiveGameOverlay.instance.stopListening();
       unawaited(KlayLiveGameOverlay.instance.stop());
@@ -1566,6 +2194,12 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     for (final c in _channels) {
       _db.removeChannel(c);
     }
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: SystemUiOverlay.values,
+      ),
+    );
     super.dispose();
   }
 
@@ -1574,11 +2208,38 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
+      // Crítico para o composer ficar embaixo. O padrão (true) faz o Scaffold
+      // encolher o body inteiro pela altura do teclado; como o composer também
+      // sobe por `bottom: viewInsets`, a compensação acontecia duas vezes e o
+      // campo "Diga algo" aparecia no meio da LIVE em vez de logo acima do
+      // teclado. Com false o body (e o vídeo) mantêm o tamanho e só o composer
+      // sobe, pela altura exata do teclado.
+      resizeToAvoidBottomInset: false,
       body: Stack(
         fit: StackFit.expand,
         children: [
           _buildVideoLayer(),
           _buildGradientScrim(),
+          // Tocar fora do composer fecha o teclado e desativa o composer.
+          //
+          // Fica ACIMA do vídeo (então tocar no vídeo fecha o composer em vez
+          // de alternar o vídeo) e ABAIXO da barra superior e dos botões
+          // laterais (então continuar/X/like/share seguem funcionando enquanto
+          // se comenta). Não é uma barreira que engole a tela.
+          if (_chatOpen)
+            Positioned.fill(
+              // O rodapé sobe com o teclado e tem altura variável, então a
+              // área de toque para fora vai do topo dele até o topo da tela.
+              // Medir em runtime (e não um número fixo) garante que a lista
+              // e a barra continuem clicáveis em qualquer estado.
+              bottom:
+                  MediaQuery.of(context).viewInsets.bottom +
+                  (_chatOverlayHeight ?? 0),
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closeChatField,
+              ),
+            ),
           SafeArea(
             child: Column(
               children: [
@@ -1631,25 +2292,31 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black54,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                          color: _kAccent.withValues(alpha: 0.6)),
+                        color: _kAccent.withValues(alpha: 0.6),
+                      ),
                     ),
                     child: Text(
                       '🎮 ${_live.gameName}',
                       style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600),
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-          if (_chatOpen) _buildChatOverlay(),
+          // O rodapé é sempre visível: a barra fica na borda inferior e a lista
+          // cresce de baixo para cima. Só a ativação do composer é condicional.
+          _buildChatOverlay(),
           if (_buildingConnecting()) _buildConnectingOverlay(),
           if (_buildingReconnecting()) _buildReconnectingOverlay(),
           if (_error != null) _buildErrorOverlay(_error!),
@@ -1680,13 +2347,21 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             children: [
               const CircularProgressIndicator(color: _kAccent),
               const SizedBox(height: 14),
-              const Text('Conectando à Live...',
-                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+              const Text(
+                'Conectando à Live...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const SizedBox(height: 6),
-              Text(_live.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                _live.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
             ],
           ),
         ),
@@ -1712,11 +2387,19 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             children: [
               CircularProgressIndicator(color: _kAccent),
               SizedBox(height: 14),
-              Text('Reconectando...',
-                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+              Text(
+                'Reconectando...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               SizedBox(height: 6),
-              Text('A conexão caiu e estamos tentando restabelecê-la.',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                'A conexão caiu e estamos tentando restabelecê-la.',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
             ],
           ),
         ),
@@ -1749,16 +2432,20 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                     color: _kAccent.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.screen_share_rounded,
-                      color: _kAccent, size: 44),
+                  child: const Icon(
+                    Icons.screen_share_rounded,
+                    color: _kAccent,
+                    size: 44,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 const Text(
                   'Live de Jogo',
                   style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900),
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
@@ -1771,7 +2458,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                   '🎮 ${_live.gameName ?? _live.title}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                      color: _kAccent, fontWeight: FontWeight.w700),
+                    color: _kAccent,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 24),
                 FilledButton.icon(
@@ -1780,18 +2469,22 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                     backgroundColor: const Color(0xFFE11D48),
                     minimumSize: const Size(220, 52),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                   icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('🔴 INICIAR TRANSMISSÃO',
-                      style:
-                          TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  label: const Text(
+                    '🔴 INICIAR TRANSMISSÃO',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Sair sem transmitir',
-                      style: TextStyle(color: Colors.white54)),
+                  child: const Text(
+                    'Sair sem transmitir',
+                    style: TextStyle(color: Colors.white54),
+                  ),
                 ),
               ],
             ),
@@ -1807,8 +2500,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     final minutes = duration.inMinutes;
     final h = minutes ~/ 60;
     final m = minutes % 60;
-    final timeLabel =
-        h > 0 ? '$h h ${m.toString().padLeft(2, '0')} min' : '$m min';
+    final timeLabel = h > 0
+        ? '$h h ${m.toString().padLeft(2, '0')} min'
+        : '$m min';
     return Positioned.fill(
       child: Container(
         color: Colors.black.withValues(alpha: 0.82),
@@ -1824,16 +2518,20 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                     color: _kAccent.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.check_circle_rounded,
-                      color: Color(0xFF22C55E), size: 44),
+                  child: const Icon(
+                    Icons.check_circle_rounded,
+                    color: Color(0xFF22C55E),
+                    size: 44,
+                  ),
                 ),
                 const SizedBox(height: 18),
                 const Text(
                   'Live encerrada',
                   style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900),
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -1861,10 +2559,13 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                     backgroundColor: _kAccent,
                     minimumSize: const Size(220, 50),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
-                  child: const Text('Concluir',
-                      style: TextStyle(fontWeight: FontWeight.w800)),
+                  child: const Text(
+                    'Concluir',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
                 ),
               ],
             ),
@@ -1886,11 +2587,14 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.white54)),
-          Text(value,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
         ],
       ),
     );
@@ -1926,16 +2630,23 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(a.title,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13)),
-                      Text(a.subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 12)),
+                      Text(
+                        a.title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                        ),
+                      ),
+                      Text(
+                        a.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -2041,12 +2752,15 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             children: [
               Icon(Icons.circle, color: Colors.white, size: 8),
               SizedBox(width: 4),
-              Text('AO VIVO',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5)),
+              Text(
+                'AO VIVO',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                ),
+              ),
             ],
           ),
         ),
@@ -2057,8 +2771,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             children: [
               Flexible(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black45,
                     borderRadius: BorderRadius.circular(14),
@@ -2066,8 +2782,11 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.group_rounded,
-                          color: Colors.white, size: 15),
+                      const Icon(
+                        Icons.group_rounded,
+                        color: Colors.white,
+                        size: 15,
+                      ),
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
@@ -2075,7 +2794,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     ],
@@ -2087,19 +2808,23 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                 Flexible(
                   child: Container(
                     margin: const EdgeInsets.only(right: 8),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: _kAccent.withValues(alpha: 0.25),
                       borderRadius: BorderRadius.circular(14),
-                      border:
-                          Border.all(color: _kAccent.withValues(alpha: 0.6)),
+                      border: Border.all(
+                        color: _kAccent.withValues(alpha: 0.6),
+                      ),
                     ),
-                    child: Text(_live.category,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 12)),
+                    child: Text(
+                      _live.category,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
                   ),
                 ),
               ],
@@ -2111,9 +2836,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             color: const Color(0xFF1C1C26),
             onSelected: (v) {
               if (v == 'end') _endLive();
+              if (v == 'diagnostics') _openDiagnostics();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
+            itemBuilder: (_) => [
+              const PopupMenuItem(
                 value: 'end',
                 child: Row(
                   children: [
@@ -2123,9 +2849,26 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                   ],
                 ),
               ),
+              if (kDebugMode)
+                const PopupMenuItem(
+                  value: 'diagnostics',
+                  child: Row(
+                    children: [
+                      Icon(Icons.monitor_heart_rounded, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text(
+                        'Diagnóstico da Live',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
             ],
-            icon: const Icon(Icons.more_horiz_rounded,
-                color: Colors.white, size: 24),
+            icon: const Icon(
+              Icons.more_horiz_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
           )
         else
           PopupMenuButton<String>(
@@ -2138,7 +2881,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                   children: [
                     Icon(Icons.share_rounded, color: Colors.white),
                     SizedBox(width: 8),
-                    Text('Compartilhar Live', style: TextStyle(color: Colors.white)),
+                    Text(
+                      'Compartilhar Live',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ],
                 ),
               ),
@@ -2156,11 +2902,17 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                 value: 'mute',
                 child: Row(
                   children: [
-                    Icon(_audioListenOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-                        color: Colors.white),
+                    Icon(
+                      _audioListenOn
+                          ? Icons.volume_up_rounded
+                          : Icons.volume_off_rounded,
+                      color: Colors.white,
+                    ),
                     const SizedBox(width: 8),
-                    Text(_audioListenOn ? 'Silenciar' : 'Ativar áudio',
-                        style: const TextStyle(color: Colors.white)),
+                    Text(
+                      _audioListenOn ? 'Silenciar' : 'Ativar áudio',
+                      style: const TextStyle(color: Colors.white),
+                    ),
                   ],
                 ),
               ),
@@ -2180,7 +2932,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                   children: [
                     Icon(Icons.block_rounded, color: Colors.white),
                     SizedBox(width: 8),
-                    Text('Bloquear usuário', style: TextStyle(color: Colors.white)),
+                    Text(
+                      'Bloquear usuário',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ],
                 ),
               ),
@@ -2194,9 +2949,26 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                   ],
                 ),
               ),
+              if (kDebugMode)
+                const PopupMenuItem(
+                  value: 'diagnostics',
+                  child: Row(
+                    children: [
+                      Icon(Icons.monitor_heart_rounded, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text(
+                        'Diagnóstico da Live',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
             ],
-            icon: const Icon(Icons.more_horiz_rounded,
-                color: Colors.white, size: 24),
+            icon: const Icon(
+              Icons.more_horiz_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
           ),
         const SizedBox(width: 4),
       ],
@@ -2231,6 +3003,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         await AccountService.instance.blockUser(_live.streamerId);
         _snack('Usuário bloqueado.');
         break;
+      case 'diagnostics':
+        await _openDiagnostics();
+        break;
       case 'leave':
         if (mounted) Navigator.of(context).pop(true);
         break;
@@ -2239,10 +3014,9 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      duration: const Duration(seconds: 2),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
   }
 
   Widget _buildInfoRow() {
@@ -2277,20 +3051,25 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14),
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                       if (_live.streamerUsername != null &&
                           _live.streamerUsername!.isNotEmpty) ...[
                         const SizedBox(width: 6),
                         Flexible(
-                          child: Text('@${_live.streamerUsername}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white38, fontSize: 12)),
+                          child: Text(
+                            '@${_live.streamerUsername}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12,
+                            ),
+                          ),
                         ),
                       ],
                     ],
@@ -2310,8 +3089,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                       _live.description,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(color: Colors.white54, fontSize: 11),
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
                 if (_live.hashtags.isNotEmpty)
@@ -2322,9 +3103,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: _kAccent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600),
+                        color: _kAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
               ],
@@ -2341,7 +3123,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       children: [
         _miniAction(
           Icons.people_rounded,
-          '${_lk.participantsCount.value}',
+          '$_viewerCount',
           () => _openParticipants(),
         ),
         _miniAction(
@@ -2353,44 +3135,60 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         _miniAction(
           Icons.chat_bubble_rounded,
           'Comentários',
-          () => setState(() => _chatOpen = !_chatOpen),
+          _toggleChatField,
           color: _chatOpen ? _kAccent : Colors.white,
         ),
-        _miniAction(Icons.card_giftcard_rounded, 'Presente', _openGiftPicker,
-            color: const Color(0xFFFFA53D)),
-        _miniAction(_topSupporters.isEmpty ? Icons.emoji_events_rounded : Icons.emoji_events,
-            'Top', _openTopSupporters,
-            color: _topSupporters.isNotEmpty ? const Color(0xFFFFD700) : Colors.white),
+        _miniAction(
+          Icons.card_giftcard_rounded,
+          'Presente',
+          _openGiftPicker,
+          color: const Color(0xFFFFA53D),
+        ),
+        _miniAction(
+          _topSupporters.isEmpty
+              ? Icons.emoji_events_rounded
+              : Icons.emoji_events,
+          'Top',
+          _openTopSupporters,
+          color: _topSupporters.isNotEmpty
+              ? const Color(0xFFFFD700)
+              : Colors.white,
+        ),
         _miniAction(Icons.share_rounded, 'Compartilhar', _share),
         if (widget.role == LiveRole.streamer) ...[
           _miniAction(
-              _camOn ? Icons.videocam_rounded : Icons.videocam_off_rounded,
-              _camOn ? 'Câmera' : 'Off',
-              _toggleCamera,
-              color: _camOn ? _kAccent : Colors.white54),
+            _camOn ? Icons.videocam_rounded : Icons.videocam_off_rounded,
+            _camOn ? 'Câmera' : 'Off',
+            _toggleCamera,
+            color: _camOn ? _kAccent : Colors.white54,
+          ),
           _miniAction(
-              _micOn ? Icons.mic_rounded : Icons.mic_off_rounded,
-              _micOn ? 'Mic' : 'Off',
-              _toggleMicrophone,
-              color: _micOn ? _kAccent : Colors.white54),
+            _micOn ? Icons.mic_rounded : Icons.mic_off_rounded,
+            _micOn ? 'Mic' : 'Off',
+            _toggleMicrophone,
+            color: _micOn ? _kAccent : Colors.white54,
+          ),
           _miniAction(
-              Icons.screen_share_rounded,
-              _shareOn ? 'Tela' : 'Tela',
-              _toggleScreenShare,
-              color: _shareOn ? _kAccent : Colors.white54),
+            Icons.screen_share_rounded,
+            _shareOn ? 'Tela' : 'Tela',
+            _toggleScreenShare,
+            color: _shareOn ? _kAccent : Colors.white54,
+          ),
         ] else ...[
           _miniAction(
-              _videoListenOn
-                  ? Icons.videocam_rounded
-                  : Icons.videocam_off_rounded,
-              _videoListenOn ? 'Vídeo' : 'Off',
-              _toggleViewerVideo,
-              color: _videoListenOn ? _kAccent : Colors.white54),
+            _videoListenOn
+                ? Icons.videocam_rounded
+                : Icons.videocam_off_rounded,
+            _videoListenOn ? 'Vídeo' : 'Off',
+            _toggleViewerVideo,
+            color: _videoListenOn ? _kAccent : Colors.white54,
+          ),
           _miniAction(
-              _audioListenOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-              _audioListenOn ? 'Áudio' : 'Off',
-              _toggleViewerAudio,
-              color: _audioListenOn ? _kAccent : Colors.white54),
+            _audioListenOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+            _audioListenOn ? 'Áudio' : 'Off',
+            _toggleViewerAudio,
+            color: _audioListenOn ? _kAccent : Colors.white54,
+          ),
         ],
         const SizedBox(height: 28),
         GestureDetector(
@@ -2409,8 +3207,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
           ),
         ),
         const SizedBox(height: 4),
-        const Text('Seguir',
-            style: TextStyle(color: Colors.white70, fontSize: 11)),
+        const Text(
+          'Seguir',
+          style: TextStyle(color: Colors.white70, fontSize: 11),
+        ),
       ],
     );
   }
@@ -2429,8 +3229,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
           children: [
             Icon(icon, color: color ?? Colors.white, size: 28),
             const SizedBox(height: 2),
-            Text(label,
-                style: const TextStyle(color: Colors.white70, fontSize: 11)),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
           ],
         ),
       ),
@@ -2451,11 +3253,14 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Participantes',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16)),
+              const Text(
+                'Participantes',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -2465,8 +3270,11 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                     backgroundImage: _live.streamerAvatar != null
                         ? NetworkImage(_live.streamerAvatar!)
                         : null,
-                    child: const Icon(Icons.person,
-                        color: Colors.white70, size: 16),
+                    child: const Icon(
+                      Icons.person,
+                      color: Colors.white70,
+                      size: 16,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Text(
@@ -2485,18 +3293,23 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                         backgroundColor: _kAccent.withValues(alpha: 0.3),
                         child: Text(
                           (p.name.isNotEmpty
-                                  ? String.fromCharCodes(
-                                      p.name.runes.take(1))
+                                  ? String.fromCharCodes(p.name.runes.take(1))
                                   : '?')
                               .toUpperCase(),
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 13),
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Text(p.name.isNotEmpty ? p.name : p.identity,
-                          style:
-                              const TextStyle(color: Colors.white, fontSize: 14)),
+                      Text(
+                        p.name.isNotEmpty ? p.name : p.identity,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -2504,8 +3317,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
               if (_lk.guests.isEmpty)
                 const Padding(
                   padding: EdgeInsets.only(top: 10),
-                  child: Text('Nenhum espectador no momento.',
-                      style: TextStyle(color: Colors.white54)),
+                  child: Text(
+                    'Nenhum espectador no momento.',
+                    style: TextStyle(color: Colors.white54),
+                  ),
                 ),
             ],
           ),
@@ -2514,232 +3329,311 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     );
   }
 
+  /// Rodapé da LIVE: lista de comentários + barra do composer.
+  ///
+  /// Posicionamento (a única coisa alterada aqui):
+  ///  * a lista de mensagens fica sobre a REGIÃO INFERIOR do vídeo e cresce de
+  ///    baixo para cima — nunca no centro da tela, nunca no topo;
+  ///  * a barra do composer é fixa na borda inferior da LIVE, com o campo
+  ///    "Diga algo" na horizontal e os botões de emoji e envio dentro dela;
+  ///  * com o teclado aberto o conjunto sobe e fica ancorado logo acima dele,
+  ///    sem reorganizar mais nada;
+  ///  * com o teclado fechado volta para a borda inferior.
+  ///
+  /// Não é painel, janela central, caixa no topo nem tela separada.
   Widget _buildChatOverlay() {
-    final size = MediaQuery.of(context).size;
+    // Medido depois do frame, quando a altura final já está definida.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureChatOverlay());
+
+    // IMPORTANTE: este método é chamado direto como filho do `Stack`, então o
+    // `Positioned` tem que ser retornado na raiz. Envolver em `LayoutBuilder`
+    // (ou qualquer outro widget) quebra o posicionamento: o Stack deixa de
+    // ver o `Positioned`, passa a tratar o filho como comum e o composer
+    // aparece no TOPO da tela em vez de fixado embaixo.
     final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-    final sheetHeight =
-        (size.height * 0.45).clamp(120.0, (size.height - viewInsets) * 0.9);
-    return Positioned(
+    // Só sobe quando o composer está ativo e há teclado na tela.
+    final bottomInset = _chatOpen && viewInsets > 0
+        ? viewInsets.toDouble()
+        : 0.0;
+
+    return AnimatedPositioned(
       left: 0,
       right: 0,
-      bottom: viewInsets,
-      child: Container(
-        height: sheetHeight,
-        decoration: const BoxDecoration(
-          color: Color(0xE61A1A22),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      bottom: bottomInset,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      child: PopScope(
+        // O primeiro Voltar do Android fecha teclado/composer; só um
+        // segundo Voltar executa a ação normal de sair da LIVE.
+        canPop: !_chatOpen,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) return;
+          _closeChatField();
+        },
+        child: SafeArea(
+          top: false,
+          // Com o teclado aberto quem cuida da borda de baixo é o teclado.
+          bottom: bottomInset == 0,
+          child: Column(
+            key: _chatOverlayKey,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [_buildChatMessageList(), _buildComposerBar()],
+          ),
         ),
-        child: Column(
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 6),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text('Comentários ao vivo',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14)),
-            ),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                itemCount: _messages.length,
-                itemBuilder: (context, index) {
-                  final m = _messages[index];
-                  return GestureDetector(
-                    onLongPress: () => _openModeration(m),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CircleAvatar(
-                            radius: 12,
-                            backgroundColor: _kAccent.withValues(alpha: 0.35),
-                            backgroundImage: m.senderAvatar != null
-                                ? NetworkImage(m.senderAvatar!)
-                                : null,
-                            child: const Icon(Icons.person,
-                                color: Colors.white70, size: 12),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        m.senderDisplayName ?? 'Anônimo',
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                            color: _kAccent,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12),
-                                      ),
-                                    ),
-                                    if (m.senderVerified) ...[
-                                      const SizedBox(width: 3),
-                                      const VerifiedBadge(size: 12),
-                                    ],
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _timeLabel(m.createdAt),
-                                      style: const TextStyle(
-                                          color: Colors.white38,
-                                          fontSize: 10),
-                                    ),
-                                    if (m.editedAt != null) ...[
-                                      const SizedBox(width: 4),
-                                      const Text(
-                                        'Editada',
-                                        style: TextStyle(
-                                            color: Colors.white38,
-                                            fontSize: 10,
-                                            fontStyle: FontStyle.italic),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                Text(
-                                  m.message,
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 13),
-                                ),
-                                _buildMessageReactions(m),
-                              ],
-                            ),
-                          ),
-                          if (_mutedUsers.contains(m.userId))
-                            const Icon(Icons.volume_off_rounded,
-                                color: Colors.white38, size: 14),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+      ),
+    );
+  }
+
+  /// Comentários recebidos em tempo real, sobre a região inferior da LIVE.
+  ///
+  /// `reverse: true` com índice invertido põe a mensagem mais nova na borda de
+  /// baixo, encostada no composer — assim o texto nunca fica por cima do campo
+  /// de digitação — e as anteriores sobem. O teto de altura impede que a lista
+  /// vire o centro da tela.
+  Widget _buildChatMessageList() {
+    if (_messages.isEmpty) return const SizedBox.shrink();
+    final total = _messages.length;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 210),
+      child: ListView.builder(
+        reverse: true,
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+        itemCount: total,
+        itemBuilder: (context, index) {
+          final m = _messages[total - 1 - index];
+          return GestureDetector(
+            onLongPress: () => _openModeration(m),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (_editingMessageId != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.edit_rounded,
-                              color: _kAccent, size: 16),
-                          const SizedBox(width: 8),
-                          const Expanded(
-                            child: Text(
-                              'Editando mensagem',
-                              style: TextStyle(
-                                  color: Colors.white70, fontSize: 12),
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: _cancelEditingChat,
-                            behavior: HitTestBehavior.opaque,
-                            child: const Text(
-                              'Cancelar',
-                              style: TextStyle(
-                                  color: Colors.white54, fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
+                  CircleAvatar(
+                    radius: 10,
+                    backgroundColor: _kAccent.withValues(alpha: 0.35),
+                    backgroundImage: m.senderAvatar != null
+                        ? NetworkImage(m.senderAvatar!)
+                        : null,
+                    child: const Icon(
+                      Icons.person,
+                      color: Colors.white70,
+                      size: 10,
                     ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _chatController,
-                          focusNode: _chatFocus,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: InputDecoration(
-                            hintText: _editingMessageId != null
-                                ? 'Edite sua mensagem...'
-                                : 'Comente algo legal...',
-                            hintStyle:
-                                const TextStyle(color: Colors.white38),
-                            filled: true,
-                            fillColor: const Color(0xFF2A2A35),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 10),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(22),
-                              borderSide: BorderSide.none,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                m.senderDisplayName ??
+                                    m.senderUsername ??
+                                    'Alguém',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
+                            if (m.senderVerified) ...[
+                              const SizedBox(width: 4),
+                              const VerifiedBadge(size: 11),
+                            ],
+                            const SizedBox(width: 6),
+                            Text(
+                              _timeLabel(m.createdAt),
+                              style: const TextStyle(
+                                color: Colors.white38,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          m.message,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            height: 1.3,
+                            shadows: [
+                              Shadow(color: Colors.black87, blurRadius: 4),
+                            ],
                           ),
-                          onSubmitted: (_) => _editingMessageId != null
-                              ? _applyChatEdit()
-                              : _sendChat(),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        onPressed: () {
-                          if (_editingMessageId != null) return;
-                          final emoji = kLiveReactionEmojis[
-                              DateTime.now().second %
-                                  kLiveReactionEmojis.length];
-                          _chatController.text =
-                              '${_chatController.text}$emoji ';
-                          _chatController.selection =
-                              TextSelection.collapsed(
-                                  offset: _chatController.text.length);
-                        },
-                        tooltip: 'Emoji',
-                        icon: const Icon(Icons.emoji_emotions_outlined,
-                            color: Colors.white70, size: 22),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        onPressed: _editingMessageId != null
-                            ? null
-                            : _openGiftPicker,
-                        tooltip: 'Enviar presente',
-                        icon: const Icon(Icons.card_giftcard_rounded,
-                            color: Colors.amber, size: 22),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        onPressed: _editingMessageId != null
-                            ? _applyChatEdit
-                            : _sendChat,
-                        style: IconButton.styleFrom(
-                          backgroundColor: _kAccent,
-                          shape: const CircleBorder(),
-                        ),
-                        icon: Icon(
-                          _editingMessageId != null
-                              ? Icons.check_rounded
-                              : Icons.send_rounded,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
+                        _buildMessageReactions(m),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-          ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// Barra fixa inferior: campo "Diga algo" na horizontal + emoji + envio.
+  ///
+  /// Só o campo e os dois botões. "Comentários" e "Presente" continuam nos
+  /// controles laterais da direita (_buildMiniActions) e não são duplicados
+  /// aqui — não existe segunda barra de comentários.
+  Widget _buildComposerBar() {
+    final editing = _editingMessageId != null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: const Color(0xB3121018),
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Container(
+              constraints: const BoxConstraints(maxHeight: 92),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: TextField(
+                controller: _chatController,
+                focusNode: _chatFocus,
+                minLines: 1,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                cursorColor: _kAccent,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => editing ? _applyChatEdit() : _sendChat(),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: editing ? 'Editando comentário' : 'Diga algo',
+                  hintStyle: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: _pickComposerEmoji,
+            icon: const Icon(
+              Icons.emoji_emotions_outlined,
+              color: Colors.white,
+              size: 24,
+            ),
+            tooltip: 'Emoji',
+            visualDensity: VisualDensity.compact,
+          ),
+          IconButton(
+            onPressed: editing ? _applyChatEdit : _sendChat,
+            icon: const Icon(Icons.send_rounded, color: _kAccent, size: 22),
+            tooltip: 'Enviar',
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Emoji do composer. Reusa a mesma lista e o mesmo visual do seletor de
+  /// reação (_openEmojiPicker) — nenhum sistema novo.
+  Future<void> _pickComposerEmoji() async {
+    final emoji = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C26),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: kLiveReactionEmojis
+                .map(
+                  (e) => InkWell(
+                    onTap: () => Navigator.of(ctx).pop(e),
+                    borderRadius: BorderRadius.circular(24),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(e, style: const TextStyle(fontSize: 26)),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
         ),
       ),
     );
+    if (!mounted || emoji == null) return;
+    _chatFocus.requestFocus();
+    _chatController.text = '${_chatController.text}$emoji';
+    _chatController.selection = TextSelection.collapsed(
+      offset: _chatController.text.length,
+    );
+  }
+
+  /// Ativa ou desativa o composer inferior. Chamado pelo botão "Comentários"
+  /// dos controles laterais.
+  void _toggleChatField() {
+    if (_chatOpen) {
+      _closeChatField();
+      return;
+    }
+    setState(() => _chatOpen = true);
+    _chatFocus.requestFocus();
+  }
+
+  /// Tocar fora do composer (ou o Voltar do Android) fecha o teclado e
+  /// desativa o composer.
+  void _closeChatField() {
+    // A limpeza vem antes de soltar o foco: o listener ajusta `_chatOpen`
+    // durante o `unfocus`, e depois disso a condição abaixo não valeria mais.
+    if (_chatOpen || _editingMessageId != null) {
+      setState(() {
+        _chatOpen = false;
+        // Sem isto um "editar" antigo continuaria valendo e o próximo envio
+        // editaria a mensagem antiga em vez de publicar uma nova.
+        _editingMessageId = null;
+        _chatController.clear();
+      });
+    }
+    _chatFocus.unfocus();
+  }
+
+  /// Mantém o estado do composer em sincronia com o foco do campo.
+  void _onChatFocusChanged() {
+    final focused = _chatFocus.hasFocus;
+    if (focused == _chatOpen || !mounted) return;
+    setState(() => _chatOpen = focused);
+  }
+
+  /// Altura real do rodapé (lista + barra), usada pela área de "tocar fora".
+  ///
+  /// Só chama `setState` quando o valor muda de fato, senão
+  /// build → postFrame → setState → build vira laço.
+  void _measureChatOverlay() {
+    final size = _chatOverlayKey.currentContext?.size;
+    if (size == null || size.height <= 0) return;
+    final current = _chatOverlayHeight;
+    if (current != null && (size.height - current).abs() < 0.5) return;
+    if (!mounted) return;
+    setState(() => _chatOverlayHeight = size.height);
   }
 
   String _timeLabel(DateTime t) {
@@ -2759,11 +3653,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     ];
     return Padding(
       padding: const EdgeInsets.only(top: 5),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
-        children: chips,
-      ),
+      child: Wrap(spacing: 6, runSpacing: 4, children: chips),
     );
   }
 
@@ -2777,9 +3667,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         decoration: BoxDecoration(
           color: mine ? _kAccent.withValues(alpha: 0.35) : Colors.white10,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: mine ? _kAccent : Colors.white24,
-          ),
+          border: Border.all(color: mine ? _kAccent : Colors.white24),
         ),
         child: Text(
           '$emoji $total',
@@ -2801,8 +3689,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white24),
         ),
-        child: const Text('+ 😍',
-            style: TextStyle(color: Colors.white38, fontSize: 11)),
+        child: const Text(
+          '+ 😍',
+          style: TextStyle(color: Colors.white38, fontSize: 11),
+        ),
       ),
     );
   }
@@ -2849,18 +3739,23 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
               children: [
                 const Icon(Icons.wifi_off_rounded, color: _kLiveRed, size: 44),
                 const SizedBox(height: 12),
-                const Text('Não foi possível conectar à Live',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700)),
+                const Text(
+                  'Não foi possível conectar à Live',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 6),
-                Text(error,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  error,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 const SizedBox(height: 18),
                 FilledButton.icon(
                   onPressed: _retryJoin,
@@ -2868,17 +3763,22 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
                     backgroundColor: _kAccent,
                     minimumSize: const Size(200, 46),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                   ),
                   icon: const Icon(Icons.refresh_rounded, size: 20),
-                  label: const Text('Tentar novamente',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  label: const Text(
+                    'Tentar novamente',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Sair da Live',
-                      style: TextStyle(color: Colors.white54)),
+                  child: const Text(
+                    'Sair da Live',
+                    style: TextStyle(color: Colors.white54),
+                  ),
                 ),
               ],
             ),
@@ -2892,10 +3792,24 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   /// pôde ter ficado parado e refaz o join (sem duplicar canais — a rotina
   /// _join sempre desconecta antes de reconectar).
   Future<void> _retryJoin() async {
-    setState(() => _error = null);
+    _lk.participantsCount.removeListener(_onParticipantsChanged);
+    _lk.reconnecting.removeListener(_onReconnectingChanged);
+    _lk.lastError.removeListener(_onLiveKitError);
+    for (final channel in _channels) {
+      _db.removeChannel(channel);
+    }
+    _channels.clear();
+    _reactionsChannel = null;
+    setState(() {
+      _error = null;
+      _connected = false;
+      _chatRealtimeReady = false;
+      _liveRealtimeReady = false;
+      _realtimeError = null;
+      _subscribedRealtimeChannels = 0;
+    });
     await _lk.disconnectFromLive();
     if (!mounted) return;
-    setState(() => _connected = false);
     await _join();
   }
 }
@@ -3030,17 +3944,23 @@ class _LiveGiftGridState extends State<_LiveGiftGrid> {
           Row(
             children: [
               const Expanded(
-                child: Text('🎁 Presentes',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800)),
+                child: Text(
+                  '🎁 Presentes',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
-              Text('🪙 ${widget.wallet}',
-                  style: const TextStyle(
-                      color: Color(0xFFFFD700),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700)),
+              Text(
+                '🪙 ${widget.wallet}',
+                style: const TextStyle(
+                  color: Color(0xFFFFD700),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white54),
@@ -3059,9 +3979,13 @@ class _LiveGiftGridState extends State<_LiveGiftGrid> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
-                      label: Text(f.label,
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 12)),
+                      label: Text(
+                        f.label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
                       selected: _filter == f.id,
                       selectedColor: _kAccent,
                       backgroundColor: const Color(0xFF2A2A35),
@@ -3087,19 +4011,22 @@ class _LiveGiftGridState extends State<_LiveGiftGrid> {
   Widget _buildBody() {
     if (_error != null && _items.isEmpty) {
       return Center(
-        child: Text('Não foi possível carregar os presentes.\n$_error',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54)),
+        child: Text(
+          'Não foi possível carregar os presentes.\n$_error',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white54),
+        ),
       );
     }
     if (_loading && _items.isEmpty) {
-      return const Center(
-          child: CircularProgressIndicator(color: _kAccent));
+      return const Center(child: CircularProgressIndicator(color: _kAccent));
     }
     if (_items.isEmpty) {
       return const Center(
-        child: Text('Nenhum presente disponível.',
-            style: TextStyle(color: Colors.white54)),
+        child: Text(
+          'Nenhum presente disponível.',
+          style: TextStyle(color: Colors.white54),
+        ),
       );
     }
     return GridView.builder(
@@ -3139,18 +4066,23 @@ class _LiveGiftGridState extends State<_LiveGiftGrid> {
               children: [
                 Text(g.icon, style: const TextStyle(fontSize: 30)),
                 const SizedBox(height: 4),
-                Text(g.name,
-                    style: const TextStyle(color: Colors.white70, fontSize: 10),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  g.name,
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 const SizedBox(height: 3),
-                Text('🪙 ${g.credits}',
-                    style: TextStyle(
-                        color: afford
-                            ? const Color(0xFFFFD700)
-                            : const Color(0xFFFF5252),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700)),
+                Text(
+                  '🪙 ${g.credits}',
+                  style: TextStyle(
+                    color: afford
+                        ? const Color(0xFFFFD700)
+                        : const Color(0xFFFF5252),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ],
             ),
           ),
@@ -3183,10 +4115,7 @@ class _ReactionBurstOverlay extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(color: _kAccent, width: 2),
             boxShadow: [
-              BoxShadow(
-                color: _kAccent.withValues(alpha: 0.5),
-                blurRadius: 30,
-              ),
+              BoxShadow(color: _kAccent.withValues(alpha: 0.5), blurRadius: 30),
             ],
           ),
           child: Text(emoji, style: const TextStyle(fontSize: 52)),
@@ -3226,8 +4155,10 @@ class _TopSupportersSheetState extends State<_TopSupportersSheet> {
 
   Future<void> _load() async {
     try {
-      final top = await LivePremiumService.instance
-          .fetchTopSupporters(liveId: widget.liveId, limit: 10);
+      final top = await LivePremiumService.instance.fetchTopSupporters(
+        liveId: widget.liveId,
+        limit: 10,
+      );
       if (!mounted) return;
       setState(() {
         _top = top;
@@ -3250,14 +4181,19 @@ class _TopSupportersSheetState extends State<_TopSupportersSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('🏆 Top apoiadores',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16)),
+          const Text(
+            '🏆 Top apoiadores',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
           const SizedBox(height: 4),
-          const Text('Baseado nas moedas reais gastas em presentes nesta live.',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
+          const Text(
+            'Baseado nas moedas reais gastas em presentes nesta live.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
           const SizedBox(height: 14),
           if (_loading)
             const Center(
@@ -3270,17 +4206,21 @@ class _TopSupportersSheetState extends State<_TopSupportersSheet> {
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text('Não foi possível carregar o top.\n$_error',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white54)),
+                child: Text(
+                  'Não foi possível carregar o top.\n$_error',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54),
+                ),
               ),
             )
           else if (_top.isEmpty)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
-                child: Text('Ninguém enviou presentes nesta live ainda.',
-                    style: TextStyle(color: Colors.white54)),
+                child: Text(
+                  'Ninguém enviou presentes nesta live ainda.',
+                  style: TextStyle(color: Colors.white54),
+                ),
               ),
             )
           else
@@ -3294,11 +4234,14 @@ class _TopSupportersSheetState extends State<_TopSupportersSheet> {
                   children: [
                     SizedBox(
                       width: 34,
-                      child: Text('#${r.rank}',
-                          style: TextStyle(
-                              color: color,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14)),
+                      child: Text(
+                        '#${r.rank}',
+                        style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
                     ),
                     CircleAvatar(
                       radius: 16,
@@ -3306,8 +4249,11 @@ class _TopSupportersSheetState extends State<_TopSupportersSheet> {
                       backgroundImage: r.avatarUrl != null
                           ? NetworkImage(r.avatarUrl!)
                           : null,
-                      child: const Icon(Icons.person,
-                          color: Colors.white70, size: 14),
+                      child: const Icon(
+                        Icons.person,
+                        color: Colors.white70,
+                        size: 14,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -3319,7 +4265,9 @@ class _TopSupportersSheetState extends State<_TopSupportersSheet> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 14),
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
                             ),
                           ),
                           if (r.isVerified) ...[
@@ -3332,7 +4280,9 @@ class _TopSupportersSheetState extends State<_TopSupportersSheet> {
                     Text(
                       '${_formatValue(r.value)} 💎',
                       style: TextStyle(
-                          color: color, fontWeight: FontWeight.w700),
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ],
                 ),

@@ -6,12 +6,7 @@ import 'ad_widgets.dart';
 
 /// Placements suportados pelo KLAY K (only estes recebem anúncios; as demais
 /// áreas são proibidas por padrão — mensagens, perfil, carteira, Game Live…).
-const List<String> kAdPlacements = [
-  'feed',
-  'live_hub',
-  'games',
-  'discover',
-];
+const List<String> kAdPlacements = ['feed', 'live_hub', 'games', 'discover'];
 
 /// Proteção local simples contra spam visual (§33): o backend NÃO expõe
 /// frequency cap/placement/prioridade na RPC pública `ads_public_approved`
@@ -33,8 +28,9 @@ class AdSpot {
   /// opcional e NUNCA bloqueia o conteúdo — §37/§38).
   Future<void> load({int limit = 4}) async {
     if (!AdsService.instance.isConfigured) return;
-    final fromBackend =
-        await AdsService.instance.fetchApprovedAds(limit: limit);
+    final fromBackend = await AdsService.instance.fetchApprovedAds(
+      limit: limit,
+    );
     ads = fromBackend.length > kAdMaxPerSession
         ? fromBackend.take(kAdMaxPerSession).toList()
         : fromBackend;
@@ -60,13 +56,15 @@ class AdSpot {
       out.add(mains[i]);
       if ((i + 1) % everyN == 0) {
         final ad = ads[i ~/ everyN % ads.length];
-        out.add(Padding(
-          padding: EdgeInsets.only(bottom: gap),
-          child: AdCard(
-            ad: ad,
-            onHidden: onHidden == null ? null : () => onHidden(ad.id),
+        out.add(
+          Padding(
+            padding: EdgeInsets.only(bottom: gap),
+            child: AdCard(
+              ad: ad,
+              onHidden: onHidden == null ? null : () => onHidden(ad.id),
+            ),
           ),
-        ));
+        );
       }
     }
     return out;

@@ -11,24 +11,35 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
+import 'l10n/app_localizations.dart';
 import 'models/ad_models.dart';
 import 'models/klayk_live_models.dart';
 import 'models/post_models.dart';
 import 'models/user_profile.dart';
 import 'services/account_service.dart';
+import 'services/admin_service.dart';
 import 'services/ads_service.dart';
+import 'services/boot_diagnostics.dart';
+import 'services/boot_trace.dart';
 import 'services/experience_settings.dart';
+import 'services/locale_controller.dart';
+import 'services/local_prefs_service.dart';
+import 'screens/create/creation_flow.dart';
 import 'screens/app_gate.dart';
 import 'screens/auth_screen.dart';
+import 'screens/boot_diagnostics_screen.dart';
 import 'screens/live_room_screen.dart';
-import 'screens/messages_screen.dart';
+import 'screens/messages_hub_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/games/game_screen.dart';
+import 'screens/games/game_leaderboard_screen.dart';
+import 'screens/games/game_router.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/user_profile_screen.dart';
 import 'screens/profile/video_preview_screen.dart';
 import 'screens/live_games_screen.dart';
+import 'screens/live_hub_screen.dart';
 import 'screens/start_live_screen.dart';
 import 'screens/communities/communities_screen.dart';
 import 'screens/discover_screen.dart';
@@ -36,19 +47,22 @@ import 'screens/friends_screen.dart';
 import 'screens/audio_rooms_screen.dart';
 import 'screens/events_screen.dart';
 import 'screens/moments_screen.dart';
-import 'screens/rising_creators_screen.dart';import 'widgets/live_premium_bubble.dart';
-import 'widgets/reward_floating_button.dart';
+import 'screens/rising_creators_screen.dart';
+import 'widgets/live_premium_bubble.dart';
 import 'widgets/verified_badge.dart';
+import 'widgets/klay_live_feed_card.dart';
 import 'widgets/content_actions.dart';
 import 'widgets/live_hub_components.dart';
 import 'services/app_config.dart';
 import 'services/content_service.dart';
 import 'services/drafts_service.dart';
+import 'services/game_service.dart';
 import 'services/message_service.dart';
 import 'services/profile_service.dart';
 import 'services/social_service.dart';
 import 'services/storage_upload.dart';
 import 'services/supabase_service.dart';
+import 'services/push_service.dart';
 import 'services/guardian_service.dart';
 import 'services/live_kit_service.dart';
 import 'theme/klayk_theme.dart';
@@ -56,59 +70,397 @@ import 'design/klayk_design.dart';
 import 'widgets/klayk_ux.dart';
 import 'widgets/ad_widgets.dart';
 import 'widgets/ad_spot.dart';
+import 'widgets/klayk_game_card.dart';
+import 'widgets/reward_floating_button.dart';
+import 'widgets/feed_loading_hud.dart';
+import 'widgets/quest_bubble.dart';
 
 /// A cada N vídeos, um anúncio aprovado entra no feed (intercalação
 /// transparente com badge ANÚNCIO). Não afeta a lógica de vídeo existente.
 const int kAdsFeedEveryN = 5;
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+/// A cada N vídeos, uma live REAL ativa entra no feed "Para você".
+const int kFeedLiveEveryN = 4;
 
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarBrightness: Brightness.dark,
-      statusBarIconBrightness: Brightness.light,
-    ),
+/// Zona em que o boot acontece. O Flutter guarda a zona do binding quando
+/// `ensureInitialized()` roda e confere em `debugCheckZone` na hora do
+/// `runApp`; por isso o handler de erro precisa voltar para cá para conseguir
+/// mostrar a tela de diagnóstico sem recriar o mesmo erro de zone.
+Zone? _bootZone;
+
+/// `true` assim que um `runApp` deu certo — evita duas raízes de widget.
+bool _appStarted = false;
+
+Future<void> main() async {
+  // TODO DO BOOT INTEIRO — binding e runApp na MESMA Zone.
+  //
+  // O bug anterior: `ensureInitialized()` rodava na zone raiz (dentro de
+  // `main`) e o `runApp` rodava dentro de `runZonedGuarded`, ou seja, numa zone
+  // filha. O Flutter guarda a zone do binding e, no `runApp`, compara:
+  //
+  //   The Flutter bindings were initialized in a different zone than is now
+  //   being used.  -> BindingBase.debugCheckZone <- _runWidget <- runApp
+  //
+  // A correção NÃO é silenciar o assert (nem `debugZoneErrorsAreFatal`): é
+  // estrutural — `ensureInitialized()`, todo o boot e o `runApp` acontecem
+  // dentro da mesma zone, que é o padrão documentado do Flutter.
+  runZonedGuarded<Future<void>>(_bootKlayK, _onBootZoneError);
+}
+
+/// Executa a inicialização inteira. Fica dentro de uma única Zone para que o
+/// binding e o `runApp` compartilhem a mesma.
+Future<void> _bootKlayK() async {
+  final trace = BootTrace.instance;
+  trace.step(BootSteps.dartEnter);
+
+  // Binding primeiro: nada de canal de plataforma (nem path_provider) funciona
+  // antes dele.
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  _bootZone = Zone.current;
+  trace.step(BootSteps.bindings, detail: 'zone=${_zoneId(Zone.current)}');
+
+  // Abre a trilha: lê a abertura ANTERIOR (que é a que morreu) e passa a anexar
+  // cada etapa com flush.
+  await trace.begin();
+  trace.step(
+    BootSteps.traceReady,
+    detail:
+        'anterior=${trace.previous.length} linhas; '
+        'marcadores_nativos=${trace.nativeMarkers.length}',
   );
 
+  // Erros de build/layout e de canal de plataforma passam a ser registrados
+  // em vez de derrubarem o processo.
+  BootDiagnostics.installGlobalHandlers();
+  BootDiagnostics.instance.markPhase(BootPhases.handlers);
+  await BootDiagnostics.instance.loadPrevious();
+
+  binding.addPostFrameCallback((_) {
+    trace.step(BootSteps.firstFrame, detail: 'primeiro frame desenhado');
+    BootDiagnostics.instance.markPhase(BootSteps.firstFrame);
+  });
+
   try {
-    await SupabaseService.instance.ensureReady();
-  } catch (_) {
-    // Sem Supabase configurado (--dart-define ausente), o app segue em modo
-    // demo — nada aqui deve impedir a execução normal.
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarBrightness: Brightness.dark,
+        statusBarIconBrightness: Brightness.light,
+      ),
+    );
+    trace.step(BootSteps.systemChrome);
+  } catch (e, s) {
+    BootDiagnostics.instance.record('boot', e, s, at: BootSteps.systemChrome);
+    trace.step(BootSteps.systemChrome, detail: 'FALHOU: $e');
   }
 
-  runApp(const KlayKApp());
+  // SharedPreferences: primeiro uso real de canal de plataforma do app.
+  // Cronometrado porque é onde o plugin responde — ou não.
+  final spSw = Stopwatch()..start();
+  try {
+    await AppLanguageController.instance.initialize();
+    trace.step(
+      BootSteps.sharedPrefs,
+      detail: 'idioma+shared_preferences em ${spSw.elapsedMilliseconds}ms',
+    );
+  } catch (e, s) {
+    BootDiagnostics.instance.record('boot', e, s, at: BootSteps.sharedPrefs);
+    trace.step(BootSteps.sharedPrefs, detail: 'FALHOU: $e');
+  }
+  BootDiagnostics.instance.markPhase(BootPhases.locale);
+
+  try {
+    await LocalPrefsService.instance.load();
+  } catch (e, s) {
+    BootDiagnostics.instance.record('boot', e, s, at: BootPhases.localPrefs);
+  }
+  BootDiagnostics.instance.markPhase(BootPhases.localPrefs);
+
+  // Supabase e sessão.
+  final sbSw = Stopwatch()..start();
+  try {
+    await SupabaseService.instance.ensureReady();
+    trace.step(
+      BootSteps.supabase,
+      detail:
+          '${SupabaseService.instance.isConfigured ? 'configurado' : 'desligado'} '
+          'em ${sbSw.elapsedMilliseconds}ms',
+    );
+    try {
+      final sessao = SupabaseService.instance.hasSession;
+      trace.step(
+        BootSteps.auth,
+        detail: 'sessao=${sessao ? 'ativa' : 'nenhuma'}',
+      );
+    } catch (e) {
+      trace.step(BootSteps.auth, detail: 'FALHOU ao ler sessao: $e');
+    }
+  } catch (e, s) {
+    BootDiagnostics.instance.record('boot', e, s, at: BootSteps.supabase);
+    trace.step(BootSteps.supabase, detail: 'FALHOU: $e');
+  }
+  BootDiagnostics.instance.markPhase(BootSteps.supabase);
+
+  // Firebase (FCM so como transporte; o backend continua sendo o Supabase).
+  final fbSw = Stopwatch()..start();
+  try {
+    await PushService.instance.init();
+    trace.step(
+      BootSteps.firebase,
+      detail:
+          'pronto=${PushService.instance.isReady} '
+          'configurado=${AppConfig.isFirebaseConfigured} '
+          'em ${fbSw.elapsedMilliseconds}ms',
+    );
+  } catch (e, s) {
+    BootDiagnostics.instance.record('boot', e, s, at: BootSteps.firebase);
+    trace.step(BootSteps.firebase, detail: 'FALHOU: $e');
+  }
+  BootDiagnostics.instance.markPhase(BootSteps.firebase);
+
+  // LiveKit/WebRTC: conectar e SOB DEMANDA (so ao entrar numa live), portanto
+  // nao faz parte do startup. Registrado para deixar isso explicito em vez de
+  // deixar um buraco silencioso na trilha.
+  trace.step(
+    BootSteps.livekitDeferred,
+    detail: 'conexao LiveKit e sob demanda, fora do startup',
+  );
+
+  // CONFERENCIA EXPLICITA DA ZONE. O assert do Flutter e removido em release,
+  // entao o aviso nem aparece la: registramos a comparacao na trilha, que e a
+  // unica forma de provar no aparelho que binding e runApp estao na mesma zone.
+  final bindingZone = Zone.current;
+  trace.step(
+    BootSteps.zoneCheck,
+    detail:
+        'bindingCriadoEm=${_zoneId(bindingZone)} '
+        'mesmaZone=${bindingZone == _bootZone}',
+  );
+  if (bindingZone != _bootZone) {
+    BootDiagnostics.instance.record(
+      'boot',
+      StateError(
+        'Zone do binding (${_zoneId(bindingZone)}) difere da zone do boot '
+        '_zoneId(_bootZone ?? Zone.current) — causaria "zone mismatch" no runApp.',
+      ),
+      StackTrace.current,
+      at: BootSteps.zoneCheck,
+    );
+  }
+
+  // Erro em QUALQUER build da arvore vira a tela de diagnostico no lugar da
+  // caixa cinza padrao, e fica registrado para a proxima abertura.
+  ErrorWidget.builder = (details) => const BootErrorBox();
+
+  try {
+    _appStarted = true;
+    // O fluxo de criação vive em lib/screens/create/ e não pode importar
+    // este arquivo (UploadScreen é declarado aqui). Registramos a tela de
+    // publicação para quebrar o ciclo sem duplicar nada.
+    KlaykCreationFlow.instance.registerPublishScreen(
+      (preselected) => UploadScreen(preselectedVideo: preselected),
+    );
+    runApp(const KlayKApp());
+    trace.step(
+      BootSteps.runApp,
+      detail: 'runApp na zone ${_zoneId(Zone.current)}',
+    );
+    BootDiagnostics.instance.markPhase(BootSteps.runApp);
+  } catch (e, s) {
+    BootDiagnostics.instance.record('boot', e, s, at: BootSteps.runApp);
+    trace.step(BootSteps.runApp, detail: 'FALHOU: $e');
+    _appStarted = true;
+    runApp(const BootDiagnosticsApp());
+  }
+}
+
+/// Identificador curto e estavel da zone, para comparar na trilha.
+String _zoneId(Zone z) => '0x${z.hashCode.toUnsigned(32).toRadixString(16)}';
+
+/// Erro assíncrono que escapou do boot (fora dos try/catch por passo).
+///
+/// Este handler roda na zone PAI. Chamar `runApp` aqui recriaria o mesmo
+/// "zone mismatch", então voltamos explicitamente para a zone do boot.
+void _onBootZoneError(Object error, StackTrace stack) {
+  BootDiagnostics.instance.record('zone', error, stack, at: BootSteps.runApp);
+
+  final zone = _bootZone;
+  if (zone == null || _appStarted) return;
+  zone.run(() {
+    if (_appStarted) return;
+    _appStarted = true;
+    runApp(const BootDiagnosticsApp());
+  });
+}
+
+/// Raiz mínima usada quando o [runApp] normal não pode ser construído.
+class BootDiagnosticsApp extends StatelessWidget {
+  const BootDiagnosticsApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: KlaykTheme.dark(),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: const BootDiagnosticsScreen(),
+    );
+  }
+}
+
+/// Substitui a caixa cinza do Flutter quando um build da árvore falha, para que
+/// o usuário veja o que deu errado em vez de uma tela vazia.
+class BootErrorBox extends StatelessWidget {
+  const BootErrorBox({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final d = BootDiagnostics.instance;
+    final last = d.current.isEmpty ? null : d.current.last;
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Container(
+        color: const Color(0xFF1B1020),
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: SelectableText(
+            last == null
+                ? 'Erro ao montar a tela.'
+                : '${last.error}\n\n${last.stack}',
+            style: const TextStyle(
+              color: Color(0xFFFF8A80),
+              fontSize: 10,
+              fontFamily: 'monospace',
+              height: 1.3,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ============================================================
 // APP
 // ============================================================
 
-class KlayKApp extends StatelessWidget {
+class KlayKApp extends StatefulWidget {
   const KlayKApp({super.key});
 
   @override
+  State<KlayKApp> createState() => _KlayKAppState();
+}
+
+class _KlayKAppState extends State<KlayKApp> {
+  // `true` enquanto o app está mostrando o diagnóstico em vez do conteúdo.
+  bool _showingDiagnostics = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Houve falha nesta abertura ou na anterior? Então o primeiro que o usuário
+    // vê é o relatório, com um botão para seguir para o app.
+    if (BootDiagnostics.instance.hasFailure) {
+      _showingDiagnostics = true;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: ExperienceSettings.instance.prefs,
-      builder: (context, child) {
-        final reduceMotion =
-            ExperienceSettings.instance.reduceAnimations;
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'KLAY K',
-          theme: KlaykTheme.dark(reduceMotion: reduceMotion),
-          routes: {
-            '/login': (_) => const AuthScreen(),
-            '/live/start': (_) => const StartLiveScreen(),
-          },
-          home: AppGate(homeBuilder: () => const MainScreen()),
-        );
-      },
+    return ListenableBuilder(
+      listenable: AppLanguageController.instance,
+      builder: (context, _) => AnimatedBuilder(
+        animation: Listenable.merge([
+          ExperienceSettings.instance.prefs,
+          LocalPrefsService.instance.prefs,
+        ]),
+        builder: (context, child) {
+          final reduceMotion = ExperienceSettings.instance.reduceAnimations;
+          final local = LocalPrefsService.instance.prefs.value;
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: 'KLAY K',
+            onGenerateTitle: (ctx) => AppLocalizations.of(ctx)!.appName,
+            navigatorKey: kAppNavigatorKey,
+            theme: KlaykTheme.dark(
+              reduceMotion: reduceMotion,
+              highContrast: local.highContrast,
+            ),
+            builder: (context, child) {
+              final mq = MediaQuery.of(context);
+              final scale = (mq.textScaler.scale(1) * local.textScale).clamp(
+                0.8,
+                2.0,
+              );
+              return MediaQuery(
+                data: mq.copyWith(textScaler: TextScaler.linear(scale)),
+                child: child ?? const SizedBox.shrink(),
+              );
+            },
+            locale: AppLanguageController.instance.locale,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routes: {
+              '/login': (_) => const AuthScreen(),
+              '/live/start': (_) => const StartLiveScreen(),
+            },
+            home: _showingDiagnostics
+                ? BootDiagnosticsScreen(
+                    onContinue: () =>
+                        setState(() => _showingDiagnostics = false),
+                  )
+                : const _AppLifecycleHost(
+                    child: AppGate(homeBuilder: _mainHome),
+                  ),
+          );
+        },
+      ),
     );
   }
+}
+
+Widget _mainHome() => const MainScreen();
+
+/// Mantém a medição de tempo de uso em primeiro plano sem deixar timer
+/// rodando quando o app não está visível.
+class _AppLifecycleHost extends StatefulWidget {
+  const _AppLifecycleHost({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_AppLifecycleHost> createState() => _AppLifecycleHostState();
+}
+
+class _AppLifecycleHostState extends State<_AppLifecycleHost>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    LocalPrefsService.instance.stopSession();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      LocalPrefsService.instance.startSession();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      LocalPrefsService.instance.stopSession();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 // ============================================================
@@ -158,6 +510,7 @@ class KlayKVideo {
   final String id;
   final String? authorId;
   final String videoUrl;
+  final String? coverUrl;
   final String username;
   final String displayName;
   final String description;
@@ -180,6 +533,7 @@ class KlayKVideo {
     required this.id,
     this.authorId,
     required this.videoUrl,
+    this.coverUrl,
     required this.username,
     required this.displayName,
     required this.description,
@@ -206,6 +560,7 @@ KlayKVideo _videoFromPost(FeedPost post) {
     id: post.id,
     authorId: post.userId,
     videoUrl: post.videoUrl,
+    coverUrl: post.coverUrl,
     username: post.author?.username != null
         ? '@${post.author!.username}'
         : '@usuario',
@@ -234,6 +589,7 @@ KlayKVideo _videoFromPostResolved(FeedPost post, String videoUrl) {
     id: v.id,
     authorId: v.authorId,
     videoUrl: videoUrl,
+    coverUrl: v.coverUrl,
     username: v.username,
     displayName: v.displayName,
     description: v.description,
@@ -255,23 +611,39 @@ KlayKVideo _videoFromPostResolved(FeedPost post, String videoUrl) {
 
 /// Resolve URLs assinadas de posts em paralelo com concorrência limitada
 /// (antes: chamada em série por post; lotes evitam estouro da edge function).
-Future<List<KlayKVideo>> _resolvePostUrls(List<FeedPost> posts) async {
+/// `onWave` (opcional) é chamado após CADA onda com o progresso parcial —
+/// permite pintar o feed assim que os primeiros posts têm URL, sem esperar a
+/// página inteira (primeiro vídeo toca mais cedo).
+Future<List<KlayKVideo>> _resolvePostUrls(
+  List<FeedPost> posts, {
+  void Function(List<KlayKVideo> partial)? onWave,
+}) async {
   final out = <KlayKVideo>[];
   if (posts.isEmpty) return out;
   const batch = 5;
+  const itemTimeout = Duration(seconds: 8);
   for (var i = 0; i < posts.length; i += batch) {
     final end = i + batch > posts.length ? posts.length : i + batch;
     final chunk = posts.sublist(i, end);
-    final urls = await Future.wait(chunk.map((post) async {
-      try {
-        return await ContentService.instance.resolveVideoUrl(post);
-      } catch (_) {
-        return post.videoUrl;
-      }
-    }));
+    // Cada item tem teto próprio: uma edge de signed-URL lenta/fora não
+    // segura a onda inteira nem espera a página toda — o item cai para a URL
+    // crua e o restante do feed continua (requisito: feed não depende da
+    // resolução de todas as URLs para sair do loading).
+    final urls = await Future.wait(
+      chunk.map((post) async {
+        try {
+          return await ContentService.instance
+              .resolveVideoUrl(post)
+              .timeout(itemTimeout);
+        } catch (_) {
+          return post.videoUrl;
+        }
+      }),
+    );
     for (var j = 0; j < urls.length; j++) {
       out.add(_videoFromPostResolved(chunk[j], urls[j]));
     }
+    onWave?.call(List.of(out));
   }
   return out;
 }
@@ -323,14 +695,15 @@ Future<void> showReportDialog(
   required String targetType,
   String targetLabel = 'conteúdo',
 }) async {
-  const reasons = [
-    'Conteúdo inadequado ou ofensivo',
-    'Assédio ou bullying',
-    'Spam ou publicidade enganosa',
-    'Desinformação ou fake news',
-    'Violência ou discurso de ódio',
-    'Viola meus direitos (autoral, privacidade)',
-    'Outro',
+  final l10n = AppLocalizations.of(context)!;
+  final reasons = [
+    l10n.reportReasonInappropriate,
+    l10n.reportReasonHarassment,
+    l10n.reportReasonSpam,
+    l10n.reportReasonMisinfo,
+    l10n.reportReasonViolence,
+    l10n.reportReasonRights,
+    l10n.reportReasonOther,
   ];
 
   final reason = await showModalBottomSheet<String>(
@@ -345,7 +718,7 @@ Future<void> showReportDialog(
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
         children: [
           Text(
-            'Denunciar $targetLabel',
+            l10n.reportContent(targetLabel),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 16,
@@ -353,9 +726,9 @@ Future<void> showReportDialog(
             ),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Escolha um motivo. A moderação do KLAY K vai analisar sua denúncia.',
-            style: TextStyle(color: Colors.white54, fontSize: 13),
+          Text(
+            l10n.reportReasonIntro,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
           ),
           const SizedBox(height: 10),
           for (final r in reasons)
@@ -376,27 +749,33 @@ Future<void> showReportDialog(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: const Color(0xFF1C1C26),
-      title: Text('Denunciar $targetLabel',
-          style: const TextStyle(
-              color: Colors.white, fontWeight: FontWeight.w800)),
+      title: Text(
+        l10n.reportContent(targetLabel),
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Motivo: $reason',
-              style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(
+            l10n.reportReasonLabel(reason),
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: detailsCtrl,
             maxLines: 3,
             maxLength: 300,
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: 'Conte mais detalhes (opcional)',
-              hintStyle: TextStyle(color: Colors.white38),
+            decoration: InputDecoration(
+              hintText: l10n.reportDetailsHint,
+              hintStyle: const TextStyle(color: Colors.white38),
               filled: true,
-              fillColor: Color(0xFF17151F),
-              border: OutlineInputBorder(borderSide: BorderSide.none),
+              fillColor: const Color(0xFF17151F),
+              border: const OutlineInputBorder(borderSide: BorderSide.none),
             ),
           ),
         ],
@@ -404,12 +783,17 @@ Future<void> showReportDialog(
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+          child: Text(
+            l10n.cancel,
+            style: const TextStyle(color: Colors.white54),
+          ),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(ctx, detailsCtrl.text.trim()),
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE4183C)),
-          child: const Text('Enviar denúncia'),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFE4183C),
+          ),
+          child: Text(l10n.sendReport),
         ),
       ],
     ),
@@ -425,13 +809,11 @@ Future<void> showReportDialog(
       reason: reason,
       details: details,
     );
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Denúncia enviada. Obrigado por ajudar o KLAY K!'),
-    ));
+    messenger.showSnackBar(SnackBar(content: Text(l10n.sentReportFull)));
   } catch (e) {
-    messenger.showSnackBar(SnackBar(
-      content: Text('Erro ao enviar denúncia: $e'),
-    ));
+    messenger.showSnackBar(
+      SnackBar(content: Text(l10n.reportError(e.toString()))),
+    );
   }
 }
 
@@ -556,7 +938,8 @@ class _MainScreenState extends State<MainScreen> {
 
   // IndexedStack nasce e morre junto (não em const) para o Feed saber quando
   // perde foco (pausa vídeo/áudio ao trocar de aba — economia real).
-  late List<Widget> _screens; // setado em initState (estável) com tabActive atual.
+  late List<Widget>
+  _screens; // setado em initState (estável) com tabActive atual.
 
   @override
   void initState() {
@@ -582,8 +965,9 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
     try {
-      final settings =
-          await AccountService.instance.fetchSettings().catchError((_) => const AccountSettings());
+      final settings = await AccountService.instance.fetchSettings().catchError(
+        (_) => const AccountSettings(),
+      );
       final needsOnboarding = !settings.onboardingDone;
       if (mounted && needsOnboarding) {
         setState(() {
@@ -598,16 +982,29 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   List<Widget> _buildScreens() => [
-        FeedScreen(tabActive: _currentIndex == 0, rewardPaused: _rewardPaused),
-        const GameScreen(),
-        const UploadScreen(),
-        const RealMessagesScreen(),
-        const ProfileScreen(),
-      ];
+    FeedScreen(tabActive: _currentIndex == 0, rewardPaused: _rewardPaused),
+    const LiveHubScreen(),
+    const GameScreen(),
+    const UploadScreen(),
+    MessagesHubScreen(onUnreadChanged: _refreshUnread),
+    ProfileScreen(onCreateVideo: _openUploadForProfile),
+  ];
 
-  Future<void> _refreshUnread() async {
+  /// Abre o fluxo de publicação (aba Upload) como rota — usado pelo estado
+  /// vazio da aba Perfil ("Criar vídeo").
+  Future<void> _openUploadForProfile() async {
+    await Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute(builder: (_) => const UploadScreen()));
+  }
+
+  Future<void> _refreshUnread([int? _]) async {
     if (!SupabaseService.instance.isConfigured) return;
-    final c = await MessageService.instance.unreadCount().catchError((_) => 0);
+    final dm = await MessageService.instance.unreadCount().catchError((_) => 0);
+    final nf = await ContentService.instance
+        .unreadNotificationCount()
+        .catchError((_) => 0);
+    final c = dm + nf;
     if (mounted && c != _messagesUnread) {
       setState(() => _messagesUnread = c);
     }
@@ -641,13 +1038,21 @@ class _MainScreenState extends State<MainScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
-          IndexedStack(
-            index: _currentIndex,
-            children: _screens,
-          ),
-          RewardFloatingButton(visibleTab: _currentIndex, paused: _rewardPaused),
+          IndexedStack(index: _currentIndex, children: _screens),
           const LivePremiumBubble(),
           const MaintenanceLayer(),
+          // Bolinha de moedas/recompensa (20s) — abre a carteira real.
+          RewardFloatingButton(
+            visibleTab: _currentIndex,
+            paused: _rewardPaused,
+          ),
+          // Bolinha de missões/nível — abre a tela de missões reais.
+          //
+          // Não é mais exibida no FEED PRINCIPAL (aba 0): ali ela ficava solta sobre o
+          // vídeo e cobria o canto superior esquerdo. Continua disponível nas demais abas
+          // e, principalmente, dentro da tela de Missões. O sistema de nível/XP não foi
+          // alterado — só a renderização flutuante do feed.
+          if (_currentIndex != 0) QuestBubble(visibleTab: _currentIndex),
         ],
       ),
       bottomNavigationBar: KlayKBottomNavigation(
@@ -750,7 +1155,9 @@ class _MaintenanceLayerState extends State<MaintenanceLayer> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    emergency ? 'KLAY K em emergência' : 'KLAY K em manutenção',
+                    emergency
+                        ? AppLocalizations.of(context)!.maintenanceEmergency
+                        : AppLocalizations.of(context)!.maintenanceMode,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
@@ -761,24 +1168,33 @@ class _MaintenanceLayerState extends State<MaintenanceLayer> {
                   const SizedBox(height: 8),
                   Text(
                     w.message.isEmpty
-                        ? 'Estamos por aqui em breve. Obrigado pela paciência.'
+                        ? AppLocalizations.of(context)!.maintenanceSoonBack
                         : w.message,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        color: Colors.white70, fontSize: 13, height: 1.4),
+                      color: Colors.white70,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'modo ${w.mode}${w.isGlobal ? ' · escopo global' : ''}',
+                    AppLocalizations.of(context)!.maintenanceModeInfo(
+                      w.mode,
+                      w.isGlobal
+                          ? AppLocalizations.of(context)!.maintenanceGlobalScope
+                          : '',
+                    ),
                     style: const TextStyle(color: Colors.white38, fontSize: 11),
                   ),
                   const SizedBox(height: 20),
                   OutlinedButton.icon(
                     onPressed: _tick,
                     style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white70),
+                      foregroundColor: Colors.white70,
+                    ),
                     icon: const Icon(Icons.refresh),
-                    label: const Text('Tentar novamente'),
+                    label: Text(AppLocalizations.of(context)!.retry),
                   ),
                 ],
               ),
@@ -809,17 +1225,24 @@ class _WindowsBanner extends StatelessWidget {
           decoration: BoxDecoration(
             color: const Color(0xFF2A2012),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
+            border: Border.all(
+              color: const Color(0xFFF59E0B).withValues(alpha: 0.4),
+            ),
           ),
           child: Row(
             children: [
-              const Icon(Icons.construction_rounded,
-                  color: Color(0xFFF59E0B), size: 18),
+              const Icon(
+                Icons.construction_rounded,
+                color: Color(0xFFF59E0B),
+                size: 18,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '${w.isGlobal ? 'KLAY K' : w.feature} em manutenção'
-                  '${w.message.isEmpty ? '.' : ': ${w.message}'}',
+                  AppLocalizations.of(
+                        context,
+                      )!.featureMaintenance(w.isGlobal ? 'KLAY K' : w.feature) +
+                      (w.message.isEmpty ? '.' : ': ${w.message}'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
@@ -848,7 +1271,7 @@ class KlayKBottomNavigation extends StatelessWidget {
   void _showPublishMenu(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF1C1C26),
+      backgroundColor: const Color(0xFF171717),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -859,62 +1282,97 @@ class KlayKBottomNavigation extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Criar no KLAY K',
-                style: TextStyle(
+              Text(
+                AppLocalizations.of(ctx)!.createOnKlayK,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                 ),
               ),
               const SizedBox(height: 14),
-              _publishTile(ctx, Icons.video_library_rounded, 'Vídeo curto',
-                  onTap: () {
-                Navigator.of(ctx).pop();
-                onTap(2);
-              }),
-              _publishTile(ctx, Icons.sensors_rounded, 'Live ao vivo',
-                  iconColor: const Color(0xFFFF2E4D), onTap: () {
-                Navigator.of(ctx).pop();
-                if (AppConfig.isSupabaseConfigured) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const StartLiveScreen(),
-                    ),
-                  );
-                } else {
-                  _liveNotConfigured(context);
-                }
-              }),
-              _publishTile(ctx, Icons.mic_rounded, 'Áudio',
-                  iconColor: const Color(0xFFAB47BC), onTap: () {
-                Navigator.of(ctx).pop();
-                if (AppConfig.isSupabaseConfigured) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const AudioRoomsScreen(),
-                    ),
-                  );
-                } else {
-                  _liveNotConfigured(context);
-                }
-              }),
-              _publishTile(ctx, Icons.group_rounded, 'Amigos',
-                  iconColor: const Color(0xFF00BFA5), onTap: () {
-                Navigator.of(ctx).pop();
-                if (AppConfig.isSupabaseConfigured) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const AudioRoomsScreen(
-                        autoCreate: true,
-                        friendsMode: true,
+              _publishTile(
+                ctx,
+                Icons.video_library_rounded,
+                AppLocalizations.of(ctx)!.publishVideoTile,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  // Gravar/pick + efeitos + gravação + publicação.
+                  // Sem Supabase não há upload possível: caímos na aba de
+                  // publicação, que já mostra o aviso de "não configurado".
+                  if (AppConfig.isSupabaseConfigured) {
+                    unawaited(KlaykCreationFlow.instance.open(context));
+                  } else {
+                    onTap(3);
+                  }
+                },
+              ),
+              _publishTile(
+                ctx,
+                Icons.sensors_rounded,
+                AppLocalizations.of(ctx)!.publishLiveTile,
+                iconColor: const Color(0xFFFF2E4D),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (AppConfig.isSupabaseConfigured) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const StartLiveScreen(),
                       ),
-                    ),
-                  );
-                } else {
-                  _liveNotConfigured(context);
-                }
-              }),
+                    );
+                  } else {
+                    _liveNotConfigured(context);
+                  }
+                },
+              ),
+              _publishTile(
+                ctx,
+                Icons.sports_esports_rounded,
+                AppLocalizations.of(ctx)!.publishGameTile,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  onTap(2);
+                },
+              ),
+              _publishTile(
+                ctx,
+                Icons.mic_rounded,
+                AppLocalizations.of(ctx)!.publishAudioTile,
+                iconColor: const Color(0xFFAB47BC),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (AppConfig.isSupabaseConfigured) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const AudioRoomsScreen(),
+                      ),
+                    );
+                  } else {
+                    _liveNotConfigured(context);
+                  }
+                },
+              ),
+              _publishTile(
+                ctx,
+                Icons.group_rounded,
+                AppLocalizations.of(ctx)!.publishFriendsTile,
+                iconColor: const Color(0xFF00BFA5),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (AppConfig.isSupabaseConfigured) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const AudioRoomsScreen(
+                          autoCreate: true,
+                          friendsMode: true,
+                        ),
+                      ),
+                    );
+                  } else {
+                    _liveNotConfigured(context);
+                  }
+                },
+              ),
             ],
           ),
         ),
@@ -924,10 +1382,8 @@ class KlayKBottomNavigation extends StatelessWidget {
 
   void _liveNotConfigured(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Lives reais exigem Supabase + LiveKit configurados (--dart-define).',
-        ),
+      SnackBar(
+        content: Text(AppLocalizations.of(context)!.livesNeedConfig),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -961,26 +1417,22 @@ class KlayKBottomNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       decoration: const BoxDecoration(
         color: Colors.black,
-        border: Border(
-          top: BorderSide(
-            color: Color(0xFF252525),
-            width: 0.5,
-          ),
-        ),
+        border: Border(top: BorderSide(color: Color(0xFF252525), width: 0.5)),
       ),
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 56,
+          height: 58,
           child: Row(
             children: [
               Expanded(
                 child: _NavigationItem(
                   asset: 'assets/ic_home.png',
-                  label: 'Início',
+                  label: l10n.homeTab,
                   selected: currentIndex == 0,
                   onTap: () => onTap(0),
                 ),
@@ -988,9 +1440,9 @@ class KlayKBottomNavigation extends StatelessWidget {
               Expanded(
                 child: _NavigationItem(
                   asset: 'assets/ic_jogo.png',
-                  label: 'Jogo',
-                  selected: currentIndex == 1,
-                  onTap: () => onTap(1),
+                  label: l10n.gamesTab,
+                  selected: currentIndex == 2,
+                  onTap: () => onTap(2),
                 ),
               ),
               Expanded(
@@ -1003,54 +1455,18 @@ class KlayKBottomNavigation extends StatelessWidget {
                     children: [
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 220),
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Color(0xFFA955FF),
-                              Color(0xFF7C3AED),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.32),
-                            width: 1.2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF8B5CF6)
-                                  .withValues(
-                                    alpha: currentIndex == 2 ? 0.95 : 0.6,
-                                  ),
-                              blurRadius: currentIndex == 2 ? 22 : 14,
-                              offset: const Offset(0, 4),
-                            ),
-                            BoxShadow(
-                              color: const Color(0xFF5B21B6)
-                                  .withValues(alpha: 0.5),
-                              blurRadius: 6,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
+                        width: 54,
+                        height: 54,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF8B5CF6),
+                          shape: BoxShape.circle,
                         ),
                         child: const Icon(
                           Icons.add,
                           color: Colors.white,
-                          size: 28,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black38,
-                              blurRadius: 6,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
+                          size: 30,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      const SizedBox(height: 11),
                     ],
                   ),
                 ),
@@ -1058,18 +1474,18 @@ class KlayKBottomNavigation extends StatelessWidget {
               Expanded(
                 child: _NavigationItem(
                   asset: 'assets/ic_mensagens.png',
-                  label: 'Mensagens',
-                  selected: currentIndex == 3,
+                  label: l10n.messagesTab,
+                  selected: currentIndex == 4,
                   badge: messageUnread,
-                  onTap: () => onTap(3),
+                  onTap: () => onTap(4),
                 ),
               ),
               Expanded(
                 child: _NavigationItem(
                   asset: 'assets/ic_perfil_aba.png',
-                  label: 'Perfil',
-                  selected: currentIndex == 4,
-                  onTap: () => onTap(4),
+                  label: l10n.profileTab,
+                  selected: currentIndex == 5,
+                  onTap: () => onTap(5),
                 ),
               ),
             ],
@@ -1081,17 +1497,17 @@ class KlayKBottomNavigation extends StatelessWidget {
 }
 
 class _NavigationItem extends StatelessWidget {
-  final String asset;
+  final String? asset;
   final String label;
   final bool selected;
   final int? badge;
   final VoidCallback onTap;
 
   const _NavigationItem({
-    required this.asset,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.asset,
     this.badge,
   });
 
@@ -1106,83 +1522,64 @@ class _NavigationItem extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              _StyledAssetIcon(
-                asset: asset,
-                size: 24,
-                tint: selected ? Colors.white : const Color(0xFF8E8E8E),
-              ),
-              if (badge != null && badge! > 0)
-                Positioned(
-                  right: -12,
-                  top: -7,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF5C5C),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      '$badge',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _StyledAssetIcon(
+                  asset: asset!,
+                  size: 24,
+                  tint: selected
+                      ? const Color(0xFFA78BFA)
+                      : const Color(0xFF8E8E8E),
+                ),
+                if (badge != null && badge! > 0)
+                  Positioned(
+                    right: -12,
+                    top: -7,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF5C5C),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '$badge',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              if (selected)
-                Positioned(
-                  right: -8,
-                  top: -4,
-                  child: Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFF8B5CF6),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF8B5CF6)
-                              .withValues(alpha: 0.6),
-                          blurRadius: 7,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 3),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: selected ? Colors.white : Colors.grey,
-                fontSize: 11,
-                fontWeight:
-                    selected ? FontWeight.w700 : FontWeight.normal,
-                shadows: selected
-                    ? [
-                        Shadow(
-                          color: const Color(0xFF8B5CF6)
-                              .withValues(alpha: 0.45),
-                          blurRadius: 6,
-                          offset: const Offset(0, 1),
-                        ),
-                      ]
-                    : null,
+              ],
+            ),
+            const SizedBox(height: 2),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: selected ? 16 : 0,
+              height: 3,
+              decoration: BoxDecoration(
+                color: const Color(0xFF8B5CF6),
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 2),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selected ? const Color(0xFFE9E9FF) : Colors.grey,
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1200,7 +1597,7 @@ class FeedScreen extends StatefulWidget {
   /// aba) — o estado pausa os vídeos para não tocar áudio em segundo plano.
   final bool tabActive;
 
-  /// Notifica o [RewardFloatingButton] quando nenhum vídeo do feed está de
+  /// Notifica o ciclo de recompensas quando nenhum vídeo do feed está de
   /// fato sendo assistido (o ciclo de recompensa pausa nesses casos).
   final ValueNotifier<bool>? rewardPaused;
 
@@ -1208,34 +1605,99 @@ class FeedScreen extends StatefulWidget {
   State<FeedScreen> createState() => _FeedScreenState();
 }
 
-class _FeedScreenState extends State<FeedScreen> {
+class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   late final PageController _pageController;
 
   int _currentPage = 0;
-  int _feedTab = 0;
+  int _feedTab = _FeedTopBar.forYouIndex;
+
+  /// `false` quando o app vai para background — o vídeo ativo pausa e o
+  /// preload do próximo é interrompido (nenhum download/áudio sem necessidade).
+  bool _appActive = true;
+
+  /// Resolução em ondas das URLs do lote inicial: a primeira onda pinta o
+  /// feed (primeiro vídeo toca cedo) enquanto o restante é resolvido em
+  /// background. Bloqueia paginação/duplicatas durante a resolução.
+  bool _resolvingInitial = false;
+
+  /// Evita consultas duplicadas de anúncios no boot (initState + fim do load).
+  bool _adsLoading = false;
+
+  // Pull-to-refresh APENAS no primeiro vídeo (índice 0): o PageView usa
+  // BouncingScrollPhysics para o overscroll acompanhar o dedo em qualquer
+  // plataforma; o NotificationListener detecta o arrasto além do topo, mostra
+  // um indicador compacto e executa o refresh real preservando posição,
+  // controllers e vídeo atual.
+  final ValueNotifier<double> _pullExtent = ValueNotifier(0);
+  bool _refreshingPull = false;
+  static const double _pullRefreshThreshold = 55;
 
   List<KlayKVideo> _videos = [];
   bool _loading = true;
+  double _feedLoadingProgress = 0;
   bool _feedError = false;
+
+  /// Marca que uma carga do feed está em voo (guarda de reentrância por
+  /// execução — NÃO é o mesmo que a flag de UI `_loading`, que se inicia true
+  /// para exibir o spinner). Isso impede que a PRIMEIRA carga seja pulada.
+  bool _feedLoadInFlight = false;
+
+  static const int _feedPageSize = 50;
+
+  /// Teto duro para a carga completa do feed (autenticação + posts +
+  /// likes/saves/follows). Garante que qualquer lentidão do Supabase termina
+  /// em estado de erro com "Tentar novamente" — nunca em loading infinito.
+  static const Duration feedLoadHardTimeout = Duration(seconds: 45);
+
+  /// Teto do feed na memória: evita acumular centenas de vídeos ao rolar;
+  /// páginas antigas saem da PageView (cache) e a paginação simplesmente para.
+  static const int _maxFeedVideos = 200;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  bool _loadMoreFailed = false;
 
   List<AdCreative> _feedAds = [];
   final List<String> _countedAdImpressions = [];
+
+  // Lives reais ativas (status='live') intercaladas no feed "Para você".
+  // Somente dados reais do Supabase; quando uma live encerra, o realtime a
+  // remove — nunca aparece uma live encerrada no feed.
+  List<RealLive> _feedLives = const [];
+  RealtimeChannel? _livesChannel;
+  Timer? _livesRefreshDebounce;
 
   int _notifUnread = 0;
   RealtimeChannel? _notifChannel;
   StreamSubscription<AuthState>? _authSub;
 
+  String _myAvatarUrl = '';
+
   List<KlayKVideo> get videos => _videos;
 
-  /// Feed combinado: vídeos intercalados com anúncios aprovados.
+  /// Feed combinado: vídeos intercalados com anúncios aprovados e, na aba
+  /// "Para você", com lives reais ativas (status='live').
   /// Um anúncio entra a cada [kAdsFeedEveryN] vídeos. Só entram itens
   /// APPROVED vindos da RPC pública (nunca decididos pelo cliente).
+  /// As lives vêm do Supabase (nunca do catálogo de demonstração).
   List<Object> get feedItems {
-    if (_feedAds.isEmpty) return List<Object>.of(videos);
+    final withAds = _feedAds.isNotEmpty;
+    final withLives =
+        _feedTab == _FeedTopBar.forYouIndex && _feedLives.isNotEmpty;
+    if (!withAds && !withLives) return List<Object>.of(videos);
+
     final items = <Object>[];
     for (var i = 0; i < videos.length; i++) {
       items.add(videos[i]);
-      final adSlot = i % kAdsFeedEveryN == kAdsFeedEveryN - 1;
+      // Live reais intercaladas (circular pelas ativas, sem duplicar num slot).
+      if (withLives) {
+        final liveSlot = (i + 1) % kFeedLiveEveryN == 0;
+        if (liveSlot) {
+          final live =
+              _feedLives[(i + 1) ~/ kFeedLiveEveryN % _feedLives.length];
+          items.add(live);
+        }
+      }
+      final adSlot = withAds && i % kAdsFeedEveryN == kAdsFeedEveryN - 1;
       if (adSlot) {
         final ad = _feedAds[i ~/ kAdsFeedEveryN % _feedAds.length];
         items.add(ad);
@@ -1244,14 +1706,83 @@ class _FeedScreenState extends State<FeedScreen> {
     return items;
   }
 
+  /// Carrega as lives reais ativas para intercalar no feed (status='live').
+  Future<void> _loadFeedLives() async {
+    if (!SupabaseService.instance.isConfigured) return;
+    try {
+      final lives = await SupabaseService.instance.fetchActiveLives().timeout(
+        SupabaseService.networkTimeout,
+      );
+      if (!mounted) return;
+      setState(() {
+        _feedLives = lives;
+      });
+    } catch (_) {
+      // Falha de rede: mantém o último snapshot válido de lives.
+    }
+    if (mounted) _subscribeFeedLives();
+  }
+
+  /// Realtime em `lives`: nova live entra e live encerrada sai sozinha do
+  /// feed (nunca dependemos de reload manual). Debounce evita refetch em
+  /// rajadas (ex.: viewer_count mudando).
+  void _subscribeFeedLives() {
+    if (!SupabaseService.instance.isConfigured) return;
+    final me = SupabaseService.instance.client.auth.currentUser?.id;
+    if (me == null) return;
+    if (_livesChannel != null) return;
+    try {
+      _livesChannel = SupabaseService.instance.client
+          .channel('feed-lives-$me')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'lives',
+            callback: (_) => _scheduleFeedLivesRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: 'public',
+            table: 'lives',
+            callback: (_) => _scheduleFeedLivesRefresh(),
+          )
+          .subscribe();
+    } catch (_) {
+      // Realtime indisponível: o feed segue com o último snapshot válido.
+    }
+  }
+
+  void _scheduleFeedLivesRefresh() {
+    _livesRefreshDebounce?.cancel();
+    _livesRefreshDebounce = Timer(
+      const Duration(milliseconds: 500),
+      _loadFeedLives,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageController = PageController();
     _loadFeed();
     _loadFeedAds();
+    _loadFeedLives();
     _initNotifications();
+    _loadAvatar();
     _updateRewardPause();
+  }
+
+  /// App volta ao primeiro plano → retoma; foi para background → pausa o vídeo
+  /// ativo e interrompe preloads (nenhum controller toca sem necessidade).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final active = state == AppLifecycleState.resumed;
+    if (active != _appActive && mounted) {
+      setState(() {
+        _appActive = active;
+      });
+    }
   }
 
   @override
@@ -1262,41 +1793,71 @@ class _FeedScreenState extends State<FeedScreen> {
       setState(() {});
     }
     if (oldWidget.tabActive != widget.tabActive) {
-      _updateRewardPause();
+      // NÃO pode sincronizar aqui: `didUpdateWidget` roda dentro da fase de
+      // build, e o `ValueNotifier` notifica de forma síncrona. A notificação
+      // chegava no `RewardTimerController.setActive()` -> `notifyListeners()`
+      // -> `AnimatedBuilder.markNeedsBuild()` com a árvore em construção
+      // ("setState() or markNeedsBuild() called during build").
+      _scheduleRewardPauseSync();
     }
+  }
+
+  bool _rewardPauseSyncScheduled = false;
+
+  /// Agenda a sincronização do sinal de pausa do RewardTimer para depois do
+  /// frame, sem duplicar callbacks e sem notificar se nada mudou.
+  void _scheduleRewardPauseSync() {
+    if (_rewardPauseSyncScheduled) return;
+    _rewardPauseSyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rewardPauseSyncScheduled = false;
+      if (!mounted) return;
+      _updateRewardPause();
+    });
   }
 
   void _initNotifications() {
     if (!SupabaseService.instance.isConfigured) return;
     _notifBadgeRefresh();
     try {
-      _notifChannel ??=
-          SupabaseService.instance.subscribeToNotifications((_) {
+      _notifChannel ??= SupabaseService.instance.subscribeToNotifications((_) {
         _notifBadgeRefresh();
       });
     } catch (_) {
       // Sem sessão ainda: entra quando o usuário fizer login.
     }
-    _authSub = SupabaseService.instance.client.auth.onAuthStateChange.listen(
-      (authState) {
-        final event = authState.event;
-        final session = authState.session;
-        if (event == AuthChangeEvent.signedIn && session != null) {
-          _notifBadgeRefresh();
-          try {
-            _notifChannel ??=
-                SupabaseService.instance.subscribeToNotifications((_) {
-              _notifBadgeRefresh();
-            });
-          } catch (_) {}
-        } else if (event == AuthChangeEvent.signedOut) {
-          final ch = _notifChannel;
-          _notifChannel = null;
-          if (ch != null) SupabaseService.instance.removeChannel(ch);
-          if (mounted) setState(() => _notifUnread = 0);
+    _authSub = SupabaseService.instance.client.auth.onAuthStateChange.listen((
+      authState,
+    ) {
+      final event = authState.event;
+      final session = authState.session;
+      if (event == AuthChangeEvent.signedIn && session != null) {
+        _notifBadgeRefresh();
+        _loadAvatar();
+        _loadFeedLives();
+        try {
+          _notifChannel ??= SupabaseService.instance.subscribeToNotifications((
+            _,
+          ) {
+            _notifBadgeRefresh();
+          });
+        } catch (_) {}
+      } else if (event == AuthChangeEvent.signedOut) {
+        final ch = _notifChannel;
+        _notifChannel = null;
+        if (ch != null) SupabaseService.instance.removeChannel(ch);
+        final lc = _livesChannel;
+        _livesChannel = null;
+        if (lc != null) SupabaseService.instance.removeChannel(lc);
+        if (mounted) {
+          setState(() {
+            _notifUnread = 0;
+            _myAvatarUrl = '';
+            _feedLives = const [];
+          });
         }
-      },
-    );
+      }
+    });
   }
 
   Future<void> _notifBadgeRefresh() async {
@@ -1306,14 +1867,37 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
+  /// Avatar real do usuário logado para o topo da Home.
+  Future<void> _loadAvatar() async {
+    if (!SupabaseService.instance.isConfigured) return;
+    try {
+      final me = await ProfileService.instance.fetchMyProfile();
+      if (!mounted) return;
+      final url = me?.avatarUrl ?? '';
+      if (url != _myAvatarUrl) {
+        setState(() => _myAvatarUrl = url);
+      }
+    } catch (_) {
+      // Sem sessão ainda: mantém o avatar neutro no topo.
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _livesRefreshDebounce?.cancel();
+    final lc = _livesChannel;
+    if (lc != null) {
+      SupabaseService.instance.removeChannel(lc);
+      _livesChannel = null;
+    }
     _authSub?.cancel();
     final ch = _notifChannel;
     if (ch != null) {
       SupabaseService.instance.removeChannel(ch);
     }
     _pageController.dispose();
+    _pullExtent.dispose();
     super.dispose();
   }
 
@@ -1326,30 +1910,144 @@ class _FeedScreenState extends State<FeedScreen> {
       }
       return;
     }
+    // Guarda de reentrância por execução (e não por _loading, que se inicia
+    // true de propósito para exibir o spinner): chamadas duplicadas (troca de
+    // aba, retry, refresh) não recarregam enquanto uma carga está em voo — mas
+    // a PRIMEIRA carga SEMPRE entra. Sem isso o feed ficava "Carregando..."
+    // para sempre (bug real).
+    if (_feedLoadInFlight || _resolvingInitial) return;
+    _feedLoadInFlight = true;
+    debugPrint('[FEED] início (tab $_feedTab)');
 
     setState(() {
       _loading = true;
+      _feedLoadingProgress = 0;
       _feedError = false;
+      _loadingMore = false;
+      _loadMoreFailed = false;
+      _hasMore = true;
     });
 
+    var done = false;
     try {
-      final posts = await ContentService.instance.fetchFeed();
-      final loaded = await _resolvePostUrls(posts);
-      if (mounted) {
+      final posts = await ContentService.instance
+          .fetchFeed(limit: _feedPageSize)
+          .timeout(feedLoadHardTimeout);
+      debugPrint('[FEED] posts consultados: ${posts.length}');
+      if (!mounted) {
+        _resolvingInitial = false;
+        return;
+      }
+      if (posts.isEmpty) {
         setState(() {
-          _videos = loaded;
+          _videos = const [];
+          _feedLoadingProgress = 1;
           _loading = false;
           _feedError = false;
+          _hasMore = false;
+        });
+        done = true;
+        debugPrint('[FEED] estado atualizado (vazio)');
+        _loadFeedAds();
+        return;
+      }
+      _resolvingInitial = true;
+      // Resolve em ondas: após a 1ª onda o feed já é pintado com os primeiros
+      // vídeos (o 1º toca imediatamente); o restante entra em background sem
+      // esperar a página inteira. NUNCA bloqueia a saída do loading na página
+      // toda: cada onda pinta o que já tem.
+      await _resolvePostUrls(
+        posts,
+        onWave: (partial) {
+          if (!mounted) return;
+          final progress = (partial.length / posts.length)
+              .clamp(0.0, 1.0)
+              .toDouble();
+          setState(() {
+            _videos = partial;
+            _feedLoadingProgress = progress;
+            _loading = false;
+            _feedError = false;
+          });
+          debugPrint('[FEED] URLs resolvidas (onda): ${partial.length}');
+        },
+      );
+      _resolvingInitial = false;
+      if (mounted) {
+        setState(() {
+          _feedLoadingProgress = 1;
+          if (posts.length < _feedPageSize) _hasMore = false;
         });
       }
+      done = true;
+      debugPrint('[FEED] estado atualizado; fim');
       _loadFeedAds();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[FEED] erro: $e');
       if (mounted) {
         setState(() {
           _loading = false;
           _feedError = true;
         });
       }
+      done = true;
+    } finally {
+      _feedLoadInFlight = false;
+      _resolvingInitial = false;
+      // Saída de segurança: independentemente do que aconteceu, o loading
+      // nunca permanece ativo — ou há conteúdo ou há estado de erro com o
+      // botão "Tentar novamente".
+      if (mounted && !done && _videos.isEmpty) {
+        setState(() {
+          _loading = false;
+          _feedError = true;
+        });
+        debugPrint('[FEED] fim (saída de segurança)');
+      }
+    }
+  }
+
+  /// Aproximando do fim da PageView com vídeos congelados, busca a próxima
+  /// página (offset = total já carregado). Relatório honesto: a RPC de
+  /// resolução de URLs é chamada em lotes e cada falha mantém a URL crua.
+  Future<void> _loadMoreFeed() async {
+    if (!SupabaseService.instance.isConfigured) return;
+    if (_loading || _loadingMore || !_hasMore) return;
+    if (_resolvingInitial) return;
+    if (_videos.isEmpty) return;
+    if (_videos.length >= _maxFeedVideos) {
+      setState(() => _hasMore = false);
+      return;
+    }
+    setState(() {
+      _loadingMore = true;
+      _loadMoreFailed = false;
+    });
+    try {
+      final posts = await ContentService.instance
+          .fetchFeed(limit: _feedPageSize, offset: _videos.length)
+          .timeout(feedLoadHardTimeout);
+      final loaded = await _resolvePostUrls(posts);
+      if (!mounted) return;
+      setState(() {
+        _videos = [..._videos, ...loaded];
+        if (loaded.length < _feedPageSize) _hasMore = false;
+        _loadingMore = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMore = false;
+        _loadMoreFailed = true;
+      });
+    }
+  }
+
+  /// Gatilho de paginação: quando a página ativa chega perto do fim, carrega
+  /// o próximo lote (offset estável → sem duplicatas na reversão).
+  void _maybeLoadMore(int index) {
+    if (index >= feedItems.length - 3) {
+      _loadMoreFeed();
     }
   }
 
@@ -1388,8 +2086,12 @@ class _FeedScreenState extends State<FeedScreen> {
   /// preserva o mesmo itemCount, sem encolher em runtime.
   Future<void> _loadFeedAds() async {
     if (!SupabaseService.instance.isConfigured) return;
+    if (_adsLoading) return;
+    _adsLoading = true;
     try {
-      final ads = await AdsService.instance.fetchApprovedAds(limit: 15);
+      final ads = await AdsService.instance
+          .fetchApprovedAds(limit: 15)
+          .timeout(SupabaseService.networkTimeout);
       if (!mounted) return;
       setState(() {
         _feedAds = List.of(
@@ -1398,6 +2100,8 @@ class _FeedScreenState extends State<FeedScreen> {
       });
     } catch (_) {
       // Anúncios são opcionais no feed; falha silenciosa mantém o feed vídeo.
+    } finally {
+      _adsLoading = false;
     }
   }
 
@@ -1416,8 +2120,11 @@ class _FeedScreenState extends State<FeedScreen> {
   void _updateRewardPause() {
     final notifier = widget.rewardPaused;
     if (notifier == null) return;
-    final watching = widget.tabActive &&
-        (_feedTab == 0 || _feedTab == 1 || _feedTab == 3);
+    final watching =
+        widget.tabActive &&
+        (_feedTab == _FeedTopBar.followingIndex ||
+            _feedTab == _FeedTopBar.forYouIndex ||
+            _feedTab == _FeedTopBar.storeIndex);
     if (notifier.value != !watching) {
       notifier.value = !watching;
     }
@@ -1426,63 +2133,103 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
-    final showFeed = _feedTab == 0 || _feedTab == 1 || _feedTab == 3;
+    final showFeed =
+        _feedTab == _FeedTopBar.followingIndex ||
+        _feedTab == _FeedTopBar.forYouIndex ||
+        _feedTab == _FeedTopBar.storeIndex;
 
     return Scaffold(
       backgroundColor: kc(context).bg,
       body: Stack(
         children: [
           if (showFeed)
-            PageView.builder(
-              controller: _pageController,
-              scrollDirection: Axis.vertical,
-              itemCount: feedItems.length,
-              onPageChanged: (index) {
-                setState(() {
-                  _currentPage = index;
-                });
-                _trackAdImpression(index);
-              },
-              itemBuilder: (context, index) {
-                final item = feedItems[index];
-                if (item is AdCreative) {
+            NotificationListener<ScrollNotification>(
+              onNotification: _onFeedScrollNotification,
+              child: PageView.builder(
+                controller: _pageController,
+                scrollDirection: Axis.vertical,
+                // Overscroll elástico: permite puxar o primeiro vídeo para
+                // baixo (índice 0) com o conteúdo acompanhando o dedo em
+                // qualquer plataforma. Nos demais vídeos o swipe normal segue
+                // intacto (apenas bounce nas bordas, sem refresh).
+                physics: const BouncingScrollPhysics(
+                  parent: PageScrollPhysics(),
+                ),
+                // Pré-constrói a página vizinha (pré-carga do vídeo seguinte
+                // para o autoplay/swipe sem stutter) — com cache implícito
+                // limitado, sem instanciar todas as páginas do feed.
+                allowImplicitScrolling: true,
+                itemCount: feedItems.length,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentPage = index;
+                  });
+                  _trackAdImpression(index);
+                  _maybeLoadMore(index);
+                },
+                itemBuilder: (context, index) {
+                  final item = feedItems[index];
+                  if (item is RealLive) {
+                    return RepaintBoundary(
+                      key: ValueKey('rp-live-${item.id}'),
+                      child: _FeedLiveItem(
+                        key: ValueKey('live-${item.id}'),
+                        live: item,
+                        isActive:
+                            index == _currentPage &&
+                            widget.tabActive &&
+                            _appActive,
+                        onWatch: () => _openRealLiveInFeed(item),
+                      ),
+                    );
+                  }
+                  if (item is AdCreative) {
+                    return RepaintBoundary(
+                      key: ValueKey('rp-ad-${item.id}'),
+                      child: _FeedAdItem(
+                        key: ValueKey('ad-${item.id}'),
+                        ad: item,
+                        isActive:
+                            index == _currentPage &&
+                            widget.tabActive &&
+                            _appActive,
+                        onHidden: () => _removeFeedAd(item.id),
+                      ),
+                    );
+                  }
+                  final video = item as KlayKVideo;
                   return RepaintBoundary(
-                    key: ValueKey('rp-ad-${item.id}'),
-                    child: _FeedAdItem(
-                      key: ValueKey('ad-${item.id}'),
-                      ad: item,
+                    key: ValueKey('rp-${video.id}'),
+                    child: VideoItem(
+                      key: ValueKey(video.id),
+                      video: video,
+                      videoIndex: index,
                       isActive:
-                          index == _currentPage && widget.tabActive,
-                      onHidden: () => _removeFeedAd(item.id),
+                          index == _currentPage &&
+                          widget.tabActive &&
+                          _appActive,
+                      shouldPreload:
+                          widget.tabActive &&
+                          _appActive &&
+                          (index == _currentPage || index == _currentPage + 1),
+                      onDeleted: () => _removePost(video.id),
+                      onEnded: index < feedItems.length - 1
+                          ? () => _autoAdvance(index)
+                          : null,
                     ),
                   );
-                }
-                final video = item as KlayKVideo;
-                return RepaintBoundary(
-                  key: ValueKey('rp-${video.id}'),
-                  child: VideoItem(
-                    key: ValueKey(video.id),
-                    video: video,
-                    videoIndex: index,
-                    isActive: index == _currentPage && widget.tabActive,
-                    shouldPreload: index == _currentPage ||
-                        index == _currentPage + 1,
-                    onDeleted: () => _removePost(video.id),
-                    onEnded:
-                        index < feedItems.length - 1
-                            ? () => _autoAdvance(index)
-                            : null,
-                  ),
-                );
-              },
+                },
+              ),
             ),
           if (showFeed && _loading && videos.isEmpty)
-            const _FeedLoadingState(),
+            Positioned.fill(
+              child: _FeedLoadingState(progress: _feedLoadingProgress),
+            ),
           if (showFeed && _feedError && videos.isEmpty)
             KlaykErrorState(
               onRetry: _loadFeed,
-              title: 'Não foi possível carregar os vídeos.',
-              message: 'Verifique sua conexão e tente novamente.',
+              title: AppLocalizations.of(context)!.loadVideosFailTitle,
+              message: AppLocalizations.of(context)!.loadVideosFailBody,
             ),
           if (showFeed &&
               !_loading &&
@@ -1490,14 +2237,27 @@ class _FeedScreenState extends State<FeedScreen> {
               videos.isEmpty &&
               feedItems.isEmpty)
             _FeedEmptyState(onRetry: _loadFeed),
+          if (showFeed && _loadingMore)
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 96,
+              child: Center(child: _FeedLoadMoreIndicator()),
+            ),
+          if (showFeed && _loadMoreFailed && _hasMore)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 96,
+              child: Center(child: _FeedLoadMoreRetry(onRetry: _loadMoreFeed)),
+            ),
           if (_feedTab == _FeedTopBar.liveIndex)
             Positioned.fill(
-              child: _LiveArea(
-                topPadding: topPadding,
-                onWatch: _openLive,
-              ),
+              child: _LiveArea(topPadding: topPadding, onWatch: _openLive),
             ),
-          if (_feedTab == 4)
+          if (_feedTab == _FeedTopBar.gamesIndex)
+            Positioned.fill(child: _GamesArea(topPadding: topPadding)),
+          if (_feedTab == _FeedTopBar.destaquesIndex)
             Positioned.fill(
               child: _DestaquesArea(
                 topPadding: topPadding,
@@ -1546,76 +2306,157 @@ class _FeedScreenState extends State<FeedScreen> {
                 _updateRewardPause();
               },
               onSearch: () {
-                showSearch(
-                  context: context,
-                  delegate: KlayKSearchDelegate(),
-                );
+                showSearch(context: context, delegate: KlayKSearchDelegate());
               },
               onNotifications: _openNotifications,
               notificationUnread: _notifUnread,
+              avatarUrl: _myAvatarUrl,
+              onProfile: () => kNavIndex.value = 5,
             ),
           ),
+          // Pull-to-refresh (índice 0): indicador compacto estilo KLAY K que
+          // acompanha o dedo e gira enquanto atualiza. Sem botão fixo na tela.
+          if (showFeed)
+            Positioned(
+              top: topPadding + 64,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Center(
+                  child: AnimatedBuilder(
+                    animation: _pullExtent,
+                    builder: (context, _) => _FeedPullIndicator(
+                      pull: _pullExtent.value,
+                      refreshing: _refreshingPull,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Future<void> _openNotifications() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+  /// Detector de pull-to-refresh: verifica o arrasto além do limite superior
+  /// do feed (extentBefore == 0 ⇔ primeiro vídeo). Nunca ativa em outro índice;
+  /// o swipe vertical normal e o autoplay continuam intactos.
+  bool _onFeedScrollNotification(ScrollNotification n) {
+    if (_refreshingPull) return false;
+    final atTop = n.metrics.extentBefore <= 0.0001;
+    if (n is ScrollUpdateNotification) {
+      final px = n.metrics.pixels;
+      if (atTop && px < 0) {
+        _pullExtent.value = (-px).clamp(0.0, 100.0);
+      } else if (_pullExtent.value > 0) {
+        _pullExtent.value = 0;
+      }
+    } else if (n is ScrollEndNotification) {
+      if (atTop && _pullExtent.value >= _pullRefreshThreshold) {
+        _handleRefresh();
+      } else if (_pullExtent.value > 0) {
+        _pullExtent.value = 0;
+      }
+    }
+    return false;
+  }
+
+  /// Refresh do feed preservando a posição: reutiliza as mesmas funções de
+  /// carga reais (vídeos, anúncios e lives), sem duplicar posts e sem resetar
+  /// o PageController/controllers de vídeo. Ao terminar, o indicador some.
+  Future<void> _handleRefresh() async {
+    if (_refreshingPull) return;
+    setState(() {
+      _refreshingPull = true;
+    });
+    try {
+      await Future.wait([_loadFeed(), _loadFeedAds(), _loadFeedLives()]);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _refreshingPull = false;
+        });
+        _pullExtent.value = 0;
+      }
+    }
+  }
+
+  /// Abre uma live real pelo card do feed (mesmo fluxo da Central de Lives):
+  /// o dono entra como streamer; qualquer outro como espectador. Game Live
+  /// mantém o flag isGameLive (MediaProjection/screen share).
+  Future<void> _openRealLiveInFeed(RealLive live) async {
+    final isOwner =
+        SupabaseService.instance.client.auth.currentUser?.id == live.streamerId;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => LiveRoomScreen(
+          live: live,
+          role: isOwner ? LiveRole.streamer : LiveRole.viewer,
+          isGameLive: _isGameLiveFeed(live),
+        ),
+      ),
     );
+    _loadFeedLives();
+  }
+
+  bool _isGameLiveFeed(RealLive live) =>
+      live.category.toLowerCase().contains('jogo') ||
+      (live.gameName != null && live.gameName!.isNotEmpty);
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
     _notifBadgeRefresh();
   }
 
   Future<void> _openCommunities() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CommunitiesScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const CommunitiesScreen()));
   }
 
   Future<void> _openDiscover() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const DiscoverScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const DiscoverScreen()));
   }
 
   Future<void> _openFriends() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const FriendsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const FriendsScreen()));
   }
 
   Future<void> _openEvents() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const EventsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const EventsScreen()));
   }
 
   Future<void> _openAudioRooms() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AudioRoomsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const AudioRoomsScreen()));
   }
 
   Future<void> _openMoments() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const MomentsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const MomentsScreen()));
   }
 
   Future<void> _openRisingCreators() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const RisingCreatorsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const RisingCreatorsScreen()));
   }
 
   Future<bool> _openLive(KlayKLive live) async {
     // Lives reais são abertas via `_openRealLive` (LiveRoomScreen/LiveKit).
     // `onWatch` cobre apenas o catálogo de demonstração (`kAllLives`).
     final ended = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => _LiveViewerScreen(live: live),
-      ),
+      MaterialPageRoute(builder: (_) => _LiveViewerScreen(live: live)),
     );
     return ended ?? false;
   }
@@ -1625,76 +2466,14 @@ class _FeedScreenState extends State<FeedScreen> {
 // ESTADOS DO FEED (loading / vazio) — visual preto/grafite + roxo neon
 // ============================================================
 
-/// Tela de carregamento do feed: fundo preto/grafite, monograma KLAY K com
-/// brilho roxo neon discreto e indicador leve. NUNCA mostra vídeo fake (§3).
 class _FeedLoadingState extends StatelessWidget {
-  const _FeedLoadingState();
+  const _FeedLoadingState({required this.progress});
+
+  final double progress;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFF0B0B11),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 76,
-                height: 76,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF14101E),
-                  border: Border.all(
-                    color: const Color(0xFF8B5CF6),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.35),
-                      blurRadius: 32,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: ClipOval(
-                  child: Image.asset(
-                    'assets/images/klay_k_icon.png',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Center(
-                      child: Text(
-                        'k',
-                        style: TextStyle(
-                          fontSize: 40,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'KLAY K',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 4,
-                  shadows: [
-                    Shadow(color: Color(0xFFA78BFA), blurRadius: 20),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 22),
-              const KlaykLoader(label: 'Carregando seu feed…'),
-            ],
-          ),
-        ),
-      ),
-    );
+    return FeedLoadingHud(progress: progress);
   }
 }
 
@@ -1710,13 +2489,78 @@ class _FeedEmptyState extends StatelessWidget {
     final offline = !SupabaseService.instance.isConfigured;
     return KlaykEmptyState(
       icon: Icons.videocam_off_rounded,
-      title: 'Nenhum vídeo disponível',
+      title: AppLocalizations.of(context)!.noVideosAvailable,
       message: offline
-          ? 'Conecte-se com sua conta para ver os vídeos do KLAY K.'
-          : 'Os vídeos de quem você acompanha aparecerão aqui.',
-      actionLabel: 'Atualizar',
+          ? AppLocalizations.of(context)!.noVideosLogin
+          : AppLocalizations.of(context)!.noVideosFollowHint,
+      actionLabel: AppLocalizations.of(context)!.refresh,
       actionIcon: Icons.refresh_rounded,
       onAction: onRetry,
+    );
+  }
+}
+
+/// Indicador discreto de carregamento da próxima página (feed infinito).
+class _FeedLoadMoreIndicator extends StatelessWidget {
+  const _FeedLoadMoreIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: kc(context).surface.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            AppLocalizations.of(context)!.loadingMoreVideos,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Falha ao carregar a próxima página: pílula retry (não bloqueia o feed).
+class _FeedLoadMoreRetry extends StatelessWidget {
+  const _FeedLoadMoreRetry({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: const Key('feed_load_more_retry'),
+      onTap: onRetry,
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: kc(context).surface.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.refresh_rounded, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              AppLocalizations.of(context)!.loadMoreRetry,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1732,6 +2576,8 @@ class _FeedTopBar extends StatelessWidget {
   final VoidCallback onSearch;
   final VoidCallback onNotifications;
   final int notificationUnread;
+  final String avatarUrl;
+  final VoidCallback onProfile;
 
   const _FeedTopBar({
     required this.topPadding,
@@ -1739,52 +2585,54 @@ class _FeedTopBar extends StatelessWidget {
     required this.onTabChanged,
     required this.onSearch,
     required this.onNotifications,
+    required this.onProfile,
     this.notificationUnread = 0,
+    this.avatarUrl = '',
   });
 
+  static const int followingIndex = 0;
+  static const int forYouIndex = 1;
   static const int liveIndex = 2;
+  static const int gamesIndex = 3;
 
-  static const List<String> _tabs = [
-    'Para você',
-    'Seguindo',
-    'Live',
-    'Loja',
-    'Destaques',
-    'Descobrir',
-    'Comunidades',
-    'Amizades',
-    'Eventos',
-    'Áudio',
-    'Momentos',
-    'Em ascensão',
+  static List<String> tabTitles(AppLocalizations l10n) => [
+    l10n.followingFeedsTab,
+    l10n.forYouTab,
+    l10n.liveTab,
+    l10n.gamesTab,
   ];
 
+  /// Índice da aba Loja (exibe o mesmo feed como antes, só troca o chip).
+  static const int storeIndex = 4;
+
+  /// Índice da aba que abre a vitrine de Destaques.
+  static const int destaquesIndex = 5;
+
   /// Índice da aba que abre a exploração de Descobrir/Tendências em tela cheia.
-  static const int discoverIndex = 5;
+  static const int discoverIndex = 6;
 
   /// Índice da aba que abre a exploração de Comunidades em tela cheia.
-  static const int communitiesIndex = 6;
+  static const int communitiesIndex = 7;
 
   /// Índice da aba que abre o hub de Amizades em tela cheia.
-  static const int friendsIndex = 7;
+  static const int friendsIndex = 8;
 
   /// Índice da aba que abre a agenda/descoberta de Eventos em tela cheia.
-  static const int eventsIndex = 8;
+  static const int eventsIndex = 9;
 
   /// Índice da aba que abre as Salas de Voz (Áudio) em tela cheia.
-  static const int audioIndex = 9;
+  static const int audioIndex = 10;
 
   /// Índice da aba que abre os Momentos (efémeros) em tela cheia.
-  static const int momentsIndex = 10;
+  static const int momentsIndex = 11;
 
   /// Índice da aba que abre os Criadores em Ascensão em tela cheia.
-  static const int risingIndex = 11;
+  static const int risingIndex = 12;
 
   @override
   Widget build(BuildContext context) {
-    final isLive = feedTab == liveIndex;
-    final colors = kc(context);
-
+    final l10n = AppLocalizations.of(context)!;
+    final visibleTabs = tabTitles(l10n);
     return Container(
       padding: EdgeInsets.only(top: topPadding + 6),
       decoration: BoxDecoration(
@@ -1798,195 +2646,588 @@ class _FeedTopBar extends StatelessWidget {
           ],
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          // ---- Linha do topo: identidade + LIVE + perfil + notificações + pesquisa ----
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                // Logo / nome KLAY K (flexível para não estourar em telas pequenas)
-                Flexible(
-                  child: _buildLogo(feedTab, onTabChanged, isLive),
-                ),
-                const SizedBox(width: 8),
-                // Acesso à LIVE (aba de lives)
-                GestureDetector(
-                  onTap: () => onTabChanged(liveIndex),
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: isLive
-                          ? const Color(0xFFFF2E4D).withValues(alpha: 0.22)
-                          : colors.surface.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: isLive
-                            ? const Color(0xFFFF2E4D)
-                            : colors.border.withValues(alpha: 0.6),
-                        width: 1,
-                      ),
-                      boxShadow: isLive
-                          ? [
-                              BoxShadow(
-                                color: const Color(0xFFFF2E4D)
-                                    .withValues(alpha: 0.4),
-                                blurRadius: 12,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Categorias do feed + pesquisa na mesma linha, junta do topo,
+              // horizontalmente rolável. A lupa compacta fica logo após
+              // "Jogos" e usa o mesmo detector real de pesquisa.
+              SizedBox(
+                height: 44,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: [
+                      ...List.generate(visibleTabs.length, (index) {
+                        final selected = feedTab == index;
+                        return GestureDetector(
+                          onTap: () => onTabChanged(index),
+                          behavior: HitTestBehavior.opaque,
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 180),
+                            opacity: selected ? 1.0 : 0.72,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
                               ),
-                            ]
-                          : null,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.circle,
-                          color: Color(0xFFFF2E4D),
-                          size: 9,
-                        ),
-                        const SizedBox(width: 5),
-                        const Text(
-                          'LIVE',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    visibleTabs[index],
+                                    style: TextStyle(
+                                      color: selected
+                                          ? Colors.white
+                                          : const Color(0xFFB7B7C0),
+                                      fontSize: 15,
+                                      fontWeight: selected
+                                          ? FontWeight.w800
+                                          : FontWeight.w600,
+                                      shadows: const [
+                                        Shadow(
+                                          color: Colors.black87,
+                                          blurRadius: 8,
+                                          offset: Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 220),
+                                    curve: Curves.easeOut,
+                                    height: 3,
+                                    width: selected ? 20 : 0,
+                                    decoration: BoxDecoration(
+                                      color: selected
+                                          ? const Color(0xFF8B5CF6)
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(99),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                      const SizedBox(width: 6),
+                      // Lupa compacta (toque confortável ≥ 44px) após "Jogos".
+                      Semantics(
+                        label: 'Pesquisar',
+                        button: true,
+                        child: GestureDetector(
+                          onTap: onSearch,
+                          behavior: HitTestBehavior.opaque,
+                          child: const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Icon(
+                              Icons.search_rounded,
+                              color: Colors.white,
+                              size: 24,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black87,
+                                  blurRadius: 8,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                        if (isLive) const SizedBox(width: 1),
-                        if (isLive)
-                          const Icon(
-                            Icons.live_tv_rounded,
-                            color: Colors.white,
-                            size: 14,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Perfil (conta)
-                GestureDetector(
-                  onTap: () => kNavIndex.value = 4,
-                  child: Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: colors.surface.withValues(alpha: 0.7),
-                      border:
-                          Border.all(color: colors.border.withValues(alpha: 0.6)),
-                    ),
-                    child: const Icon(
-                      Icons.person_outline_rounded,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Notificações
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    KlayKIconButton(
-                      icon: Icons.notifications_rounded,
-                      onTap: onNotifications,
-                      size: 34,
-                    ),
-                    if (notificationUnread > 0)
-                      Positioned(
-                        right: -2,
-                        top: -2,
-                        child: KlayKBadge(count: notificationUnread),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 8),
-                // Pesquisa
-                KlayKIconButton(
-                  icon: Icons.search_rounded,
-                  onTap: onSearch,
-                  size: 34,
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 10),
+            ],
           ),
-          const SizedBox(height: 12),
-          // ---- Navegação / categorias ----
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              children: List.generate(
-                _tabs.length,
-                (index) {
-                  final selected = feedTab == index;
-                  return KlayKChip(
-                    label: _tabs[index],
-                    selected: selected,
-                    onTap: () => onTabChanged(index),
-                  );
-                },
+          // Sino de notificações com contador REAL de não lidas (backend),
+          // sempre visível no canto superior direito. Abre a Central de
+          // Notificações.
+          Positioned(
+            top: 2,
+            right: 8,
+            child: Semantics(
+              label: AppLocalizations.of(context)!.notificationsTab,
+              button: true,
+              child: GestureDetector(
+                onTap: onNotifications,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const Icon(
+                        Icons.notifications_none_rounded,
+                        color: Colors.white,
+                        size: 24,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black87,
+                            blurRadius: 8,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      if (notificationUnread > 0)
+                        Positioned(
+                          right: -2,
+                          top: -2,
+                          child: KlayKBadge(count: notificationUnread),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 10),
         ],
       ),
     );
   }
+}
 
-  /// Wordmark "KLAY K" com gradiente roxo + ícone oficial do app.
-  Widget _buildLogo(int current, ValueChanged<int> onTab, bool isLive) {
-    return GestureDetector(
-      onTap: () => onTab(0),
-      behavior: HitTestBehavior.opaque,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
+// ============================================================
+// LIVE NO FEED + PULL-TO-REFRESH
+// ============================================================
+
+/// Indicador compacto de refresh do feed (identidade KLAY K): pequeno,
+/// discreto e sem botão fixo. Aparece apenas durante o gesto pull-to-refresh
+/// no primeiro vídeo, acompanha o arrasto e gira enquanto atualiza.
+class _FeedPullIndicator extends StatefulWidget {
+  const _FeedPullIndicator({required this.pull, required this.refreshing});
+
+  final double pull;
+  final bool refreshing;
+
+  @override
+  State<_FeedPullIndicator> createState() => _FeedPullIndicatorState();
+}
+
+class _FeedPullIndicatorState extends State<_FeedPullIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin;
+
+  @override
+  void initState() {
+    super.initState();
+    _spin = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 850),
+    );
+  }
+
+  @override
+  void didUpdateWidget(_FeedPullIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshing && !oldWidget.refreshing) {
+      _spin.repeat();
+    } else if (!widget.refreshing && oldWidget.refreshing) {
+      _spin.stop();
+      _spin.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final refreshing = widget.refreshing;
+    final pull = widget.pull.clamp(0.0, 100.0);
+    if (!refreshing && pull <= 0.5) return const SizedBox.shrink();
+
+    final size = refreshing ? 44.0 : (30.0 + pull * 0.24).clamp(30.0, 52.0);
+    final opacity = refreshing
+        ? 1.0
+        : (pull / _kPullIndicatorFade).clamp(0.0, 1.0);
+    const neon = Color(0xFF8B5CF6);
+
+    Widget icon;
+    if (refreshing) {
+      icon = RotationTransition(
+        turns: _spin,
+        child: const Icon(Icons.refresh_rounded, color: Colors.white, size: 22),
+      );
+    } else {
+      icon = Transform.rotate(
+        angle: pull * 0.035,
+        child: const Icon(Icons.refresh_rounded, color: Colors.white, size: 20),
+      );
+    }
+
+    return Opacity(
+      opacity: opacity,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0xE6161616),
+          border: Border.all(color: neon.withValues(alpha: 0.55), width: 1.2),
+          boxShadow: [
+            BoxShadow(color: neon.withValues(alpha: 0.15), blurRadius: 12),
+          ],
+        ),
+        child: Center(child: icon),
+      ),
+    );
+  }
+}
+
+/// Ponto máximo de opacidade do indicador (fade proporcional ao arrasto).
+const double _kPullIndicatorFade = 70.0;
+
+/// Altura das abas do feed (topo) que ficam por cima das páginas: 6 (gap do
+/// topo) + 44 (fileira das abas) + 10 (espaço abaixo) — usado pelo card de
+/// live para o badge AO VIVO nunca ficar escondido atrás das abas.
+const double _kFeedTopBarClear = 66.0;
+
+/// Página fullscreen de LIVE REAL no feed "Para você" (status='live').
+/// Mostra apenas dados reais: título, streamer (avatar/nome), categoria/jogo,
+/// espectadores reais e CTA para entrar na Live. O preview usa o cover real
+/// quando existe; senão um gradiente — nunca imagem aleatória/placeholder fake.
+class _FeedLiveItem extends StatelessWidget {
+  const _FeedLiveItem({
+    super.key,
+    required this.live,
+    required this.isActive,
+    required this.onWatch,
+  });
+
+  final RealLive live;
+
+  /// Se o slot é a página ativa (para destaque visual, sem autoplay da live).
+  final bool isActive;
+
+  final VoidCallback onWatch;
+
+  bool get _isGame =>
+      live.category.toLowerCase().contains('jogo') ||
+      (live.gameName != null && live.gameName!.isNotEmpty);
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final game = _isGame;
+    final format = game
+        ? (live.gameName != null && live.gameName!.isNotEmpty
+              ? live.gameName!
+              : live.category)
+        : live.category.isEmpty
+        ? 'Bate-papo'
+        : live.category;
+
+    final bottom = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.asset(
-                'assets/images/klay_k_icon.png',
-                width: 24,
-                height: 24,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox(
-                  width: 24,
-                  height: 24,
-                ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.remove_red_eye_rounded,
+                    color: Colors.white70,
+                    size: 13,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${live.viewerCount}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            ShaderMask(
-              shaderCallback: (bounds) => const LinearGradient(
-                colors: [
-                  Color(0xFFC084F0),
-                  Color(0xFF8B5CF6),
-                  Color(0xFF6D28D9),
-                ],
-              ).createShader(bounds),
-              child: const Text(
-                'KLAY K',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.5,
-                  height: 1,
+            const Spacer(),
+            if (game) ...[
+              const Icon(
+                Icons.sports_esports_rounded,
+                color: Color(0xFFB794FF),
+                size: 16,
+              ),
+              const SizedBox(width: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 150),
+                child: Text(
+                  format,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 14),
+        Text(
+          live.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            CircleAvatar(
+              radius: 10,
+              backgroundColor: _kPurple.withValues(alpha: 0.4),
+              backgroundImage: live.streamerAvatar != null
+                  ? NetworkImage(live.streamerAvatar!)
+                  : null,
+              child: const Icon(Icons.person, color: Colors.white70, size: 11),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                live.streamerDisplayName ?? live.streamerUsername ?? 'Streamer',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        if (live.description.isNotEmpty) ...[
+          Text(
+            live.description,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+        ],
+        Align(
+          alignment: Alignment.centerRight,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFF3A3A3A), width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.play_arrow_rounded, color: _kPurple, size: 18),
+                const SizedBox(width: 5),
+                Text(
+                  l10n.enterLive,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+
+    return Semantics(
+      container: true,
+      label:
+          'Live ao vivo de ${live.streamerDisplayName ?? live.streamerUsername ?? ''}',
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onWatch,
+        child: Container(
+          color: const Color(0xFF14101A),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (live.coverUrl != null && live.coverUrl!.isNotEmpty)
+                Image.network(
+                  live.coverUrl!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      _FeedLiveFallback(avatarUrl: live.streamerAvatar),
+                  loadingBuilder: (_, child, progress) => progress == null
+                      ? child
+                      : _FeedLiveFallback(avatarUrl: live.streamerAvatar),
+                )
+              else
+                _FeedLiveFallback(avatarUrl: live.streamerAvatar),
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0x33000000),
+                      Colors.transparent,
+                      Color(0xCC000000),
+                      Color(0xF014101A),
+                    ],
+                    stops: [0.0, 0.3, 0.65, 1.0],
+                  ),
+                ),
+              ),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    _kFeedTopBarClear,
+                    16,
+                    18,
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _kLiveRed,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.circle,
+                                  color: Colors.white,
+                                  size: 7,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  AppLocalizations.of(context)!.liveBadge,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            game
+                                ? Icons.sports_esports_rounded
+                                : Icons.videocam_rounded,
+                            color: _kPurple,
+                            size: 18,
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      // Conteúdo inferior rolável em telas muito baixas
+                      // (nunca estoura: tela pequena + fontes grandes).
+                      Flexible(child: SingleChildScrollView(child: bottom)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+/// Fundo gradiente para o card de live sem cover: avatar GRANDE do streamer
+/// (com fallback KLAY K) sobre gradiente — nunca fake.
+class _FeedLiveFallback extends StatelessWidget {
+  final String? avatarUrl;
+
+  const _FeedLiveFallback({this.avatarUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF2A1B54), Color(0xFF0D0B14)],
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Align(
+            alignment: Alignment.center,
+            child: Container(
+              width: 92,
+              height: 92,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _kPurple.withValues(alpha: 0.55),
+                  width: 2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: _kPurple.withValues(alpha: 0.4),
+                    blurRadius: 26,
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: avatarUrl != null && avatarUrl!.isNotEmpty
+                  ? Image.network(
+                      avatarUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          const _FallbackInitialAvatar(),
+                      loadingBuilder: (_, child, progress) => progress == null
+                          ? child
+                          : const _FallbackInitialAvatar(),
+                    )
+                  : const _FallbackInitialAvatar(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Avatar de fallback com a inicial KLAY K ('.') sobre anel roxo — usado
+/// quando não há avatar do streamer.
+class _FallbackInitialAvatar extends StatelessWidget {
+  const _FallbackInitialAvatar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: _kPurple.withValues(alpha: 0.25),
+      alignment: Alignment.center,
+      child: const Icon(Icons.sensors_rounded, color: Colors.white, size: 40),
     );
   }
 }
@@ -1995,7 +3236,7 @@ class _FeedTopBar extends StatelessWidget {
 // VIDEO ITEM
 // ============================================================
 
-/// Página de anúncio fullscreen do feed. Rende um anúncio aprovado de forma
+/// Página de ANÚNCIO fullscreen do feed. Rende um anúncio aprovado de forma
 /// inconfundível: badge ANÚNCIO, selo oficial quando verificado, menu
 /// "por que estou vendo?/ocultar/denunciar" e CTA explícito.
 class _FeedAdItem extends StatelessWidget {
@@ -2016,137 +3257,143 @@ class _FeedAdItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final advertiser =
-        ad.advertiserName.isNotEmpty ? ad.advertiserName : 'Anunciante';
+    final l10n = AppLocalizations.of(context)!;
+    final advertiser = ad.advertiserName.isNotEmpty
+        ? ad.advertiserName
+        : l10n.advertiser;
     return Semantics(
       container: true,
-      label: 'Anúncio de $advertiser${ad.title.isEmpty ? '' : ' · ${ad.title}'}',
+      label: l10n.adOf(advertiser, ad.title.isEmpty ? '' : ' · ${ad.title}'),
       child: Container(
         color: kc(context).bg,
         child: Stack(
           fit: StackFit.expand,
           children: [
-          if (ad.mediaUrl.isNotEmpty)
-            Image.network(
-              ad.mediaUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const _AdFallbackBg(),
-              loadingBuilder: (_, child, progress) =>
-                  progress == null ? child : const _AdFallbackBg(),
-            )
-          else
-            const _AdFallbackBg(),
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0x33000000),
-                  Colors.transparent,
-                  Color(0xCC000000),
-                  Color(0xF014101A),
-                ],
-                stops: [0.0, 0.25, 0.65, 1.0],
+            if (ad.mediaUrl.isNotEmpty)
+              Image.network(
+                ad.mediaUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const _AdFallbackBg(),
+                loadingBuilder: (_, child, progress) =>
+                    progress == null ? child : const _AdFallbackBg(),
+              )
+            else
+              const _AdFallbackBg(),
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x33000000),
+                    Colors.transparent,
+                    Color(0xCC000000),
+                    Color(0xF014101A),
+                  ],
+                  stops: [0.0, 0.25, 0.65, 1.0],
+                ),
               ),
             ),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const AdBadge(),
-                      const Spacer(),
-                      AdOverflowMenu(ad: ad, onHidden: onHidden),
-                    ],
-                  ),
-                  const Spacer(),
-                  if (ad.verified) ...[
-                    const VerifiedAdSeal(compact: true),
-                    const SizedBox(height: 12),
-                  ],
-                  Text(
-                    ad.title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 19,
-                      height: 1.25,
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const AdBadge(),
+                        const Spacer(),
+                        AdOverflowMenu(ad: ad, onHidden: onHidden),
+                      ],
                     ),
-                  ),
-                  if (ad.description.isNotEmpty) ...[
-                    const SizedBox(height: 6),
+                    const Spacer(),
+                    if (ad.verified) ...[
+                      const VerifiedAdSeal(compact: true),
+                      const SizedBox(height: 12),
+                    ],
                     Text(
-                      ad.description,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
+                      ad.title,
                       style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                        height: 1.4,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 19,
+                        height: 1.25,
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      AdAvatar(ad: ad),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          ad.advertiserName.isEmpty
-                              ? 'Anunciante'
-                              : ad.advertiserName,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
+                    if (ad.description.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        ad.description,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                          height: 1.4,
                         ),
                       ),
-                      if (ad.verified) ...[
-                        const Text(
-                          'Anúncio verificado',
-                          style:
-                              TextStyle(color: Colors.white54, fontSize: 11),
-                        ),
-                      ] else
-                        const Text(
-                          'Empresa anunciante',
-                          style:
-                              TextStyle(color: Colors.white54, fontSize: 11),
-                        ),
                     ],
-                  ),
-                  // CTA só aparece se a campanha tiver um destino real e
-                  // aprovado; sem CTA válido, o botão NUNCA aparece (§35/§62).
-                  if (ad.hasValidCta) ...[
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: FilledButton.icon(
-                        onPressed: () => _openCta(context, ad),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: kAdPurple,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        AdAvatar(ad: ad),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            ad.advertiserName.isEmpty
+                                ? AppLocalizations.of(context)!.advertiser
+                                : ad.advertiserName,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                        icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                        label: Text(ad.ctaLabel),
-                      ),
+                        if (ad.verified) ...[
+                          Text(
+                            AppLocalizations.of(context)!.adVerified,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ] else
+                          Text(
+                            AppLocalizations.of(context)!.adcompany,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
+                          ),
+                      ],
                     ),
+                    // CTA só aparece se a campanha tiver um destino real e
+                    // aprovado; sem CTA válido, o botão NUNCA aparece (§35/§62).
+                    if (ad.hasValidCta) ...[
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: FilledButton.icon(
+                          onPressed: () => _openCta(context, ad),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: kAdPurple,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                          label: Text(ad.ctaLabel),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
           ],
         ),
       ),
@@ -2213,6 +3460,7 @@ class _VideoItemState extends State<VideoItem>
 
   bool _loading = true;
   bool _error = false;
+  bool _buffering = false;
   bool _showPlayIcon = false;
   bool _showHeart = false;
   bool _downloading = false;
@@ -2240,14 +3488,8 @@ class _VideoItemState extends State<VideoItem>
       duration: const Duration(milliseconds: 600),
     );
 
-    _heartAnimation = Tween<double>(
-      begin: 0,
-      end: 1,
-    ).animate(
-      CurvedAnimation(
-        parent: _heartController,
-        curve: Curves.elasticOut,
-      ),
+    _heartAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _heartController, curve: Curves.elasticOut),
     );
 
     if (widget.isActive || widget.shouldPreload) {
@@ -2304,10 +3546,17 @@ class _VideoItemState extends State<VideoItem>
   }
 
   /// Escuta o fim do vídeo (loop desligado) para autoplay contínuo e cuida da
-  /// retomada de vídeos que já terminaram.
+  /// retomada de vídeos que já terminaram. Também acende (só na virada) o
+  /// indicador discreto de buffering — sem rebuild por tick.
   void _onVideoTick() {
     final controller = _controller;
     if (!mounted || controller == null) return;
+
+    final buffering = controller.value.isBuffering;
+    if (buffering != _buffering) {
+      _buffering = buffering;
+      setState(() {});
+    }
 
     if (_resumeFromEnd) {
       if (controller.value.position.inMilliseconds <= 60 &&
@@ -2369,8 +3618,7 @@ class _VideoItemState extends State<VideoItem>
   }
 
   void _toggleVideo() {
-    if (_controller == null ||
-        !_controller!.value.isInitialized) {
+    if (_controller == null || !_controller!.value.isInitialized) {
       return;
     }
 
@@ -2383,16 +3631,13 @@ class _VideoItemState extends State<VideoItem>
 
       _playIconTimer?.cancel();
 
-      _playIconTimer = Timer(
-        const Duration(seconds: 1),
-        () {
-          if (mounted) {
-            setState(() {
-              _showPlayIcon = false;
-            });
-          }
-        },
-      );
+      _playIconTimer = Timer(const Duration(seconds: 1), () {
+        if (mounted) {
+          setState(() {
+            _showPlayIcon = false;
+          });
+        }
+      });
     } else {
       _playFromCurrentPosition();
 
@@ -2420,16 +3665,13 @@ class _VideoItemState extends State<VideoItem>
 
     if (widget.video.liked) {
       _heartTimer?.cancel();
-      _heartTimer = Timer(
-        const Duration(milliseconds: 700),
-        () {
-          if (mounted) {
-            setState(() {
-              _showHeart = false;
-            });
-          }
-        },
-      );
+      _heartTimer = Timer(const Duration(milliseconds: 700), () {
+        if (mounted) {
+          setState(() {
+            _showHeart = false;
+          });
+        }
+      });
     }
 
     _syncLike(wasLiked);
@@ -2450,7 +3692,7 @@ class _VideoItemState extends State<VideoItem>
         widget.video.likes += wasLiked ? 1 : -1;
       });
       if (wasLiked) _showHeart = false;
-      _showSnack('Não foi possível atualizar a curtida');
+      _showSnack(AppLocalizations.of(context)!.likeUpdateFail);
     }
   }
 
@@ -2460,13 +3702,42 @@ class _VideoItemState extends State<VideoItem>
     });
   }
 
+  Future<void> _toggleFollow() async {
+    final authorId = widget.video.authorId;
+    if (authorId == null || authorId.isEmpty) return;
+    if (!SupabaseService.instance.isConfigured) return;
+
+    final wasFollowing = widget.video.following;
+    setState(() {
+      widget.video.following = !wasFollowing;
+    });
+
+    try {
+      final svc = ContentService.instance;
+      if (wasFollowing) {
+        await svc.unfollowUser(authorId);
+      } else {
+        await svc.followUser(authorId);
+      }
+      if (!mounted) return;
+      _showSnack(
+        wasFollowing
+            ? AppLocalizations.of(context)!.unfollowed
+            : '✓ ${AppLocalizations.of(context)!.nowFollowing}',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        widget.video.following = wasFollowing;
+      });
+      _showSnack(AppLocalizations.of(context)!.followUpdateFail);
+    }
+  }
+
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -2495,63 +3766,60 @@ class _VideoItemState extends State<VideoItem>
     );
     if (!mounted) return;
     if (ok) {
-      _showSnack('Vídeo atualizado.');
+      _showSnack(AppLocalizations.of(context)!.videoUpdated);
     } else {
-      _showSnack('Não foi possível atualizar agora. Tente de novo.');
+      _showSnack(AppLocalizations.of(context)!.updateFail);
     }
   }
 
   Future<void> _deleteVideo() async {
+    final l10n = AppLocalizations.of(context)!;
     final go = await confirmDeleteDialog(
       context,
-      title: 'Apagar vídeo?',
-      message:
-          'O vídeo, a capa, curtidas e comentários serão removidos '
-          'permanentemente. Essa ação não pode ser desfeita.',
+      title: l10n.deleteVideoTitle,
+      message: l10n.deleteVideoBody,
     );
     if (!go || !mounted) return;
     try {
-      await ContentService.instance.deletePost(widget.video.id);
+      await ContentService.instance.deletePost(
+        widget.video.id,
+        videoPath: widget.video.videoUrl,
+        coverUrl: widget.video.coverUrl,
+      );
       if (!mounted) return;
       widget.onDeleted?.call();
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      _showSnack('Não foi possível apagar o vídeo.');
+      _showSnack(ContentService.deletePostErrorMessage(e, l10n));
     }
   }
 
   Future<void> _openCreatorProfile() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => UserProfileScreen(
-            userId: widget.video.authorId ?? ''),
+        builder: (_) => UserProfileScreen(userId: widget.video.authorId ?? ''),
       ),
     );
     if (mounted) setState(() {});
   }
 
   Future<void> _openAudioPage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AudioScreen(video: widget.video),
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => AudioScreen(video: widget.video)));
     if (mounted) setState(() {});
   }
 
-  void _openRelatedSearch() {
-    if (widget.video.hashtags.isEmpty) return;
-    final term = '#${widget.video.hashtags.first}';
-    showSearch(
-      context: context,
-      delegate: KlayKSearchDelegate(queryHint: term),
-    );
-  }
-
-  String get _shareLink =>
-      'https://klayk.app/v/${widget.video.id}';
+  String get _shareLink => 'https://klayk.app/v/${widget.video.id}';
 
   Future<void> _showShareMenu() async {
+    // Textos localizados capturados ANTES de qualquer await: usar BuildContext
+    // depois de um gap assíncrono quebra se o widget já foi descartado, e
+    // evita repetir a lookup em cada ramo do switch.
+    final l10n = AppLocalizations.of(context)!;
+    final shareText =
+        '${l10n.lookAtThisVideo} 🎬\n$_shareLink\n${widget.video.videoUrl}';
+
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: const Color(0xFF1C1C26),
@@ -2563,7 +3831,7 @@ class _VideoItemState extends State<VideoItem>
     );
 
     if (action == null) return;
-    if (!context.mounted) return;
+    if (!mounted) return;
 
     switch (action) {
       case 'friend':
@@ -2572,83 +3840,107 @@ class _VideoItemState extends State<VideoItem>
         if (!SupabaseService.instance.isConfigured) return;
         await _sendVideoToFriend(friend);
       case 'messages':
-        kNavIndex.value = 3;
-        setState(() => widget.video.shares++);
+        final friend = await _pickFriend();
+        if (friend == null) return;
+        if (!SupabaseService.instance.isConfigured) return;
+        await _sendVideoToFriend(friend);
       case 'copy':
         await Clipboard.setData(ClipboardData(text: _shareLink));
-        _showSnack('Link copiado');
+        if (!mounted) return;
+        _showSnack(l10n.linkCopied);
+        await _notifyShare();
       case 'whatsapp':
         await _launchShareUrl(
-          'https://wa.me/?text=${Uri.encodeComponent('Olha esse vídeo no KLAY K! $_shareLink')}',
+          'https://wa.me/?text=${Uri.encodeComponent('${l10n.lookAtThisVideo} $_shareLink')}',
           'WhatsApp',
         );
       case 'instagram':
-        await _launchShareUrl(
-          'https://www.instagram.com/',
-          'Instagram',
-        );
+        await Share.share(shareText);
+        if (!mounted) return;
+        setState(() => widget.video.shares++);
+        await _notifyShare();
       case 'facebook':
         await _launchShareUrl(
           'https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}',
           'Facebook',
         );
       case 'system':
-        await Share.share(
-          'Olha esse vídeo no KLAY K! 🎬\n$_shareLink\n${widget.video.videoUrl}',
-        );
-        setState(() => widget.video.shares++);
-      case 'report':
+        await Share.share(shareText);
         if (!mounted) return;
+        setState(() => widget.video.shares++);
+        await _notifyShare();
+      case 'report':
         await showReportDialog(
           context,
           targetId: widget.video.id,
           targetType: 'post',
-          targetLabel: 'publicação',
+          targetLabel: l10n.reportTargetPost,
         );
     }
   }
 
+  /// Notifica o dono do vídeo quando alguém compartilha de verdade (evento
+  /// real de compartilhamento — nunca gera aviso para o próprio autor).
+  Future<void> _notifyShare() async {
+    if (!SupabaseService.instance.isConfigured) return;
+    final me = SupabaseService.instance.client.auth.currentUser?.id;
+    final owner = widget.video.authorId ?? '';
+    if (me == null || owner.isEmpty || me == owner) return;
+    try {
+      await ContentService.instance.notify(
+        toUserId: owner,
+        actorId: me,
+        type: 'share',
+        refId: widget.video.id,
+        message: '',
+      );
+    } catch (_) {}
+  }
+
   Future<void> _launchShareUrl(String url, String label) async {
+    final l10n = AppLocalizations.of(context)!;
     final uri = Uri.parse(url);
     final available = await canLaunchUrl(uri);
     if (!available) {
-      _showSnack('$label não disponível neste dispositivo');
+      _showSnack(l10n.unavailableOnDevice(label));
       return;
     }
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (launched) {
       setState(() => widget.video.shares++);
+      await _notifyShare();
     } else {
-      _showSnack('Não foi possível abrir o $label');
+      _showSnack(l10n.couldNotOpen(label));
     }
   }
 
   /// Seleciona um amigo real (backend) para receber o vídeo. Nunca usa lista
   /// falsa: sem amigos ou sem backend, mostra estado honesto (vazio/erro).
   Future<UserProfile?> _pickFriend() async {
+    final l10n = AppLocalizations.of(context)!;
     if (!SupabaseService.instance.isConfigured) {
-      _showSnack('Conecte-se para enviar vídeos aos amigos.');
+      _showSnack(l10n.loginToSendVideos);
       return null;
     }
     List<UserProfile> friends;
     try {
       friends = await ProfileService.instance.fetchMutualFriends();
     } catch (_) {
-      _showSnack('Não foi possível carregar seus amigos agora.');
+      _showSnack(l10n.loadFriendsFail);
       return null;
     }
     if (!mounted) return null;
     if (friends.isEmpty) {
-      _showSnack('Você ainda não tem amigos para receber vídeos.');
+      _showSnack(l10n.noFriendsToReceive);
       return null;
     }
     return showDialog<UserProfile>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C26),
-        title: const Text(
-          'Enviar para amigo',
-          style: TextStyle(
+        title: Text(
+          AppLocalizations.of(context)!.shareToFriend,
+          style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w700,
           ),
@@ -2660,15 +3952,19 @@ class _VideoItemState extends State<VideoItem>
             itemCount: friends.length,
             itemBuilder: (context, i) {
               final f = friends[i];
-              final name = f.displayName ?? f.username ?? 'Amigo';
+              final name =
+                  f.displayName ??
+                  f.username ??
+                  AppLocalizations.of(context)!.friend;
               return ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: const Color(0xFF8B5CF6)
-                      .withValues(alpha: 0.35),
+                  backgroundColor: const Color(
+                    0xFF8B5CF6,
+                  ).withValues(alpha: 0.35),
                   backgroundImage:
                       (f.avatarUrl != null && f.avatarUrl!.isNotEmpty)
-                          ? NetworkImage(f.avatarUrl!)
-                          : null,
+                      ? NetworkImage(f.avatarUrl!)
+                      : null,
                   child: (f.avatarUrl == null || f.avatarUrl!.isEmpty)
                       ? const Icon(Icons.person, color: Colors.white, size: 20)
                       : null,
@@ -2681,7 +3977,9 @@ class _VideoItemState extends State<VideoItem>
                     ? Text(
                         '@${f.username}',
                         style: const TextStyle(
-                            color: Colors.white54, fontSize: 12),
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
                       )
                     : null,
                 onTap: () => Navigator.pop(context, f),
@@ -2692,9 +3990,9 @@ class _VideoItemState extends State<VideoItem>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancelar',
-              style: TextStyle(color: Colors.white54),
+            child: Text(
+              AppLocalizations.of(context)!.cancel,
+              style: const TextStyle(color: Colors.white54),
             ),
           ),
         ],
@@ -2704,97 +4002,103 @@ class _VideoItemState extends State<VideoItem>
 
   /// Envia o vídeo para um amigo real via DM (conversa real no backend).
   Future<void> _sendVideoToFriend(UserProfile friend) async {
+    final l10n = AppLocalizations.of(context)!;
     try {
-      final conv = await MessageService.instance
-          .getOrCreateConversation(friend.id);
-      final link = '🎬 ${widget.video.displayName}\n$_shareLink\n'
+      final conv = await MessageService.instance.getOrCreateConversation(
+        friend.id,
+      );
+      final link =
+          '🎬 ${widget.video.displayName}\n$_shareLink\n'
           '${widget.video.videoUrl}';
       await MessageService.instance.sendMessage(conv.id, link);
       if (!mounted) return;
-      kNavIndex.value = 3;
-      _showSnack('Vídeo enviado para ${friend.displayName ?? friend.username ?? 'amigo'}');
+      kNavIndex.value = 4;
+      _showSnack(
+        l10n.videoSentTo(friend.displayName ?? friend.username ?? l10n.friend),
+      );
       setState(() => widget.video.shares++);
     } catch (_) {
-      _showSnack('Não foi possível enviar o vídeo agora.');
+      _showSnack(l10n.sendVideoFail);
     }
   }
 
   Widget _buildShareSheet() {
-    return const SafeArea(
+    final l10n = AppLocalizations.of(context)!;
+    return SafeArea(
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-          Padding(
-            padding: EdgeInsets.fromLTRB(20, 18, 20, 12),
-            child: Text(
-              'Compartilhar',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+              child: Text(
+                l10n.share,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
-          ),
-          _ShareOption(
-            icon: Icons.person_add_alt_1_rounded,
-            color: Color(0xFF8B5CF6),
-            label: 'Enviar para amigo',
-            value: 'friend',
-          ),
-          _ShareOption(
-            icon: Icons.chat_bubble_rounded,
-            color: Color(0xFFFF4D6A),
-            label: 'Mensagens',
-            value: 'messages',
-          ),
-          _ShareOption(
-            icon: Icons.link_rounded,
-            color: Color(0xFFFFA53D),
-            label: 'Copiar link',
-            value: 'copy',
-          ),
-          _ShareOption(
-            icon: Icons.ios_share_rounded,
-            color: Color(0xFF22C55E),
-            label: 'Compartilhar para outros aplicativos',
-            value: 'system',
-          ),
-          _ShareOption(
-            icon: Icons.chat_rounded,
-            color: Color(0xFF25D366),
-            label: 'WhatsApp',
-            value: 'whatsapp',
-          ),
-          _ShareOption(
-            icon: Icons.camera_alt_rounded,
-            color: Color(0xFFE1306C),
-            label: 'Instagram',
-            value: 'instagram',
-          ),
-          _ShareOption(
-            icon: Icons.thumb_up_alt_rounded,
-            color: Color(0xFF1877F2),
-            label: 'Facebook',
-            value: 'facebook',
-          ),
-          _ShareOption(
-            icon: Icons.more_horiz_rounded,
-            color: Colors.white,
-            label: 'Mais opções do Android',
-            value: 'system',
-          ),
-          SizedBox(height: 4),
-          Divider(color: Color(0xFF2A2A2A), height: 20),
-          _ShareOption(
-            icon: Icons.flag_rounded,
-            color: Color(0xFFE4183C),
-            label: 'Denunciar publicação',
-            value: 'report',
-          ),
-          SizedBox(height: 10),
-        ],
+            _ShareOption(
+              icon: Icons.person_add_alt_1_rounded,
+              color: const Color(0xFF8B5CF6),
+              label: l10n.shareToFriend,
+              value: 'friend',
+            ),
+            _ShareOption(
+              icon: Icons.chat_bubble_rounded,
+              color: const Color(0xFFFF4D6A),
+              label: l10n.messagesTab,
+              value: 'messages',
+            ),
+            _ShareOption(
+              icon: Icons.link_rounded,
+              color: const Color(0xFFFFA53D),
+              label: l10n.copyLink,
+              value: 'copy',
+            ),
+            _ShareOption(
+              icon: Icons.ios_share_rounded,
+              color: const Color(0xFF22C55E),
+              label: l10n.shareSystemOthers,
+              value: 'system',
+            ),
+            const _ShareOption(
+              icon: Icons.chat_rounded,
+              color: Color(0xFF25D366),
+              label: 'WhatsApp',
+              value: 'whatsapp',
+            ),
+            const _ShareOption(
+              icon: Icons.camera_alt_rounded,
+              color: Color(0xFFE1306C),
+              label: 'Instagram',
+              value: 'instagram',
+            ),
+            const _ShareOption(
+              icon: Icons.thumb_up_alt_rounded,
+              color: Color(0xFF1877F2),
+              label: 'Facebook',
+              value: 'facebook',
+            ),
+            _ShareOption(
+              icon: Icons.more_horiz_rounded,
+              color: Colors.white,
+              label: l10n.moreAndroidOptions,
+              value: 'system',
+            ),
+            const SizedBox(height: 4),
+            const Divider(color: Color(0xFF2A2A2A), height: 20),
+            _ShareOption(
+              icon: Icons.flag_rounded,
+              color: const Color(0xFFE4183C),
+              label: l10n.reportPost,
+              value: 'report',
+            ),
+            const SizedBox(height: 10),
+          ],
         ),
       ),
     );
@@ -2812,11 +4116,11 @@ class _VideoItemState extends State<VideoItem>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 18, 20, 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
               child: Text(
-                'Salvar',
-                style: TextStyle(
+                AppLocalizations.of(context)!.savePost,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
@@ -2829,14 +4133,14 @@ class _VideoItemState extends State<VideoItem>
                   : Icons.bookmark_border_rounded,
               color: const Color(0xFF8B5CF6),
               label: widget.video.saved
-                  ? 'Remover dos favoritos'
-                  : 'Adicionar aos favoritos',
+                  ? AppLocalizations.of(context)!.removeFromSaved
+                  : AppLocalizations.of(context)!.addToSaved,
               value: 'favorite',
             ),
-            const _ShareOption(
+            _ShareOption(
               icon: Icons.download_rounded,
-              color: Color(0xFF22C55E),
-              label: 'Baixar para o dispositivo',
+              color: const Color(0xFF22C55E),
+              label: AppLocalizations.of(context)!.downloadToDevice,
               value: 'download',
             ),
             const SizedBox(height: 10),
@@ -2844,14 +4148,17 @@ class _VideoItemState extends State<VideoItem>
         ),
       ),
     );
+    if (!mounted) return;
 
     switch (action) {
       case 'favorite':
         final wasSaved = widget.video.saved;
         setState(() => widget.video.saved = !widget.video.saved);
-        _showSnack(widget.video.saved
-            ? 'Adicionado aos favoritos'
-            : 'Removido dos favoritos');
+        _showSnack(
+          widget.video.saved
+              ? AppLocalizations.of(context)!.savedUpdated
+              : AppLocalizations.of(context)!.unsavedUpdated,
+        );
         await _syncSave(wasSaved);
       case 'download':
         await _downloadToDevice();
@@ -2869,7 +4176,7 @@ class _VideoItemState extends State<VideoItem>
     } catch (_) {
       if (!mounted) return;
       setState(() => widget.video.saved = wasSaved);
-      _showSnack('Não foi possível atualizar o salvamento');
+      _showSnack(AppLocalizations.of(context)!.saveSyncError);
     }
   }
 
@@ -2879,12 +4186,12 @@ class _VideoItemState extends State<VideoItem>
     setState(() => _downloading = true);
 
     try {
-      final response = await http.get(
-        Uri.parse(widget.video.videoUrl),
-      );
+      final response = await http.get(Uri.parse(widget.video.videoUrl));
+
+      if (!mounted) return;
 
       if (response.statusCode != 200) {
-        _showSnack('Não foi possível baixar o vídeo');
+        _showSnack(AppLocalizations.of(context)!.downloadFail);
         return;
       }
 
@@ -2892,9 +4199,12 @@ class _VideoItemState extends State<VideoItem>
       final file = File('${dir.path}/${widget.video.id}.mp4');
       await file.writeAsBytes(response.bodyBytes, flush: true);
 
-      _showSnack('Vídeo baixado com sucesso! 📥');
+      if (!mounted) return;
+
+      _showSnack(AppLocalizations.of(context)!.videoDownloaded);
     } catch (_) {
-      _showSnack('Não foi possível baixar o vídeo');
+      if (!mounted) return;
+      _showSnack(AppLocalizations.of(context)!.downloadFail);
     } finally {
       if (mounted) {
         setState(() => _downloading = false);
@@ -2950,8 +4260,7 @@ class _VideoItemState extends State<VideoItem>
         children: [
           Container(
             color: Colors.black,
-            child: _controller != null &&
-                    _controller!.value.isInitialized
+            child: _controller != null && _controller!.value.isInitialized
                 ? FittedBox(
                     fit: BoxFit.cover,
                     child: SizedBox(
@@ -2962,7 +4271,7 @@ class _VideoItemState extends State<VideoItem>
                   )
                 : _buildPlaceholder(),
           ),
-// Região central de duplo-toque para curtir. `translucent` deixa o
+          // Região central de duplo-toque para curtir. `translucent` deixa o
           // drag vertical seguir para o PageView (duplo-toque é derrotado por
           // qualquer movimento de deslize), então o swipe continua instantâneo,
           // sem bloquear os botões laterais.
@@ -2979,20 +4288,31 @@ class _VideoItemState extends State<VideoItem>
                 strokeWidth: 2.5,
               ),
             ),
-          if (_error)
+          if (_buffering && !_loading)
             const Center(
+              child: SizedBox(
+                width: 34,
+                height: 34,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+          if (_error)
+            Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.error_outline,
                     color: Colors.white54,
                     size: 48,
                   ),
-                  SizedBox(height: 10),
+                  const SizedBox(height: 10),
                   Text(
-                    'Não foi possível carregar o vídeo',
-                    style: TextStyle(color: Colors.white70),
+                    AppLocalizations.of(context)!.videoLoadFail,
+                    style: const TextStyle(color: Colors.white70),
                   ),
                 ],
               ),
@@ -3028,10 +4348,7 @@ class _VideoItemState extends State<VideoItem>
                   color: Color(0xFFFF4D6A),
                   size: 130,
                   shadows: [
-                    Shadow(
-                      color: Colors.black45,
-                      blurRadius: 16,
-                    ),
+                    Shadow(color: Colors.black45, blurRadius: 16),
                     Shadow(
                       color: Colors.black38,
                       blurRadius: 4,
@@ -3065,40 +4382,27 @@ class _VideoItemState extends State<VideoItem>
               ),
             ),
           ),
+          // Bloco do criador: nome, @usuário e (abaixo) descrição + hashtags no mesmo
+          // bloco de texto. É o ÚNICO lugar do feed com esses dados.
+          //
+          // `bottom` menor = mais baixo na tela, longe do centro do vídeo.
+          // O deslocamento é relativo ao `bottomPadding`, que já embute a
+          // altura da navegação inferior — então continua responsivo: em
+          // telas com navegação maior, o bloco sobe junto, sem cobrir vídeo.
           Positioned(
             left: 12,
             right: 92,
-            bottom: bottomPadding + 110,
-            child: _VideoInfo(
+            bottom: bottomPadding + 10,
+            child: _CreatorStrip(
               video: widget.video,
-              onOpenCreator: _openCreatorProfile,
+              onTap: _openCreatorProfile,
               hashtagsExpanded: _hashtagsExpanded,
               onToggleHashtags: _toggleHashtags,
             ),
           ),
           Positioned(
-            left: 12,
-            right: 140,
-            bottom: bottomPadding + 74,
-            child: _AudioStrip(
-              audioName: widget.video.audioName,
-              onTap: _openAudioPage,
-            ),
-          ),
-          // Pesquisa relacionada: só aparece com dados reais (hashtags do post).
-          if (widget.video.hashtags.isNotEmpty)
-            Positioned(
-              left: 12,
-              right: 140,
-              bottom: bottomPadding + 46,
-              child: _RelatedSearchStrip(
-                query: widget.video.hashtags.first,
-                onTap: _openRelatedSearch,
-              ),
-            ),
-          Positioned(
             right: 10,
-            bottom: bottomPadding + 90,
+            bottom: bottomPadding + 64,
             child: _SideActions(
               video: widget.video,
               controller: _controller,
@@ -3111,6 +4415,7 @@ class _VideoItemState extends State<VideoItem>
               onSave: _showSaveMenu,
               onProfile: _openCreatorProfile,
               onAudio: _openAudioPage,
+              onFollow: _toggleFollow,
               downloading: _downloading,
             ),
           ),
@@ -3142,14 +4447,42 @@ class _VideoItemState extends State<VideoItem>
   }
 
   Widget _buildPlaceholder() {
+    final cover = widget.video.coverUrl ?? '';
     return Container(
       color: const Color(0xFF181820),
-      child: const Center(
-        child: Icon(
-          Icons.play_circle_outline,
-          color: Colors.white24,
-          size: 64,
-        ),
+      width: double.infinity,
+      height: double.infinity,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (cover.isNotEmpty)
+            Image.network(
+              cover,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          // Velatura dark com identidade KLAY K: mantém legíveis os overlays
+          // enquanto o vídeo carrega (nunca tela cinza vazia).
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0x22000000), Color(0x77000000)],
+              ),
+            ),
+          ),
+          const Center(
+            child: SizedBox(
+              width: 34,
+              height: 34,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3196,25 +4529,27 @@ class _CommentsSheetState extends State<CommentsSheet> {
   Future<void> _loadComments() async {
     setState(() => _loading = true);
     try {
-      final real = await ContentService.instance
-          .fetchComments(widget.video.id);
+      final real = await ContentService.instance.fetchComments(widget.video.id);
       final mapped = real
-          .map((c) => Comment(
-                id: c.id,
-                username: c.author?.username != null
-                    ? '@${c.author!.username}'
-                    : 'Usuário',
-                text: c.text,
-                timestamp: c.createdAt,
-                replyTo: c.parentId != null ? 'resposta' : null,
-                authorId: c.author?.id,
-                avatarUrl: c.author?.avatarUrl,
-                edited: c.editedAt != null,
-                isVerified: c.author?.isVerified ?? false,
-                mine: c.userId != null &&
-                    c.userId ==
-                        SupabaseService.instance.client.auth.currentUser?.id,
-              ))
+          .map(
+            (c) => Comment(
+              id: c.id,
+              username: c.author?.username != null
+                  ? '@${c.author!.username}'
+                  : AppLocalizations.of(context)!.user,
+              text: c.text,
+              timestamp: c.createdAt,
+              replyTo: c.parentId != null ? 'resposta' : null,
+              authorId: c.author?.id,
+              avatarUrl: c.author?.avatarUrl,
+              edited: c.editedAt != null,
+              isVerified: c.author?.isVerified ?? false,
+              mine:
+                  c.userId != null &&
+                  c.userId ==
+                      SupabaseService.instance.client.auth.currentUser?.id,
+            ),
+          )
           .toList();
       if (mounted) {
         setState(() {
@@ -3249,8 +4584,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Não foi possível enviar o comentário'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.commentSendError),
               behavior: SnackBarBehavior.floating,
             ),
           );
@@ -3278,18 +4613,23 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
   void _deleteComment(Comment comment, {required bool real}) {
     if (real) {
-      ContentService.instance.deleteComment(comment.id).then((_) {
-        _loadComments();
-      }).catchError((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Não foi possível excluir o comentário'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      });
+      ContentService.instance
+          .deleteComment(comment.id)
+          .then((_) {
+            _loadComments();
+          })
+          .catchError((_) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    AppLocalizations.of(context)!.commentDeleteError,
+                  ),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          });
       return;
     }
     setState(() {
@@ -3309,8 +4649,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
       _editingComment = comment;
       _replyTo = null;
       _controller.text = comment.text;
-      _controller.selection =
-          TextSelection.collapsed(offset: _controller.text.length);
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
     });
     _focusNode.requestFocus();
   }
@@ -3327,8 +4668,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
     Clipboard.setData(ClipboardData(text: comment.text)).then((_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Comentário copiado.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.commentCopied),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -3345,12 +4686,15 @@ class _CommentsSheetState extends State<CommentsSheet> {
       return;
     }
     if (_real) {
-      final applied = await ContentService.instance.editComment(target.id, text);
+      final applied = await ContentService.instance.editComment(
+        target.id,
+        text,
+      );
       if (!mounted) return;
       if (!applied) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Edição indisponível no momento. Tente mais tarde.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.commentEditUnavailable),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -3389,18 +4733,16 @@ class _CommentsSheetState extends State<CommentsSheet> {
       context,
       targetId: comment.id,
       targetType: 'comment',
-      targetLabel: 'comentário de ${comment.username}',
+      targetLabel: AppLocalizations.of(context)!.commentOf(comment.username),
     );
   }
 
   void _openCommentProfile(Comment comment) {
     final id = comment.authorId;
     if (id == null || id.isEmpty || !mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => UserProfileScreen(userId: id),
-      ),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => UserProfileScreen(userId: id)));
   }
 
   @override
@@ -3421,9 +4763,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              const Text(
-                'Comentários',
-                style: TextStyle(
+              Text(
+                AppLocalizations.of(context)!.commentsTitle,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -3431,10 +4773,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
               ),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(12),
@@ -3465,54 +4804,45 @@ class _CommentsSheetState extends State<CommentsSheet> {
           child: _loading && _comments.isEmpty
               ? const KlaykLoader()
               : _comments.isEmpty
-                  ? const KlaykEmptyState(
-                      icon: Icons.chat_bubble_outline,
-                      title: 'Seja o primeiro a comentar',
-                      message: 'Compartilhe sua opinião sobre este vídeo.',
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: _comments.length,
-                      itemBuilder: (context, index) {
-                        return _CommentTile(
-                          comment: _comments[index],
-                          onReply: () => _startReply(_comments[index]),
-                          onEdit: () => _startEditComment(_comments[index]),
-                          onCopy: () => _copyComment(_comments[index]),
-                          onDelete: () => _deleteComment(
-                            _comments[index],
-                            real: _real,
-                          ),
-                          onToggle: () {
-                            setState(() {
-                              final c = _comments[index];
-                              c.liked = !c.liked;
-                              c.likes += c.liked ? 1 : -1;
-                              if (c.likes < 0) c.likes = 0;
-                            });
-                          },
-                          onReport: () =>
-                              _reportComment(_comments[index]),
-                          onProfile: () =>
-                              _openCommentProfile(_comments[index]),
-                        );
+              ? KlaykEmptyState(
+                  icon: Icons.chat_bubble_outline,
+                  title: AppLocalizations.of(context)!.beFirstToComment,
+                  message: AppLocalizations.of(context)!.shareYourOpinion,
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _comments.length,
+                  itemBuilder: (context, index) {
+                    return _CommentTile(
+                      comment: _comments[index],
+                      onReply: () => _startReply(_comments[index]),
+                      onEdit: () => _startEditComment(_comments[index]),
+                      onCopy: () => _copyComment(_comments[index]),
+                      onDelete: () =>
+                          _deleteComment(_comments[index], real: _real),
+                      onToggle: () {
+                        setState(() {
+                          final c = _comments[index];
+                          c.liked = !c.liked;
+                          c.likes += c.liked ? 1 : -1;
+                          if (c.likes < 0) c.likes = 0;
+                        });
                       },
-                    ),
+                      onReport: () => _reportComment(_comments[index]),
+                      onProfile: () => _openCommentProfile(_comments[index]),
+                    );
+                  },
+                ),
         ),
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
           decoration: const BoxDecoration(
             color: Color(0xFF1E1E1E),
-            border: Border(
-              top: BorderSide(color: Color(0xFF2A2A2A)),
-            ),
+            border: Border(top: BorderSide(color: Color(0xFF2A2A2A))),
           ),
           child: Row(
             children: [
-              const Icon(
-                Icons.sentiment_satisfied_alt,
-                color: Colors.white38,
-              ),
+              const Icon(Icons.sentiment_satisfied_alt, color: Colors.white38),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -3525,7 +4855,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
                         child: Padding(
                           padding: const EdgeInsets.only(bottom: 2),
                           child: Text(
-                            'Respondendo a $_replyTo ✕',
+                            '${AppLocalizations.of(context)!.replyToLabel(_replyTo!)} ✕',
                             style: const TextStyle(
                               color: Color(0xFFB28DFF),
                               fontSize: 12,
@@ -3538,11 +4868,11 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     if (_editingComment != null) ...[
                       InkWell(
                         onTap: _cancelCommentEdit,
-                        child: const Padding(
-                          padding: EdgeInsets.only(bottom: 2),
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
                           child: Text(
-                            'Editando comentário ✕',
-                            style: TextStyle(
+                            '${AppLocalizations.of(context)!.editingCommentLabel} ✕',
+                            style: const TextStyle(
                               color: Color(0xFF8B5CF6),
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -3558,8 +4888,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
                       cursorColor: const Color(0xFF8B5CF6),
                       decoration: InputDecoration(
                         hintText: _editingComment != null
-                            ? 'Edite seu comentário...'
-                            : 'Adicionar comentário...',
+                            ? AppLocalizations.of(context)!.editCommentHint
+                            : AppLocalizations.of(context)!.addCommentHint,
                         hintStyle: const TextStyle(color: Colors.white38),
                         border: InputBorder.none,
                         isDense: true,
@@ -3573,7 +4903,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
               ),
               const SizedBox(width: 8),
               GestureDetector(
-                onTap: _editingComment != null ? _applyCommentEdit : _addComment,
+                onTap: _editingComment != null
+                    ? _applyCommentEdit
+                    : _addComment,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -3634,19 +4966,13 @@ class _CommentTile extends StatelessWidget {
             onTap: canOpenProfile ? onProfile : null,
             child: CircleAvatar(
               radius: 18,
-              backgroundColor: const Color(0xFF8B5CF6)
-                  .withValues(alpha: 0.4),
-              backgroundImage: (comment.avatarUrl != null &&
-                      comment.avatarUrl!.isNotEmpty)
+              backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
+              backgroundImage:
+                  (comment.avatarUrl != null && comment.avatarUrl!.isNotEmpty)
                   ? NetworkImage(comment.avatarUrl!)
                   : null,
-              child: (comment.avatarUrl == null ||
-                      comment.avatarUrl!.isEmpty)
-                  ? const Icon(
-                      Icons.person,
-                      color: Colors.white,
-                      size: 20,
-                    )
+              child: (comment.avatarUrl == null || comment.avatarUrl!.isEmpty)
+                  ? const Icon(Icons.person, color: Colors.white, size: 20)
                   : null,
             ),
           ),
@@ -3687,13 +5013,14 @@ class _CommentTile extends StatelessWidget {
                           vertical: 1,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF8B5CF6)
-                              .withValues(alpha: 0.35),
+                          color: const Color(
+                            0xFF8B5CF6,
+                          ).withValues(alpha: 0.35),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Text(
-                          'Você',
-                          style: TextStyle(
+                        child: Text(
+                          AppLocalizations.of(context)!.you,
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
@@ -3707,10 +5034,11 @@ class _CommentTile extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
-                      'Respondendo a ${comment.replyTo}',
+                      AppLocalizations.of(
+                        context,
+                      )!.replyToLabel(comment.replyTo!),
                       style: TextStyle(
-                        color: const Color(0xFF8B5CF6)
-                            .withValues(alpha: 0.9),
+                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.9),
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
@@ -3719,16 +5047,13 @@ class _CommentTile extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   comment.text,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
                 ),
                 if (comment.edited)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
-                      'Editada',
+                      AppLocalizations.of(context)!.editedLabel,
                       style: TextStyle(
                         color: const Color(0xFF8B5CF6).withValues(alpha: 0.8),
                         fontSize: 11,
@@ -3771,9 +5096,9 @@ class _CommentTile extends StatelessWidget {
                     GestureDetector(
                       onTap: onReply,
                       behavior: HitTestBehavior.opaque,
-                      child: const Text(
-                        'Responder',
-                        style: TextStyle(
+                      child: Text(
+                        AppLocalizations.of(context)!.reply,
+                        style: const TextStyle(
                           color: Colors.white54,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -3785,9 +5110,9 @@ class _CommentTile extends StatelessWidget {
                       GestureDetector(
                         onTap: onCopy,
                         behavior: HitTestBehavior.opaque,
-                        child: const Text(
-                          'Copiar',
-                          style: TextStyle(
+                        child: Text(
+                          AppLocalizations.of(context)!.copy,
+                          style: const TextStyle(
                             color: Colors.white54,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -3798,9 +5123,9 @@ class _CommentTile extends StatelessWidget {
                       GestureDetector(
                         onTap: onEdit,
                         behavior: HitTestBehavior.opaque,
-                        child: const Text(
-                          'Editar',
-                          style: TextStyle(
+                        child: Text(
+                          AppLocalizations.of(context)!.edit,
+                          style: const TextStyle(
                             color: Color(0xFFB28DFF),
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -3814,32 +5139,35 @@ class _CommentTile extends StatelessWidget {
                             context: context,
                             builder: (context) => AlertDialog(
                               backgroundColor: const Color(0xFF1C1C26),
-                              title: const Text(
-                                'Excluir comentário',
-                                style: TextStyle(
+                              title: Text(
+                                AppLocalizations.of(
+                                  context,
+                                )!.deleteCommentTitle,
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
-                              content: const Text(
-                                'Tem certeza que deseja excluir este comentário?',
-                                style: TextStyle(color: Colors.white70),
+                              content: Text(
+                                AppLocalizations.of(context)!.deleteCommentBody,
+                                style: const TextStyle(color: Colors.white70),
                               ),
                               actions: [
                                 TextButton(
                                   onPressed: () =>
                                       Navigator.pop(context, false),
-                                  child: const Text(
-                                    'Cancelar',
-                                    style: TextStyle(color: Colors.white54),
+                                  child: Text(
+                                    AppLocalizations.of(context)!.cancel,
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                    ),
                                   ),
                                 ),
                                 TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, true),
-                                  child: const Text(
-                                    'Excluir',
-                                    style: TextStyle(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: Text(
+                                    AppLocalizations.of(context)!.delete,
+                                    style: const TextStyle(
                                       color: Color(0xFFFF4D6A),
                                     ),
                                   ),
@@ -3850,9 +5178,9 @@ class _CommentTile extends StatelessWidget {
                           if (confirm == true) onDelete();
                         },
                         behavior: HitTestBehavior.opaque,
-                        child: const Text(
-                          'Excluir',
-                          style: TextStyle(
+                        child: Text(
+                          AppLocalizations.of(context)!.delete,
+                          style: const TextStyle(
                             color: Color(0xFFFF4D6A),
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -3865,9 +5193,9 @@ class _CommentTile extends StatelessWidget {
                       GestureDetector(
                         onTap: onReport,
                         behavior: HitTestBehavior.opaque,
-                        child: const Text(
-                          'Denunciar',
-                          style: TextStyle(
+                        child: Text(
+                          AppLocalizations.of(context)!.report,
+                          style: const TextStyle(
                             color: Colors.white38,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -3962,10 +5290,7 @@ class _RotatingDisc extends StatefulWidget {
   final VideoPlayerController? controller;
   final double size;
 
-  const _RotatingDisc({
-    required this.controller,
-    required this.size,
-  });
+  const _RotatingDisc({required this.controller, required this.size});
 
   @override
   State<_RotatingDisc> createState() => _RotatingDiscState();
@@ -4045,6 +5370,7 @@ class _SideActions extends StatelessWidget {
   final VoidCallback onSave;
   final VoidCallback onProfile;
   final VoidCallback onAudio;
+  final VoidCallback onFollow;
   final bool downloading;
 
   const _SideActions({
@@ -4058,6 +5384,7 @@ class _SideActions extends StatelessWidget {
     required this.onSave,
     required this.onProfile,
     required this.onAudio,
+    required this.onFollow,
     required this.downloading,
     this.controller,
   });
@@ -4076,59 +5403,60 @@ class _SideActions extends StatelessWidget {
           avatarUrl: video.avatarUrl,
           following: video.following,
           onTap: onProfile,
+          onFollow: onFollow,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         _ActionIcon(
           icon: video.liked
               ? Icons.favorite_rounded
               : Icons.favorite_border_rounded,
           iconWidget: _StyledAssetIcon(
             asset: 'assets/ic_curtir.png',
-            size: 36,
+            size: 40,
             tint: video.liked ? const Color(0xFFFF4D6A) : Colors.white,
             shadow: true,
           ),
           label: _formatNumber(video.likes),
           active: video.liked,
           activeColor: const Color(0xFFFF4D6A),
-          semanticLabel: 'Curtir',
+          semanticLabel: AppLocalizations.of(context)!.likeLabel,
           onTap: onLike,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         _ActionIcon(
           icon: Icons.chat_bubble_rounded,
           iconWidget: const _StyledAssetIcon(
             asset: 'assets/ic_comentario.png',
-            size: 38,
+            size: 42,
             shadow: true,
           ),
           label: _formatNumber(video.comments),
-          semanticLabel: 'Comentários',
+          semanticLabel: AppLocalizations.of(context)!.commentsTitle,
           onTap: onComment,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         _ActionIcon(
           icon: Icons.reply_rounded,
           iconWidget: const _StyledAssetIcon(
             asset: 'assets/ic_compartilhar.png',
-            size: 36,
+            size: 40,
             shadow: true,
           ),
           label: _formatNumber(video.shares),
-          semanticLabel: 'Compartilhar',
+          semanticLabel: AppLocalizations.of(context)!.share,
           onTap: onShare,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         _ActionIcon(
           icon: video.saved
               ? Icons.verified_rounded
               : Icons.file_download_rounded,
           iconWidget: downloading
               ? const SizedBox(
-                  width: 38,
-                  height: 38,
+                  width: 40,
+                  height: 40,
                   child: Padding(
-                    padding: EdgeInsets.all(7),
+                    padding: EdgeInsets.all(8),
                     child: CircularProgressIndicator(
                       strokeWidth: 3,
                       color: Colors.white,
@@ -4137,25 +5465,23 @@ class _SideActions extends StatelessWidget {
                 )
               : _StyledAssetIcon(
                   asset: 'assets/ic_download.png',
-                  size: 36,
-                  tint: video.saved
-                      ? const Color(0xFF8B5CF6)
-                      : Colors.white,
+                  size: 40,
+                  tint: video.saved ? const Color(0xFF8B5CF6) : Colors.white,
                   shadow: true,
                 ),
-          label: video.saved ? 'Salvo' : '',
-          semanticLabel: 'Salvar',
+          label: video.saved ? AppLocalizations.of(context)!.saveShort : '',
+          semanticLabel: AppLocalizations.of(context)!.savePost,
           onTap: onSave,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 14),
         Semantics(
-          label: 'Música',
+          label: AppLocalizations.of(context)!.music,
           button: true,
           child: GestureDetector(
             onTap: onAudio,
             child: Container(
-              width: 46,
-              height: 46,
+              width: 50,
+              height: 50,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -4169,7 +5495,7 @@ class _SideActions extends StatelessWidget {
                   ),
                 ],
               ),
-              child: _RotatingDisc(controller: controller, size: 26),
+              child: _RotatingDisc(controller: controller, size: 28),
             ),
           ),
         ),
@@ -4192,11 +5518,13 @@ class _CreatorAvatar extends StatelessWidget {
   final String avatarUrl;
   final bool following;
   final VoidCallback onTap;
+  final VoidCallback onFollow;
 
   const _CreatorAvatar({
     required this.avatarUrl,
     required this.following,
     required this.onTap,
+    required this.onFollow,
   });
 
   @override
@@ -4210,20 +5538,19 @@ class _CreatorAvatar extends StatelessWidget {
           clipBehavior: Clip.none,
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: following
-                      ? const Color(0xFF8B5CF6)
-                      : Colors.white,
-                  width: 2.5,
+                  color: following ? const Color(0xFF8B5CF6) : Colors.white,
+                  width: 1.6,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF8B5CF6)
-                        .withValues(alpha: following ? 0.5 : 0.2),
+                    color: const Color(
+                      0xFF8B5CF6,
+                    ).withValues(alpha: following ? 0.25 : 0.1),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -4238,36 +5565,51 @@ class _CreatorAvatar extends StatelessWidget {
                     child: const Icon(
                       Icons.person,
                       color: Colors.white,
-                      size: 24,
+                      size: 26,
                     ),
                   ),
                 ),
               ),
             ),
             Positioned(
-              bottom: -3,
-              right: -3,
-              child: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
+              bottom: -4,
+              right: -4,
+              // Badge "+" / "✓": toque curto segue (ou deixa de seguir) o
+              // criador usando o sistema real de follows, sem abrir tela nova.
+              child: Semantics(
+                label: following
+                    ? AppLocalizations.of(context)!.following
+                    : AppLocalizations.of(context)!.follow,
+                button: true,
+                child: GestureDetector(
+                  onTap: onFollow,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.4),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        following ? Icons.check_rounded : Icons.add_rounded,
+                        color: following
+                            ? const Color(0xFF8B5CF6)
+                            : Colors.black,
+                        size: 15,
+                        weight: 800,
+                      ),
                     ),
-                  ],
-                ),
-                child: Icon(
-                  following ? Icons.check_rounded : Icons.add_rounded,
-                  color: following
-                      ? const Color(0xFFFF4D6A)
-                      : Colors.black,
-                  size: 14,
-                  weight: 800,
+                  ),
                 ),
               ),
             ),
@@ -4319,9 +5661,10 @@ class _ActionIconState extends State<_ActionIcon>
       lowerBound: 0.0,
       upperBound: 1.0,
     );
-    _scale = Tween<double>(begin: 1.0, end: 1.3).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
-    );
+    _scale = Tween<double>(
+      begin: 1.0,
+      end: 1.3,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack));
   }
 
   @override
@@ -4342,38 +5685,39 @@ class _ActionIconState extends State<_ActionIcon>
           widget.onTap();
         },
         onTapCancel: () => _ctrl.reverse(),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedBuilder(
-              animation: _scale,
-              builder: (_, child) => Transform.scale(
-                scale: _scale.value,
-                child: child,
+        // Padding extra dá área de toque confortável sem aumentar o ícone.
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedBuilder(
+                animation: _scale,
+                builder: (_, child) =>
+                    Transform.scale(scale: _scale.value, child: child),
+                child:
+                    widget.iconWidget ??
+                    Icon(
+                      widget.icon,
+                      color: widget.active ? widget.activeColor : Colors.white,
+                      size: 40,
+                      shadows: _kIconShadow,
+                    ),
               ),
-              child: widget.iconWidget ??
-                  Icon(
-                    widget.icon,
-                    color: widget.active
-                        ? widget.activeColor
-                        : Colors.white,
-                    size: 34,
-                    shadows: _kIconShadow,
+              if (widget.label.isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text(
+                  widget.label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    shadows: _kLabelShadow,
                   ),
-            ),
-            if (widget.label.isNotEmpty) ...[
-              const SizedBox(height: 3),
-              Text(
-                widget.label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  shadows: _kLabelShadow,
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -4381,177 +5725,240 @@ class _ActionIconState extends State<_ActionIcon>
 }
 
 // ============================================================
-// INFORMAÇÕES DO CRIADOR
+// BLOCO DO CRIADOR (substitui a faixa de "Áudio original")
 // ============================================================
 
-class _VideoInfo extends StatelessWidget {
+/// Tipos de selo suportados pelo bloco do criador.
+///
+/// Hoje só [verified] existe de verdade (o selo oficial do projeto). Os
+/// demais ficam declarados como ponto de extensão para Creator, Pro, Elite,
+/// Legend e Founder — mas **não** são exibidos: enquanto o backend não mandar
+/// um papel, nenhum selo além de verificado aparece.
+enum KlaykBadgeKind {
+  verified,
+  creator,
+  pro,
+  elite,
+  legend,
+  founder;
+
+  /// Só verificação é aplicada ao bloco do criador nesta etapa.
+  static bool isActive(KlaykBadgeKind kind) => kind == KlaykBadgeKind.verified;
+}
+
+/// Os selos ativos para este criador.
+///
+/// Ponto único de decisão: é aqui que Creator/Pro/Elite/Legend/Founder vão
+/// entrar quando o backend passar a informar o papel do autor. Por enquanto
+/// devolve no máximo um selo (verificado), então nunca duplica ícone na linha.
+List<KlaykBadgeKind> _creatorBadgesFor(KlayKVideo video) {
+  final out = <KlaykBadgeKind>[];
+  if (video.isVerified) out.add(KlaykBadgeKind.verified);
+  return out.where(KlaykBadgeKind.isActive).toList();
+}
+
+/// Informação do criador na parte inferior esquerda do vídeo.
+///
+/// Ocupa exatamente o espaço que era da faixa de áudio, sem criar área nova:
+/// nome + selo na mesma linha, @username abaixo e #klayk em roxo/neon.
+///
+/// Dados vem do próprio [KlayKVideo] (displayName / username / isVerified) —
+/// nada é fixo no código e nenhuma consulta extra é feita ao Supabase.
+///
+/// A estrutura já aceita outros tipos de selo no futuro: [KlaykBadgeKind]
+/// hoje só produz [KlaykBadgeKind.verified], mas o ponto de extensão está
+/// aqui para Creator/Pro/Elite/Legend/Founder.
+class _CreatorStrip extends StatelessWidget {
   final KlayKVideo video;
-  final VoidCallback onOpenCreator;
+  final VoidCallback onTap;
+
+  /// Estado do "mais/menos". Controla **apenas** a descrição + hashtags: nome e
+  /// @usuário nunca são afetados.
   final bool hashtagsExpanded;
   final VoidCallback onToggleHashtags;
 
-  const _VideoInfo({
+  const _CreatorStrip({
     required this.video,
-    required this.onOpenCreator,
+    required this.onTap,
     required this.hashtagsExpanded,
     required this.onToggleHashtags,
   });
 
-  bool get _needsMore =>
-      video.description.length > 52 || video.hashtags.length > 3;
+  /// Linhas do texto antes de cortar. Curto aparece inteiro, sem "mais".
+  static const int _collapsedLines = 2;
+
+  /// Descrição + hashtags como UM único bloco de texto.
+  ///
+  /// O KLAY K injeta `klayk` em todo post, então a lista de hashtags já vem
+  /// com ele — aqui entra junto da descrição, sem bloco separado e sem
+  /// duplicar a #klayk.
+  String get _caption {
+    final desc = video.description.trim();
+    final tags = video.hashtags
+        .map((t) => t.trim().replaceFirst(RegExp(r'^#'), ''))
+        .where((t) => t.isNotEmpty)
+        .map((t) => '#$t')
+        .toList();
+    if (desc.isEmpty) return tags.join(' ');
+    if (tags.isEmpty) return desc;
+    return '$desc ${tags.join(' ')}';
+  }
+
+  /// Mesmo texto da [_caption], mas como spans: hashtags mantêm a cor de
+  /// destaque do KLAY K e continuam no MESMO bloco (quebra junto com a
+  /// descrição, respeita as mesmas linhas e o mesmo corte).
+  TextSpan _captionSpan(Color accent) {
+    final desc = video.description.trim();
+    final tags = video.hashtags
+        .map((t) => t.trim().replaceFirst(RegExp(r'^#'), ''))
+        .where((t) => t.isNotEmpty)
+        .map((t) => '#$t')
+        .toList();
+    final children = <InlineSpan>[];
+    if (desc.isNotEmpty) {
+      children.add(
+        TextSpan(
+          text: desc,
+          style: const TextStyle(color: Colors.white),
+        ),
+      );
+    }
+    for (final tag in tags) {
+      children.add(
+        TextSpan(
+          text: ' $tag',
+          style: TextStyle(color: accent, fontWeight: FontWeight.w600),
+        ),
+      );
+    }
+    return TextSpan(
+      children: children,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 13,
+        height: 1.3,
+        shadows: _kLabelShadow,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final colors = kc(context);
-    final accent = colors.primarySoft;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          onTap: onOpenCreator,
-          behavior: HitTestBehavior.opaque,
-          child: Row(
+    final colors = kcolors(context);
+    final name = video.displayName.trim();
+    final handle = video.username.trim();
+    final hasName = name.isNotEmpty && name != 'Usuário';
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Linha 1: nome + selo, com truncamento elegante. O selo fica
+          // dentro do Flexible para nunca estourar a largura disponível.
+          Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Flexible(
                 child: Text(
-                  video.displayName,
+                  hasName ? name : handle.replaceFirst('@', ''),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.2,
-                    shadows: [
-                      Shadow(
-                          color: Colors.black87,
-                          blurRadius: 8,
-                          offset: Offset(0, 2)),
-                      Shadow(
-                          color: Color(0x998B5CF6),
-                          blurRadius: 16,
-                          offset: Offset(0, 0)),
-                    ],
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    shadows: _kLabelShadow,
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
-              if (video.isVerified)
-                const VerifiedBadge(size: 18),
-              const SizedBox(width: 5),
-              const Text(
-                '>',
-                style: TextStyle(
-                  color: Colors.white60,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  shadows: _kLabelShadow,
-                ),
-              ),
+              for (final badge in _creatorBadgesFor(video)) ...[
+                const SizedBox(width: 5),
+                if (badge == KlaykBadgeKind.verified)
+                  const VerifiedBadge(size: 15),
+              ],
             ],
           ),
-        ),
-        const SizedBox(height: 6),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 260),
-          curve: Curves.easeInOut,
-          alignment: Alignment.topLeft,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                video.description,
-                maxLines: hashtagsExpanded ? null : 2,
-                overflow: hashtagsExpanded
-                    ? null
-                    : TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  height: 1.3,
-                  shadows: _kLabelShadow,
-                ),
+          if (handle.isNotEmpty && handle != '@usuario') ...[
+            const SizedBox(height: 2),
+            Text(
+              handle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                shadows: _kLabelShadow,
               ),
-              if (video.hashtags.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                if (hashtagsExpanded)
-                  Wrap(
-                    spacing: 9,
-                    runSpacing: 3,
-                    children: video.hashtags
-                        .map(
-                          (t) => Text(
-                            '#$t',
-                            style: TextStyle(
-                              color: accent,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              shadows: _kLabelShadow,
+            ),
+          ],
+          const SizedBox(height: 3),
+          // Descrição + hashtags como UM bloco de texto, logo ABAIXO do
+          // @usuário. Nunca na mesma linha do @usuário, nunca em bloco
+          // separado: é o mesmo `Text.rich`, quebrando junto.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (_caption.isEmpty) return const SizedBox.shrink();
+              final span = _captionSpan(colors.primarySoft);
+              // Mede o texto real para só mostrar "mais" quando existe
+              // conteúdo escondido de fato (e não por um chute de tamanho).
+              final painter = TextPainter(
+                text: span,
+                maxLines: _collapsedLines,
+                textDirection: Directionality.of(context),
+              )..layout(maxWidth: constraints.maxWidth);
+              final hidden = painter.didExceedMaxLines;
+              painter.dispose();
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text.rich(
+                    span,
+                    maxLines: hashtagsExpanded ? null : _collapsedLines,
+                    overflow: hashtagsExpanded
+                        ? TextOverflow.clip
+                        : TextOverflow.ellipsis,
+                  ),
+                  if (hidden)
+                    GestureDetector(
+                      onTap: onToggleHashtags,
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              hashtagsExpanded ? 'menos' : 'mais',
+                              style: TextStyle(
+                                color: colors.primarySoft,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                shadows: _kLabelShadow,
+                              ),
                             ),
-                          ),
-                        )
-                        .toList(),
-                  )
-                else
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          video.hashtags
-                              .take(3)
-                              .map((t) => '#$t')
-                              .join(' '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: accent,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            shadows: _kLabelShadow,
-                          ),
+                            Icon(
+                              hashtagsExpanded
+                                  ? Icons.keyboard_arrow_up_rounded
+                                  : Icons.keyboard_arrow_down_rounded,
+                              color: colors.primarySoft,
+                              size: 16,
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-              ],
-              if (_needsMore)
-                GestureDetector(
-                  onTap: onToggleHashtags,
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          hashtagsExpanded ? 'Menos' : 'Mais',
-                          style: TextStyle(
-                            color: accent,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            shadows: _kLabelShadow,
-                          ),
-                        ),
-                        const SizedBox(width: 2),
-                        Icon(
-                          hashtagsExpanded
-                              ? Icons.keyboard_arrow_up_rounded
-                              : Icons.keyboard_arrow_down_rounded,
-                          color: accent,
-                          size: 16,
-                        ),
-                      ],
                     ),
-                  ),
-                ),
-            ],
+                ],
+              );
+            },
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -4564,9 +5971,14 @@ class _AudioStrip extends StatelessWidget {
   final String audioName;
   final VoidCallback onTap;
 
+  /// Tamanho do texto. A tela de áudio usa 16 (é o conteúdo principal de lá);
+  /// no feed usava 12 como rótulo discreto.
+  final double fontSize;
+
   const _AudioStrip({
     required this.audioName,
     required this.onTap,
+    this.fontSize = 12,
   });
 
   @override
@@ -4577,88 +5989,27 @@ class _AudioStrip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          Icon(
             Icons.music_note_rounded,
             color: Colors.white,
-            size: 16,
+            size: fontSize + 4,
             shadows: _kLabelShadow,
           ),
           const SizedBox(width: 4),
           Flexible(
             child: Text(
               audioName,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
+                fontSize: fontSize,
+                fontWeight: fontSize >= 16 ? FontWeight.w800 : FontWeight.w500,
                 shadows: _kLabelShadow,
               ),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ============================================================
-// PESQUISA RELACIONADA (barra discreta na base do vídeo)
-// ============================================================
-
-/// Pílula "🔎 Pesquisar: <termo relacionado>" na base do vídeo. Só é
-/// criada quando há dados reais (hashtag do post) — nunca inventa termo.
-class _RelatedSearchStrip extends StatelessWidget {
-  final String query;
-  final VoidCallback onTap;
-
-  const _RelatedSearchStrip({required this.query, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = kc(context).primarySoft;
-    return Semantics(
-      label: 'Pesquisar $query',
-      button: true,
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.38),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.search_rounded,
-                color: Colors.white,
-                size: 16,
-                shadows: _kLabelShadow,
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  'Pesquisar: $query',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    shadows: _kLabelShadow,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right_rounded, color: accent, size: 16),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -4742,9 +6093,107 @@ class _AudioScreenState extends State<AudioScreen> {
   List<FeedPost> _related = const [];
   bool _relatedLoading = true;
 
+  /// Modo de gerenciamento: seleção múltipla de vídeos deste som.
+  bool _manageMode = false;
+  final Set<String> _selected = {};
+  bool _deleting = false;
+
+  /// True quando o usuário tem capability 'moderation' (apagar vídeos de
+  /// outros). O cliente apenas decide o atalho — o backend revalida.
+  bool _isMod = false;
+
   @override
   void initState() {
     super.initState();
+    _load();
+    _loadModCap();
+  }
+
+  Future<void> _loadModCap() async {
+    if (!SupabaseService.instance.isConfigured) return;
+    try {
+      final caps = await AdminService.instance.myCaps();
+      if (mounted) setState(() => _isMod = caps.contains('moderation'));
+    } catch (_) {}
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selected.isEmpty || _deleting) return;
+    final n = _selected.length;
+    final go = await confirmDeleteDialog(
+      context,
+      title: AppLocalizations.of(context)!.deleteVideosTitle(n),
+      message: AppLocalizations.of(context)!.deleteVideosBody,
+      confirmLabel: AppLocalizations.of(context)!.deleteConfirmDialog(n),
+    );
+    if (!go || !mounted) return;
+    await _performDelete(_selected);
+  }
+
+  Future<void> _deleteAllAudioVideos() async {
+    if (_related.isEmpty || _deleting) return;
+    final go = await confirmDeleteDialog(
+      context,
+      title: AppLocalizations.of(context)!.deleteAllAudioVideosTitle,
+      message: AppLocalizations.of(context)!.deleteAllAudioVideosBody,
+      confirmLabel: AppLocalizations.of(context)!.deleteAllConfirm,
+    );
+    if (!go || !mounted) return;
+    await _performDelete(_related.map((p) => p.id).toSet());
+  }
+
+  Future<void> _performDelete(Set<String> ids) async {
+    final myId = SupabaseService.instance.client.auth.currentUser?.id;
+    setState(() => _deleting = true);
+    var removed = 0;
+    var denied = 0;
+    for (final p in _related) {
+      if (!ids.contains(p.id)) continue;
+      final mine = myId != null && p.userId == myId;
+      try {
+        if (mine) {
+          await ContentService.instance.deletePost(
+            p.id,
+            videoPath: p.videoUrl,
+            coverUrl: p.coverUrl,
+          );
+        } else if (_isMod) {
+          final res = await AdminService.instance.adminDeletePost(p.id);
+          if (res['ok'] != true && res['id'] == null) {
+            denied++;
+            continue;
+          }
+        } else {
+          denied++;
+          continue;
+        }
+        removed++;
+      } catch (_) {
+        denied++;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _deleting = false;
+      _selected.clear();
+      _manageMode = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          removed > 0
+              ? AppLocalizations.of(context)!.audioVideosDeleted(removed)
+              : AppLocalizations.of(context)!.audioVideosDeleted(0),
+        ),
+      ),
+    );
+    if (denied > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.deleteDeniedPermission),
+        ),
+      );
+    }
     _load();
   }
 
@@ -4752,11 +6201,11 @@ class _AudioScreenState extends State<AudioScreen> {
   /// sem backend, os valores ficam em 0/vazio (nunca inventa números).
   Future<void> _load() async {
     final audioName = widget.video.audioName;
-    if (audioName.isNotEmpty &&
-        SupabaseService.instance.isConfigured) {
+    if (audioName.isNotEmpty && SupabaseService.instance.isConfigured) {
       try {
-        final count = await ContentService.instance
-            .countPostsByAudio(audioName);
+        final count = await ContentService.instance.countPostsByAudio(
+          audioName,
+        );
         final feed = await ContentService.instance.fetchFeed();
         final related = feed
             .where((p) => p.audioName == audioName)
@@ -4796,13 +6245,36 @@ class _AudioScreenState extends State<AudioScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         centerTitle: true,
-        title: const Text(
-          'Áudio',
-          style: TextStyle(
+        title: Text(
+          AppLocalizations.of(context)!.audio,
+          style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w800,
           ),
         ),
+        actions: [
+          if (_manageMode)
+            TextButton(
+              onPressed: _deleting
+                  ? null
+                  : () => setState(() {
+                      _manageMode = false;
+                      _selected.clear();
+                    }),
+              child: Text(
+                AppLocalizations.of(context)!.doneAction,
+                style: const TextStyle(color: Color(0xFFB28DFF)),
+              ),
+            )
+          else if (_related.isNotEmpty)
+            IconButton(
+              tooltip: AppLocalizations.of(context)!.manageSoundVideos,
+              onPressed: _deleting
+                  ? null
+                  : () => setState(() => _manageMode = true),
+              icon: const Icon(Icons.select_all_rounded, color: Colors.white70),
+            ),
+        ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4824,8 +6296,7 @@ class _AudioScreenState extends State<AudioScreen> {
                     border: Border.all(color: Colors.white24),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF8B5CF6)
-                            .withValues(alpha: 0.5),
+                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
                         blurRadius: 20,
                         offset: const Offset(0, 6),
                       ),
@@ -4842,15 +6313,13 @@ class _AudioScreenState extends State<AudioScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        widget.video.audioName,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
+                      // Nome do áudio com ícone de nota: o mesmo componente
+                      // que antes aparecia no feed, agora onde o áudio é o
+                      // conteúdo real da tela.
+                      _AudioStrip(
+                        audioName: widget.video.audioName,
+                        onTap: () {},
+                        fontSize: 16,
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -4871,7 +6340,9 @@ class _AudioScreenState extends State<AudioScreen> {
                               ),
                             )
                           : Text(
-                              '$totalUses vídeo${totalUses == 1 ? '' : 's'} usando este som',
+                              AppLocalizations.of(
+                                context,
+                              )!.soundUses(totalUses),
                               style: const TextStyle(
                                 color: Color(0xFFB28DFF),
                                 fontSize: 12,
@@ -4888,10 +6359,12 @@ class _AudioScreenState extends State<AudioScreen> {
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
             child: GestureDetector(
               onTap: () {
-                kNavIndex.value = 2;
+                kNavIndex.value = 3;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Crie seu vídeo usando este som 🎬'),
+                  SnackBar(
+                    content: Text(
+                      AppLocalizations.of(context)!.createVideoWithSound,
+                    ),
                     behavior: SnackBarBehavior.floating,
                   ),
                 );
@@ -4910,9 +6383,9 @@ class _AudioScreenState extends State<AudioScreen> {
                     ),
                   ],
                 ),
-                child: const Text(
-                  'Usar este som',
-                  style: TextStyle(
+                child: Text(
+                  AppLocalizations.of(context)!.useThisSound,
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -4921,17 +6394,25 @@ class _AudioScreenState extends State<AudioScreen> {
               ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 14, 20, 10),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
             child: Text(
-              'Vídeos usando esse áudio',
-              style: TextStyle(
+              AppLocalizations.of(context)!.videosUsingAudio,
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
               ),
             ),
           ),
+          if (_manageMode)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                AppLocalizations.of(context)!.tapVideosToSelect,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ),
           Expanded(
             child: _relatedLoading
                 ? const Center(
@@ -4945,59 +6426,89 @@ class _AudioScreenState extends State<AudioScreen> {
                     ),
                   )
                 : _related.isEmpty
-                    ? const SingleChildScrollView(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 4,
-                        ),
-                        child: Text(
-                          'Nenhum vídeo usando esse áudio ainda',
-                          style: TextStyle(color: Colors.white54, fontSize: 13),
-                        ),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        itemCount: _related.length,
-                        itemBuilder: (context, index) {
-                          final p = _related[index];
-                          final name = p.author?.name ?? 'Usuário';
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: GestureDetector(
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => VideoPreviewScreen(post: p),
+                ? SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      AppLocalizations.of(context)!.noVideosUsingAudio,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: _related.length,
+                    itemBuilder: (context, index) {
+                      final p = _related[index];
+                      final selected = _selected.contains(p.id);
+                      final name =
+                          p.author?.name ?? AppLocalizations.of(context)!.user;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: GestureDetector(
+                          onTap: _manageMode
+                              ? () => setState(() {
+                                  if (!_selected.add(p.id)) {
+                                    _selected.remove(p.id);
+                                  }
+                                })
+                              : () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => VideoPreviewScreen(post: p),
+                                  ),
                                 ),
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? const Color(0xFF2A2440)
+                                  : const Color(0xFF1C1C26),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: selected
+                                    ? const Color(0xFF8B5CF6)
+                                    : Colors.white10,
+                                width: selected ? 1.4 : 1,
                               ),
-                              child: Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1C1C26),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: Colors.white10),
-                                ),
-                                child: Row(
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
-                                      child: p.coverUrl == null ||
-                                              p.coverUrl!.isEmpty
-                                          ? Container(
-                                              width: 56,
-                                              height: 76,
-                                              color: const Color(0xFF2A2A38),
-                                              child: const Icon(
-                                                Icons.play_circle_outline,
-                                                color: Colors.white38,
-                                              ),
-                                            )
-                                          : Image.network(
-                                              p.coverUrl!,
-                                              width: 56,
-                                              height: 76,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) =>
-                                                  Container(
+                            ),
+                            child: Row(
+                              children: [
+                                if (_manageMode) ...[
+                                  Icon(
+                                    selected
+                                        ? Icons.check_circle_rounded
+                                        : Icons.radio_button_unchecked_rounded,
+                                    color: selected
+                                        ? const Color(0xFF8B5CF6)
+                                        : Colors.white38,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 10),
+                                ],
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child:
+                                      p.coverUrl == null || p.coverUrl!.isEmpty
+                                      ? Container(
+                                          width: 56,
+                                          height: 76,
+                                          color: const Color(0xFF2A2A38),
+                                          child: const Icon(
+                                            Icons.play_circle_outline,
+                                            color: Colors.white38,
+                                          ),
+                                        )
+                                      : Image.network(
+                                          p.coverUrl!,
+                                          width: 56,
+                                          height: 76,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) =>
+                                              Container(
                                                 width: 56,
                                                 height: 76,
                                                 color: const Color(0xFF2A2A38),
@@ -5006,62 +6517,115 @@ class _AudioScreenState extends State<AudioScreen> {
                                                   color: Colors.white38,
                                                 ),
                                               ),
-                                            ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                        ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
                                         children: [
-                                          Row(
-                                            children: [
-                                              Flexible(
-                                                child: Text(
-                                                  name,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
+                                          Flexible(
+                                            child: Text(
+                                              name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w700,
                                               ),
-                                              if (p.author?.isVerified ??
-                                                  false) ...[
-                                                const SizedBox(width: 5),
-                                                const VerifiedBadge(size: 15),
-                                              ],
-                                            ],
-                                          ),
-                                          const SizedBox(height: 3),
-                                          Text(
-                                            '${_format(p.likesCount)} curtidas',
-                                            style: const TextStyle(
-                                              color: Colors.white54,
-                                              fontSize: 12,
                                             ),
                                           ),
+                                          if (p.author?.isVerified ??
+                                              false) ...[
+                                            const SizedBox(width: 5),
+                                            const VerifiedBadge(size: 15),
+                                          ],
                                         ],
                                       ),
-                                    ),
-                                    const Icon(
-                                      Icons.play_circle_fill_rounded,
-                                      color: Color(0xFF8B5CF6),
-                                      size: 30,
-                                    ),
-                                  ],
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        AppLocalizations.of(
+                                          context,
+                                        )!.likesText(_format(p.likesCount)),
+                                        style: const TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
+                                const Icon(
+                                  Icons.play_circle_fill_rounded,
+                                  color: Color(0xFF8B5CF6),
+                                  size: 30,
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
+      bottomNavigationBar: _manageMode
+          ? SafeArea(
+              child: Container(
+                color: const Color(0xFF14141E),
+                padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _deleting
+                            ? AppLocalizations.of(context)!.deleting
+                            : _selected.isEmpty
+                            ? AppLocalizations.of(context)!.noneSelected
+                            : AppLocalizations.of(
+                                context,
+                              )!.selectedCount(_selected.length),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _deleting ? null : _deleteAllAudioVideos,
+                      child: Text(
+                        AppLocalizations.of(context)!.deleteAll,
+                        style: const TextStyle(
+                          color: Color(0xFFEF4444),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    FilledButton(
+                      onPressed: (_selected.isEmpty || _deleting)
+                          ? null
+                          : _deleteSelected,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFEF4444),
+                      ),
+                      child: Text(
+                        AppLocalizations.of(
+                          context,
+                        )!.deleteCount(_selected.length),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 }
@@ -5111,6 +6675,11 @@ class _LiveAreaState extends State<_LiveArea> {
   bool get _liveLoading =>
       SupabaseService.instance.isConfigured && _activeLives == null;
 
+  /// Habilita a ação "Apagar todas as lives" no cabeçalho. O backend sempre
+  /// restringe o escopo (próprias; TODAS apenas com capability 'moderation'),
+  /// então o botão é apenas um atalho — nunca decide permissão no cliente.
+  bool _canManageLives = false;
+
   @override
   void initState() {
     super.initState();
@@ -5122,11 +6691,77 @@ class _LiveAreaState extends State<_LiveArea> {
 
   Future<void> _loadRealLives() async {
     try {
-      final lives = await SupabaseService.instance.fetchActiveLives();
+      final lives = await SupabaseService.instance.fetchActiveLives().timeout(
+        SupabaseService.networkTimeout,
+      );
       if (!mounted) return;
       setState(() => _activeLives = lives);
+      _refreshManageLiveScope(lives);
     } catch (_) {
       // Em caso de falha (sem rede, backend desligado), permanece no demo.
+    }
+  }
+
+  Future<void> _refreshManageLiveScope(List<RealLive> lives) async {
+    final uid = SupabaseService.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    final anyOwn = lives.any((l) => l.streamerId == uid);
+    if (anyOwn) {
+      if (mounted) setState(() => _canManageLives = true);
+      return;
+    }
+    final caps = await AdminService.instance.myCaps();
+    if (mounted && caps.contains('moderation')) {
+      setState(() => _canManageLives = true);
+    }
+  }
+
+  Future<void> _deleteAllLives() async {
+    final go = await confirmDeleteDialog(
+      context,
+      title: 'Apagar todas as lives?',
+      message:
+          'Esta ação excluirá permanentemente as lives permitidas e '
+          'seus arquivos relacionados.',
+      confirmLabel: 'Apagar todas',
+    );
+    if (!go || !mounted) return;
+    final uid = SupabaseService.instance.client.auth.currentUser?.id;
+    final lives = _activeLives ?? const <RealLive>[];
+    final activeIds = lives
+        .where(
+          (l) => l.status == 'live' && (l.streamerId == uid || _canManageLives),
+        )
+        .map((l) => l.id)
+        .toList();
+    try {
+      final deleted = await ContentService.instance.deleteAllLives(
+        activeIds: activeIds,
+      );
+      if (!mounted) return;
+      if (deleted >= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Todas as lives foram apagadas.')),
+        );
+        _loadRealLives();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Não foi possível apagar as lives agora. Tente de novo.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Não foi possível apagar as lives agora. Tente de novo.',
+          ),
+        ),
+      );
     }
   }
 
@@ -5154,13 +6789,14 @@ class _LiveAreaState extends State<_LiveArea> {
     if (!mounted) return;
     if (ok) {
       _loadRealLives();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Live atualizada.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Live atualizada.')));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Não foi possível atualizar agora. Tente de novo.')),
+          content: Text('Não foi possível atualizar agora. Tente de novo.'),
+        ),
       );
     }
   }
@@ -5175,7 +6811,10 @@ class _LiveAreaState extends State<_LiveArea> {
     );
     if (!go || !mounted) return;
     try {
-      await ContentService.instance.deleteLive(live.id, coverUrl: live.coverUrl);
+      await ContentService.instance.deleteLive(
+        live.id,
+        coverUrl: live.coverUrl,
+      );
       if (!mounted) return;
       _loadRealLives();
     } catch (_) {
@@ -5189,8 +6828,8 @@ class _LiveAreaState extends State<_LiveArea> {
   Future<void> _openRealLive(RealLive live) async {
     // Papel REAL: o dono da live entra como streamer (consegue encerrar e vê o
     // próprio vídeo/áudio); qualquer outra pessoa entra como espectador.
-    final isOwner = SupabaseService.instance.client.auth.currentUser?.id ==
-        live.streamerId;
+    final isOwner =
+        SupabaseService.instance.client.auth.currentUser?.id == live.streamerId;
     await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (_) => LiveRoomScreen(
@@ -5211,37 +6850,36 @@ class _LiveAreaState extends State<_LiveArea> {
   static const List<LiveFormat> _formats = [
     LiveFormat(
       id: 'video',
-      title: 'Vídeo',
-      description: 'Converse com seu público ao vivo',
+      title: '',
+      description: '',
       icon: Icons.videocam_rounded,
       accent: kkLivePurple,
     ),
     LiveFormat(
       id: 'audio',
-      title: 'Áudio',
-      description: 'Converse ao vivo sem câmera',
+      title: '',
+      description: '',
       icon: Icons.mic_rounded,
       accent: kkLiveMagenta,
     ),
     LiveFormat(
       id: 'friends',
-      title: 'Amigos',
-      description: 'Entre ao vivo com seus amigos',
+      title: '',
+      description: '',
       icon: Icons.people_rounded,
       accent: Color(0xFF22C55E),
     ),
     LiveFormat(
       id: 'filmes',
-      title: 'Filmes',
-      description:
-          'Crie uma experiência ao vivo sobre filmes e entretenimento',
+      title: '',
+      description: '',
       icon: Icons.movie_rounded,
       accent: Color(0xFFF59E0B),
     ),
     LiveFormat(
       id: 'jogos',
-      title: 'Jogos',
-      description: 'Transmita seu jogo ao vivo',
+      title: '',
+      description: '',
       icon: Icons.sports_esports_rounded,
       accent: kkLivePurple,
     ),
@@ -5257,35 +6895,102 @@ class _LiveAreaState extends State<_LiveArea> {
     'Educativo',
   ];
 
+  String _formatTitle(AppLocalizations l10n, String id) {
+    switch (id) {
+      case 'audio':
+        return l10n.liveFormatAudio;
+      case 'friends':
+        return l10n.liveFormatFriends;
+      case 'filmes':
+        return l10n.liveFormatFilms;
+      case 'jogos':
+        return l10n.liveFormatGames;
+      default:
+        return l10n.liveFormatVideo;
+    }
+  }
+
+  String _formatDescription(AppLocalizations l10n, String id) {
+    switch (id) {
+      case 'audio':
+        return l10n.liveFormatAudioDesc;
+      case 'friends':
+        return l10n.liveFormatFriendsDesc;
+      case 'filmes':
+        return l10n.liveFormatFilmsDesc;
+      case 'jogos':
+        return l10n.liveFormatGamesDesc;
+      default:
+        return l10n.liveFormatVideoDesc;
+    }
+  }
+
+  List<LiveFormat> _localizedFormats(AppLocalizations l10n) {
+    return _formats
+        .map(
+          (f) => LiveFormat(
+            id: f.id,
+            title: _formatTitle(l10n, f.id),
+            description: _formatDescription(l10n, f.id),
+            icon: f.icon,
+            accent: f.accent,
+          ),
+        )
+        .toList();
+  }
+
+  String _categoryLabel(AppLocalizations l10n, String category) {
+    switch (category.toLowerCase()) {
+      case 'jogos':
+        return l10n.gamesTab;
+      case 'filmes':
+        return l10n.liveFormatFilms;
+      case 'música':
+      case 'musica':
+        return l10n.music;
+      case 'bate-papo':
+        return l10n.exploreChat;
+      case 'comédia':
+      case 'comedia':
+        return l10n.exploreComedy;
+      case 'educativo':
+        return l10n.exploreEducational;
+      default:
+        return l10n.exploreAll;
+    }
+  }
+
   Future<void> _openVideoLive() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const StartLiveScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const StartLiveScreen()));
     _loadRealLives();
   }
 
   Future<void> _openAudioLive() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const AudioRoomsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const AudioRoomsScreen()));
     _loadRealLives();
   }
 
   Future<void> _openFriendsLive() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => const AudioRoomsScreen(autoCreate: true, friendsMode: true),
+        builder: (_) =>
+            const AudioRoomsScreen(autoCreate: true, friendsMode: true),
       ),
     );
     _loadRealLives();
   }
 
   Future<void> _openFilmsLive() async {
+    final l10n = AppLocalizations.of(context)!;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => const StartLiveScreen(
+        builder: (_) => StartLiveScreen(
           initialCategory: 'Filmes',
-          title: 'Live de Filmes',
+          title: l10n.liveFilmsTitle,
         ),
       ),
     );
@@ -5336,10 +7041,7 @@ class _LiveAreaState extends State<_LiveArea> {
     final topInset = MediaQuery.of(context).padding.top;
 
     if (!widget.showHeader) {
-      return Container(
-        color: Colors.black,
-        child: _buildCentral(topInset),
-      );
+      return Container(color: Colors.black, child: _buildCentral(topInset));
     }
 
     return Container(
@@ -5361,6 +7063,8 @@ class _LiveAreaState extends State<_LiveArea> {
   /// + explorar por categoria. Seções com dados reais do backend ou estados de
   /// carregamento/vazio/erro (nunca dados falsos permanentes).
   Widget _buildCentral(double topInset) {
+    final l10n = AppLocalizations.of(context)!;
+    final liveFormats = _localizedFormats(l10n);
     final liveNow = _realLivesByCategory(_exploreCategories[_categoryFilter]);
     final trending = _realLivesByCategory('Todos');
 
@@ -5370,20 +7074,35 @@ class _LiveAreaState extends State<_LiveArea> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
       children: [
         // ---- Cabeçalho ----
-        const Text(
-          'Live',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0.5,
-            shadows: [Shadow(color: kkLivePurple, blurRadius: 22)],
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                l10n.live,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            if (_canManageLives)
+              IconButton(
+                tooltip: l10n.deleteAllLives,
+                onPressed: _deleteAllLives,
+                icon: const Icon(
+                  Icons.delete_sweep_rounded,
+                  color: Color(0xFFEF4444),
+                  size: 22,
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 2),
-        const Text(
-          'O que você quer fazer hoje?',
-          style: TextStyle(color: Colors.white60, fontSize: 14),
+        Text(
+          l10n.whatDoYouWantToDoToday,
+          style: const TextStyle(color: Colors.white60, fontSize: 14),
         ),
         const SizedBox(height: 18),
 
@@ -5391,33 +7110,33 @@ class _LiveAreaState extends State<_LiveArea> {
         LayoutBuilder(
           builder: (context, constraints) {
             final twoPerLine = constraints.maxWidth >= 420;
-            final cards = _formats.map((f) => LiveTypeCard(
-                  key: ValueKey('live-${f.id}'),
-                  format: f,
-                  onTap: () => _openFormat(f),
-                ));
+            final cards = liveFormats.map(
+              (f) => LiveTypeCard(
+                key: ValueKey('live-${f.id}'),
+                format: f,
+                onTap: () => _openFormat(f),
+              ),
+            );
             if (twoPerLine) {
               return Wrap(
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  for (final c in cards) SizedBox(width: (constraints.maxWidth - 12) / 2, child: c),
+                  for (final c in cards)
+                    SizedBox(width: (constraints.maxWidth - 12) / 2, child: c),
                 ],
               );
             }
             // Celulares menores: 2 colunas com o último card ocupando a linha.
-            return _FormatMobileGrid(
-              formats: _formats,
-              onOpen: _openFormat,
-            );
+            return _FormatMobileGrid(formats: liveFormats, onOpen: _openFormat);
           },
         ),
         const SizedBox(height: 26),
 
         // ---- Ao vivo agora ----
-        const _SectionHeader(
-          title: 'Ao vivo agora',
-          subtitle: 'Veja o que está acontecendo no KLAY K',
+        _SectionHeader(
+          title: l10n.liveNowTitle,
+          subtitle: l10n.liveNowSubtitle,
           icon: Icons.circle,
           liveBadge: true,
         ),
@@ -5453,18 +7172,17 @@ class _LiveAreaState extends State<_LiveArea> {
           const SizedBox(height: 22),
           AdCard(
             ad: _hubAds.ads.first,
-            onHidden: () => setState(
-              () => _hubAds.remove(_hubAds.ads.first.id),
-            ),
+            onHidden: () =>
+                setState(() => _hubAds.remove(_hubAds.ads.first.id)),
           ),
           const SizedBox(height: 4),
         ],
         const SizedBox(height: 26),
 
         // ---- Em alta ----
-        const _SectionHeader(
-          title: 'Em alta',
-          subtitle: 'Lives em destaque agora',
+        _SectionHeader(
+          title: l10n.trendingTitle,
+          subtitle: l10n.trendingSubtitle,
           icon: Icons.local_fire_department_rounded,
           accent: kkLiveMagenta,
         ),
@@ -5472,11 +7190,11 @@ class _LiveAreaState extends State<_LiveArea> {
         if (_liveLoading)
           const LiveNowSkeleton(rows: 1, rail: true)
         else if (trending.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              'Lives em alta aparecem aqui quando houver transmissões.',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
+              l10n.trendingLivesEmpty,
+              style: const TextStyle(color: Colors.white54, fontSize: 13),
             ),
           )
         else
@@ -5490,7 +7208,7 @@ class _LiveAreaState extends State<_LiveArea> {
                 final live = trending[index];
                 return TrendingLiveCard(
                   title: live.title,
-                  meta: live.streamerDisplayName ?? 'Transmissão',
+                  meta: live.streamerDisplayName ?? l10n.transmission,
                   viewers: live.viewerCount,
                   onTap: () => _openRealLive(live),
                 );
@@ -5500,9 +7218,9 @@ class _LiveAreaState extends State<_LiveArea> {
         const SizedBox(height: 26),
 
         // ---- Explorar Lives ----
-        const _SectionHeader(
-          title: 'Explorar Lives',
-          subtitle: 'Navegue por categoria',
+        _SectionHeader(
+          title: l10n.exploreLivesTitle,
+          subtitle: l10n.exploreLivesSubtitle,
           icon: Icons.explore_rounded,
         ),
         const SizedBox(height: 10),
@@ -5513,7 +7231,7 @@ class _LiveAreaState extends State<_LiveArea> {
               for (var i = 0; i < _exploreCategories.length; i++) ...[
                 if (i > 0) const SizedBox(width: 8),
                 LiveCategoryChip(
-                  label: _exploreCategories[i],
+                  label: _categoryLabel(l10n, _exploreCategories[i]),
                   selected: _categoryFilter == i,
                   onTap: () => setState(() => _categoryFilter = i),
                 ),
@@ -5563,7 +7281,6 @@ class _LiveAreaState extends State<_LiveArea> {
                     fontSize: 17,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 0.5,
-                    shadows: [Shadow(color: Color(0xFF8B5CF6), blurRadius: 14)],
                   ),
                 ),
               ),
@@ -5581,7 +7298,7 @@ class _LiveAreaState extends State<_LiveArea> {
                   textStyle: const TextStyle(fontWeight: FontWeight.w800),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                 ),
-                child: const Text('Ver todas'),
+                child: Text(AppLocalizations.of(context)!.seeAll),
               ),
             ],
           ),
@@ -5719,17 +7436,19 @@ class _FormatMobileGrid extends StatelessWidget {
         rows.add(const SizedBox(height: 12));
         break;
       }
-      rows.add(Row(
-        children: [
-          Expanded(
-            child: LiveTypeCard(format: first, onTap: () => onOpen(first)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: LiveTypeCard(format: second, onTap: () => onOpen(second)),
-          ),
-        ],
-      ));
+      rows.add(
+        Row(
+          children: [
+            Expanded(
+              child: LiveTypeCard(format: first, onTap: () => onOpen(first)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: LiveTypeCard(format: second, onTap: () => onOpen(second)),
+            ),
+          ],
+        ),
+      );
       rows.add(const SizedBox(height: 12));
     }
     return Column(children: rows);
@@ -5766,29 +7485,31 @@ class LiveNowSkeleton extends StatelessWidget {
     final items = <Widget>[];
     for (var r = 0; r < rows; r++) {
       items
-        ..add(Row(
-          children: [
-            Expanded(
-              child: Container(
-                height: 160,
-                decoration: BoxDecoration(
-                  color: kkLiveCard,
-                  borderRadius: BorderRadius.circular(16),
+        ..add(
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 160,
+                  decoration: BoxDecoration(
+                    color: kkLiveCard,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Container(
-                height: 160,
-                decoration: BoxDecoration(
-                  color: kkLiveCard,
-                  borderRadius: BorderRadius.circular(16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  height: 160,
+                  decoration: BoxDecoration(
+                    color: kkLiveCard,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                 ),
               ),
-            ),
-          ],
-        ))
+            ],
+          ),
+        )
         ..add(const SizedBox(height: 10));
     }
     return Column(children: items);
@@ -5804,22 +7525,20 @@ class _DemoHint extends StatelessWidget {
   Widget build(BuildContext context) {
     return _EmptyLiveState(
       onStart: onStart,
-      title: 'Configure o Supabase para ver lives',
+      title: AppLocalizations.of(context)!.configureSupabaseForLives,
     );
   }
 }
 
 class _EmptyLiveState extends StatelessWidget {
   final VoidCallback onStart;
-  final String title;
+  final String? title;
 
-  const _EmptyLiveState({
-    required this.onStart,
-    this.title = 'Não há Lives acontecendo agora.',
-  });
+  const _EmptyLiveState({required this.onStart, this.title});
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 24),
@@ -5830,35 +7549,39 @@ class _EmptyLiveState extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const Icon(Icons.radio_button_checked_rounded,
-              color: kkLiveRed, size: 30),
+          const Icon(
+            Icons.radio_button_checked_rounded,
+            color: kkLiveRed,
+            size: 30,
+          ),
           const SizedBox(height: 10),
           Text(
-            title,
+            title ?? l10n.noLivesNow,
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white70, fontSize: 14),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Que tal começar uma?',
-            style: TextStyle(color: Colors.white54, fontSize: 13),
+          Text(
+            l10n.startOne,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
           ),
           const SizedBox(height: 14),
           FilledButton.icon(
             onPressed: onStart,
             style: FilledButton.styleFrom(
               backgroundColor: kkLivePurple,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
             icon: const Icon(Icons.sensors_rounded, color: Colors.white),
-            label: const Text(
-              'Começar Live',
-              style:
-                  TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+            label: Text(
+              l10n.startLive,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
@@ -5881,220 +7604,20 @@ class _RealLiveCard extends StatelessWidget {
   });
 
   bool get _isOwner =>
-      SupabaseService.instance.client.auth.currentUser?.id ==
-      live.streamerId;
+      SupabaseService.instance.client.auth.currentUser?.id == live.streamerId;
 
   @override
   Widget build(BuildContext context) {
-    final name = live.streamerDisplayName ?? 'Transmissão ao vivo';
-    final isGame = live.category.toLowerCase().contains('jogo');
-    return GestureDetector(
+    return KlayLiveFeedCard(
+      live: live,
       onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF251A45), Color(0xFF14142B)],
-          ),
-          border: Border.all(color: _kPurple.withValues(alpha: 0.5)),
-          boxShadow: [
-            BoxShadow(
-              color: _kPurple.withValues(alpha: 0.25),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          children: [
-            if (live.coverUrl != null && live.coverUrl!.isNotEmpty) ...[
-              Positioned.fill(
-                child: Image.network(
-                  live.coverUrl!,
-                  fit: BoxFit.cover,
-                  // Falha de rede/URL inválida → volta ao gradiente do card.
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  loadingBuilder: (context, child, progress) =>
-                      progress == null ? child : const SizedBox.shrink(),
-                ),
-              ),
-              // Scrim para manter legíveis badge/título/streamer sobre a capa.
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.35),
-                        Colors.black.withValues(alpha: 0.78),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            Positioned(
-              right: -20,
-              top: -20,
-              child: Container(
-                width: 110,
-                height: 110,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _kPurple.withValues(alpha: 0.18),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: _kLiveRed,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _kLiveRed.withValues(alpha: 0.5),
-                              blurRadius: 8,
-                            ),
-                          ],
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.circle,
-                                color: Colors.white, size: 7),
-                            SizedBox(width: 4),
-                            Text('AO VIVO',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800)),
-                          ],
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(
-                        isGame
-                            ? Icons.sports_esports_rounded
-                            : Icons.videocam_rounded,
-                        color: _kPurple,
-                        size: 18,
-                      ),
-                      ContentOverflowMenu(
-                        isOwner: _isOwner,
-                        onEdit: onEditLive ?? () {},
-                        onDelete: onDeleteLive ?? () {},
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.remove_red_eye_rounded,
-                            color: Colors.white70, size: 13),
-                        const SizedBox(width: 4),
-                        Text('${live.viewerCount}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    live.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 8,
-                        backgroundColor: _kPurple.withValues(alpha: 0.4),
-                        backgroundImage: live.streamerAvatar != null
-                            ? NetworkImage(live.streamerAvatar!)
-                            : null,
-                        child: const Icon(Icons.person,
-                            color: Colors.white70, size: 9),
-                      ),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 11),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  // CTA real (§21): o card inteiro é tocável, mas o botão
-                  // explicita o acesso à sala da live.
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [_kPurple, Color(0xFF6D28D9)],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _kPurple.withValues(alpha: 0.5),
-                            blurRadius: 10,
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.play_arrow_rounded,
-                              color: Colors.white, size: 16),
-                          SizedBox(width: 4),
-                          Text('Toque para entrar na Live',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      headerTrailing: _isOwner
+          ? ContentOverflowMenu(
+              isOwner: true,
+              onEdit: onEditLive ?? () {},
+              onDelete: onDeleteLive ?? () {},
+            )
+          : null,
     );
   }
 }
@@ -6171,7 +7694,7 @@ class _GameLiveRailCard extends StatelessWidget {
             Positioned(
               right: 10,
               top: 10,
-              child: _liveBadge(),
+              child: _liveBadge(AppLocalizations.of(context)!.liveBadge),
             ),
             Padding(
               padding: const EdgeInsets.all(12),
@@ -6179,8 +7702,11 @@ class _GameLiveRailCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Spacer(),
-                  const Icon(Icons.sports_esports_rounded,
-                      color: Color(0xFFB794FF), size: 28),
+                  const Icon(
+                    Icons.sports_esports_rounded,
+                    color: Color(0xFFB794FF),
+                    size: 28,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     gameName,
@@ -6220,255 +7746,30 @@ class _GameLiveRailCard extends StatelessWidget {
     );
   }
 
-  Widget _liveBadge() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFF2E4D).withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.circle, color: Colors.white, size: 6),
-            const SizedBox(width: 4),
-            Text(
-              viewers > 0 ? 'AO VIVO • $viewers' : 'AO VIVO',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 9,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
-class _LiveCard extends StatelessWidget {
-  final KlayKLive live;
-  final VoidCallback onTap;
-
-  const _LiveCard({
-    required this.live,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          decoration: const BoxDecoration(color: Color(0xFF181820)),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (live.isGame)
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF3B0764), Color(0xFF8B5CF6)],
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.sports_esports_rounded,
-                      color: Colors.white70,
-                      size: 54,
-                    ),
-                  ),
-                )
-              else
-                Image.network(
-                  live.avatarUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    color: const Color(0xFF23232E),
-                    child: const Icon(
-                      Icons.person,
-                      color: Colors.white38,
-                      size: 44,
-                    ),
-                  ),
-                ),
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Color(0xCC000000),
-                      Color(0xF2000000),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 8,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _kLiveRed,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.circle, color: Colors.white, size: 6),
-                      SizedBox(width: 3),
-                      Text(
-                        'AO VIVO',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.remove_red_eye_rounded,
-                        color: Colors.white70,
-                        size: 12,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        live.viewers >= 1000
-                            ? '${(live.viewers / 1000).toStringAsFixed(1)}k'
-                            : '${live.viewers}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 9,
-                right: 9,
-                bottom: 9,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        ClipOval(
-                          child: Image.network(
-                            live.avatarUrl,
-                            width: 22,
-                            height: 22,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              width: 22,
-                              height: 22,
-                              color: Colors.grey[800],
-                              child: const Icon(
-                                Icons.person,
-                                color: Colors.white,
-                                size: 14,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            live.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              shadows: _kLabelShadow,
-                            ),
-                          ),
-                        ),
-                        if (live.isVerified) ...[
-                          const SizedBox(width: 4),
-                          const VerifiedBadge(size: 12),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      live.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        shadows: _kLabelShadow,
-                      ),
-                    ),
-                    if (live.isGame) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.workspace_premium_rounded,
-                            color: _kPurple,
-                            size: 12,
-                          ),
-                          const SizedBox(width: 3),
-                          Flexible(
-                            child: Text(
-                              live.gameName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: _kPurple,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                shadows: _kLabelShadow,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
+  Widget _liveBadge(String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFF2E4D).withValues(alpha: 0.95),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.circle, color: Colors.white, size: 6),
+        const SizedBox(width: 4),
+        Text(
+          viewers > 0 ? '$label • $viewers' : label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
           ),
         ),
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
 
-// ============================================================
 // REPRODUÇÃO DE LIVE (FULLSCREEN)
 // ============================================================
 
@@ -6543,7 +7844,9 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
     });
   }
 
-  void _showGiftSheet() {
+  void _showGiftNotice() {
+    // Catálogo de demonstração (kAllLives) não é sala real: NUNCA gera
+    // transação. Mostra um aviso honesto em vez de um presente falso.
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1C1C26),
@@ -6552,75 +7855,44 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
       ),
       builder: (context) {
         return Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Enviar presente',
-                style: TextStyle(
+              Text(
+                AppLocalizations.of(context)!.demoGiftsTitle,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _GiftOption(
-                    emoji: '💜',
-                    label: 'Rosa',
-                    onTap: () {
-                      setState(() => _giftCount++);
-                      Navigator.pop(context);
-                      _showGiftSnack('💜 Enviou 1 Rosa');
-                    },
+              const SizedBox(height: 10),
+              Text(
+                AppLocalizations.of(context)!.demoGiftsBody,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _kPurple,
+                    foregroundColor: Colors.white,
                   ),
-                  _GiftOption(
-                    emoji: '💖',
-                    label: 'Coração',
-                    onTap: () {
-                      setState(() => _giftCount++);
-                      Navigator.pop(context);
-                      _showGiftSnack('💖 Enviou 1 Coração');
-                    },
-                  ),
-                  _GiftOption(
-                    emoji: '🎮',
-                    label: 'Joystick',
-                    onTap: () {
-                      setState(() => _giftCount++);
-                      Navigator.pop(context);
-                      _showGiftSnack('🎮 Enviou 1 Joystick');
-                    },
-                  ),
-                  _GiftOption(
-                    emoji: '🚀',
-                    label: 'Foguete',
-                    onTap: () {
-                      setState(() => _giftCount += 10);
-                      Navigator.pop(context);
-                      _showGiftSnack('🚀 Enviou 1 Foguete');
-                    },
-                  ),
-                ],
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(AppLocalizations.of(context)!.gotIt),
+                ),
               ),
             ],
           ),
         );
       },
-    );
-  }
-
-  void _showGiftSnack(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
     );
   }
 
@@ -6644,9 +7916,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
               ),
             )
           else if (_loading)
-            const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            )
+            const Center(child: CircularProgressIndicator(color: Colors.white))
           else
             Container(
               decoration: const BoxDecoration(
@@ -6726,27 +7996,27 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                 onSelected: (value) {
                   if (value == 'end') {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Live encerrada'),
+                      SnackBar(
+                        content: Text(AppLocalizations.of(context)!.liveEnded),
                         behavior: SnackBarBehavior.floating,
                       ),
                     );
                     Navigator.pop(context, true);
                   }
                 },
-                itemBuilder: (_) => const [
+                itemBuilder: (_) => [
                   PopupMenuItem(
                     value: 'end',
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.stop_circle_outlined,
                           color: Color(0xFFFF4D6A),
                         ),
-                        SizedBox(width: 10),
+                        const SizedBox(width: 10),
                         Text(
-                          'Encerrar live',
-                          style: TextStyle(color: Colors.white),
+                          AppLocalizations.of(context)!.endLive,
+                          style: const TextStyle(color: Colors.white),
                         ),
                       ],
                     ),
@@ -6775,17 +8045,16 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                       ),
                     ],
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.circle, color: Colors.white, size: 7),
-                      SizedBox(width: 5),
+                      const Icon(Icons.circle, color: Colors.white, size: 7),
+                      const SizedBox(width: 5),
                       Text(
-                        'AO VIVO',
-                        style: TextStyle(
+                        AppLocalizations.of(context)!.liveBadge,
+                        style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
                         ),
                       ),
                     ],
@@ -6861,7 +8130,9 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          _following ? 'Seguindo' : 'Seguir',
+                          _following
+                              ? AppLocalizations.of(context)!.following
+                              : AppLocalizations.of(context)!.follow,
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 11,
@@ -6901,17 +8172,19 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                   icon: Icons.card_giftcard_rounded,
                   color: _kPurple,
                   label: '$_giftCount',
-                  onTap: _showGiftSheet,
+                  onTap: _showGiftNotice,
                 ),
                 const SizedBox(height: 18),
                 _LiveAction(
                   icon: Icons.share_rounded,
                   color: Colors.white,
-                  label: 'Compartilhar',
+                  label: AppLocalizations.of(context)!.share,
                   onTap: () {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Link da live copiado'),
+                      SnackBar(
+                        content: Text(
+                          AppLocalizations.of(context)!.liveLinkCopied,
+                        ),
                         behavior: SnackBarBehavior.floating,
                       ),
                     );
@@ -7005,8 +8278,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                       ),
                     ),
                     const SizedBox(width: 5),
-                    if (widget.live.isVerified)
-                      const VerifiedBadge(size: 16),
+                    if (widget.live.isVerified) const VerifiedBadge(size: 16),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -7048,12 +8320,16 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                             fontSize: 13,
                           ),
                           cursorColor: _kPurple,
-                          decoration: const InputDecoration(
-                            hintText: 'Escreva um comentário...',
-                            hintStyle: TextStyle(color: Colors.white54),
+                          decoration: InputDecoration(
+                            hintText: AppLocalizations.of(
+                              context,
+                            )!.writeCommentHint,
+                            hintStyle: const TextStyle(color: Colors.white54),
                             border: InputBorder.none,
                             isDense: true,
-                            contentPadding: EdgeInsets.symmetric(vertical: 10),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 10,
+                            ),
                           ),
                         ),
                       ),
@@ -7097,7 +8373,9 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Comentários (${_comments.length})',
+                            AppLocalizations.of(
+                              context,
+                            )!.commentsCount(_comments.length),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 15,
@@ -7109,7 +8387,9 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                             child: ListView.builder(
                               itemCount: _comments.length,
                               itemBuilder: (context, index) {
-                                String name = 'Espectador';
+                                String name = AppLocalizations.of(
+                                  context,
+                                )!.viewerFallback;
                                 if (index == 0) name = widget.live.displayName;
                                 if (index == 1) name = 'Clarice';
                                 if (index == 2) name = 'Daniel';
@@ -7134,8 +8414,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                                                 style: const TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 13,
-                                                  fontWeight:
-                                                      FontWeight.w700,
+                                                  fontWeight: FontWeight.w700,
                                                 ),
                                               ),
                                               TextSpan(
@@ -7213,42 +8492,141 @@ class _LiveAction extends StatelessWidget {
   }
 }
 
-class _GiftOption extends StatelessWidget {
-  final String emoji;
-  final String label;
-  final VoidCallback onTap;
+// ============================================================
+// ÁREA JOGOS DA HOME
+// ============================================================
 
-  const _GiftOption({
-    required this.emoji,
-    required this.label,
-    required this.onTap,
-  });
+/// Prévia da aba Jogos dentro da Home: catálogo real do backend (`games`) com
+/// os mesmos cards da aba Jogos ([KlaykGameCard]). Abre os jogos/rankings
+/// reais; "Ver todos" leva à aba Jogos completa.
+class _GamesArea extends StatefulWidget {
+  final double topPadding;
+
+  const _GamesArea({required this.topPadding});
+
+  @override
+  State<_GamesArea> createState() => _GamesAreaState();
+}
+
+class _GamesAreaState extends State<_GamesArea> {
+  final _svc = GameService.instance;
+  List<GameInfo> _games = const [];
+  Map<String, int> _records = const {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final games = await _svc.catalog();
+    final records = await _svc.myRecords();
+    if (!mounted) return;
+    setState(() {
+      _games = games;
+      _records = records;
+      _loading = false;
+    });
+  }
+
+  void _openGame(GameInfo g) {
+    openGame(context, g).then((_) {
+      if (mounted) _load();
+    });
+  }
+
+  void _openLeaderboard(GameInfo g) {
+    KlaykNav.push(context, GameLeaderboardScreen(game: g));
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
+    final colors = kc(context);
+    return Container(
+      color: colors.bg,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _kPurple.withValues(alpha: 0.4)),
+          SizedBox(height: widget.topPadding + 96),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: Icon(
+                    Icons.sports_esports_rounded,
+                    color: colors.primarySoft,
+                    size: 15,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Jogos',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => kNavIndex.value = 2,
+                  style: TextButton.styleFrom(
+                    foregroundColor: colors.primarySoft,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(20, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 14),
+                  label: const Text(
+                    'Ver todos',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
-            alignment: Alignment.center,
-            child: Text(emoji, style: const TextStyle(fontSize: 26)),
           ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: _loading
+                ? const Center(child: KlaykLoader())
+                : RefreshIndicator(
+                    onRefresh: _load,
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+                      children: [
+                        if (_games.isEmpty)
+                          const KlaykEmptyState(
+                            icon: Icons.sports_esports_rounded,
+                            title: 'Sem jogos no momento',
+                            message: 'Novos jogos chegam em breve no KLAY K.',
+                          )
+                        else
+                          for (var i = 0; i < _games.length; i++) ...[
+                            KlaykGameCard(
+                              game: _games[i],
+                              best: _records[_games[i].id] ?? 0,
+                              onPlay: _games[i].isActive
+                                  ? () => _openGame(_games[i])
+                                  : null,
+                              onRanking: _games[i].isActive
+                                  ? () => _openLeaderboard(_games[i])
+                                  : null,
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                        const SizedBox(height: 4),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),
@@ -7264,10 +8642,7 @@ class _DestaquesArea extends StatefulWidget {
   final double topPadding;
   final Future<bool> Function(KlayKLive live) onWatchLive;
 
-  const _DestaquesArea({
-    required this.topPadding,
-    required this.onWatchLive,
-  });
+  const _DestaquesArea({required this.topPadding, required this.onWatchLive});
 
   @override
   State<_DestaquesArea> createState() => _DestaquesAreaState();
@@ -7275,10 +8650,30 @@ class _DestaquesArea extends StatefulWidget {
 
 class _DestaquesAreaState extends State<_DestaquesArea> {
   final List<Map<String, String>> _trending = const [
-    {'displayName': 'SEM NOÇÃO TV', 'avatarUrl': 'https://i.pravatar.cc/150?img=12', 'views': '12,4M', 'tag': '#sucesso'},
-    {'displayName': 'KLAY K BRASIL', 'avatarUrl': 'https://i.pravatar.cc/150?img=32', 'views': '9,1M', 'tag': '#brasil'},
-    {'displayName': 'CRIADORES KLAY K', 'avatarUrl': 'https://i.pravatar.cc/150?img=45', 'views': '7,6M', 'tag': '#viral'},
-    {'displayName': 'Maria K', 'avatarUrl': 'https://i.pravatar.cc/150?img=47', 'views': '5,2M', 'tag': '#klayk'},
+    {
+      'displayName': 'SEM NOÇÃO TV',
+      'avatarUrl': 'https://i.pravatar.cc/150?img=12',
+      'views': '12,4M',
+      'tag': '#sucesso',
+    },
+    {
+      'displayName': 'KLAY K BRASIL',
+      'avatarUrl': 'https://i.pravatar.cc/150?img=32',
+      'views': '9,1M',
+      'tag': '#brasil',
+    },
+    {
+      'displayName': 'CRIADORES KLAY K',
+      'avatarUrl': 'https://i.pravatar.cc/150?img=45',
+      'views': '7,6M',
+      'tag': '#viral',
+    },
+    {
+      'displayName': 'Maria K',
+      'avatarUrl': 'https://i.pravatar.cc/150?img=47',
+      'views': '5,2M',
+      'tag': '#klayk',
+    },
   ];
 
   final List<Map<String, String>> _creators = const [
@@ -7309,19 +8704,19 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(height: widget.topPadding + 96),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 14),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.local_fire_department_rounded,
                           color: _kPurple,
                           size: 20,
                         ),
-                        SizedBox(width: 6),
+                        const SizedBox(width: 6),
                         Text(
-                          'Destaques',
-                          style: TextStyle(
+                          AppLocalizations.of(context)!.highlights,
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 17,
                             fontWeight: FontWeight.w800,
@@ -7332,9 +8727,10 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                   ),
                   const SizedBox(height: 14),
                   _SectionTitle(
-                    title: 'Vídeos em alta',
-                    trailing: 'Ver todos',
-                    onTrailing: () => _showSnack('Tudo em alta'),
+                    title: AppLocalizations.of(context)!.trendingVideos,
+                    trailing: AppLocalizations.of(context)!.seeAll,
+                    onTrailing: () =>
+                        _showSnack(AppLocalizations.of(context)!.allTrending),
                   ),
                   const SizedBox(height: 10),
                   SizedBox(
@@ -7359,9 +8755,11 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                   ),
                   const SizedBox(height: 18),
                   _SectionTitle(
-                    title: 'Criadores em alta',
-                    trailing: 'Ver todos',
-                    onTrailing: () => _showSnack('Criadores em alta'),
+                    title: AppLocalizations.of(context)!.trendingCreators,
+                    trailing: AppLocalizations.of(context)!.seeAll,
+                    onTrailing: () => _showSnack(
+                      AppLocalizations.of(context)!.trendingCreators,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   SizedBox(
@@ -7373,7 +8771,9 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                       itemBuilder: (context, index) {
                         return GestureDetector(
                           onTap: () => _showSnack(
-                            'Perfil de ${_creators[index]['name']}',
+                            AppLocalizations.of(
+                              context,
+                            )!.profileOf(_creators[index]['name']!),
                           ),
                           child: Container(
                             width: 78,
@@ -7418,9 +8818,10 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                   ),
                   const SizedBox(height: 18),
                   _SectionTitle(
-                    title: 'Jogos',
-                    trailing: 'Ver todos',
-                    onTrailing: () => _showSnack('Todos os jogos'),
+                    title: AppLocalizations.of(context)!.gamesTab,
+                    trailing: AppLocalizations.of(context)!.seeAll,
+                    onTrailing: () =>
+                        _showSnack(AppLocalizations.of(context)!.allGames),
                   ),
                   const SizedBox(height: 10),
                   SizedBox(
@@ -7432,7 +8833,11 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                       itemBuilder: (context, index) {
                         final game = _games[index];
                         return GestureDetector(
-                          onTap: () => _showSnack('Jogo ${game['name']}'),
+                          onTap: () => _showSnack(
+                            AppLocalizations.of(
+                              context,
+                            )!.openGame(game['name']!),
+                          ),
                           child: Container(
                             width: 132,
                             margin: const EdgeInsets.only(right: 10),
@@ -7477,7 +8882,9 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                                     const SizedBox(width: 4),
                                     Flexible(
                                       child: Text(
-                                        '${game['viewers']} assistindo',
+                                        AppLocalizations.of(
+                                          context,
+                                        )!.watchingCount(game['viewers']!),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
@@ -7496,9 +8903,9 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  const _SectionTitle(
-                    title: 'Transmissões ao vivo',
-                    trailing: 'Ver todos',
+                  _SectionTitle(
+                    title: AppLocalizations.of(context)!.liveBroadcasts,
+                    trailing: AppLocalizations.of(context)!.seeAll,
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -7524,10 +8931,7 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 }
@@ -7700,10 +9104,7 @@ class _TrendingVideoCard extends StatelessWidget {
                     tag,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white54,
-                      fontSize: 9,
-                    ),
+                    style: const TextStyle(color: Colors.white54, fontSize: 9),
                   ),
                 ],
               ),
@@ -7720,19 +9121,25 @@ class _TrendingVideoCard extends StatelessWidget {
 // ============================================================
 
 class UploadScreen extends StatefulWidget {
-  const UploadScreen({super.key, this.draftsStore});
+  const UploadScreen({super.key, this.draftsStore, this.preselectedVideo});
 
-  /// Armazenamento de rascunhos injetável (mesmo padrão do `DraftsScreen`).
+  /// Armazenamento de rascunhos injetável (mesmo padrão que o `DraftsScreen`).
   /// Quando omitido, usa o `DraftsService.instance` real.
   final DraftStore? draftsStore;
+
+  /// Caminho local de um vídeo já gravado/capturado.
+  ///
+  /// Quando informado, a tela entra direto na revisão: não pede arquivo e já
+  /// inicia o upload, reusando exatamente o mesmo caminho do `_pickVideo`.
+  /// É o que liga a tela de criação de vídeo (gravação) à publicação.
+  final String? preselectedVideo;
 
   @override
   State<UploadScreen> createState() => _UploadScreenState();
 }
 
 class _UploadScreenState extends State<UploadScreen> {
-  final TextEditingController _descriptionController =
-      TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
 
   File? _selectedVideo;
   bool _picking = false;
@@ -7744,6 +9151,43 @@ class _UploadScreenState extends State<UploadScreen> {
   /// envia o mesmo vídeo duas vezes.
   _VideoUploadTask? _videoTask;
   String? _uploadedVideoPath;
+
+  @override
+  void initState() {
+    super.initState();
+    // Vídeo já gravado na tela de criação: entra direto na revisão, sem pedir
+    // arquivo de novo. O arquivo tem de existir de fato — uma gravação que o
+    // usuário apagou não pode chegar aqui.
+    final pre = widget.preselectedVideo;
+    if (pre != null && pre.isNotEmpty && File(pre).existsSync()) {
+      // Adiado para o primeiro frame: `setState`/upload aqui ainda não podem
+      // tocar no contexto de mounted nem disparar build durante o build.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _adoptVideo(File(pre));
+      });
+    }
+  }
+
+  /// Adota um vídeo já escolhido: cancela upload anterior, limpa o objeto
+  /// antigo no servidor e inicia o novo upload.
+  ///
+  /// Compartilhado por [initState] (vídeo pré-selecionado) e [_pickVideo]
+  /// (galeria) para que os dois caminhos sejam idênticos.
+  void _adoptVideo(File file) {
+    if (!mounted) return;
+    _cancelPendingUpload();
+    final uploaded = _uploadedVideoPath;
+    setState(() {
+      _selectedVideo = file;
+      _uploadedVideoPath = null;
+      _uploadProgress = null;
+    });
+    if (uploaded != null) {
+      ContentService.instance.removeVideoObject(uploaded);
+    }
+    _startUploadIfConfigured();
+  }
+
   double? _uploadProgress;
 
   @override
@@ -7760,10 +9204,10 @@ class _UploadScreenState extends State<UploadScreen> {
   /// Extrai as hashtags (#tokens) de uma descrição, no mesmo formato que o
   /// publish usa — [String] sem o `#`.
   List<String> _parseHashtags(String description) => <String>[
-        'klayk',
-        for (final tag in description.split(RegExp(r'\s+')))
-          if (tag.startsWith('#')) tag.substring(1),
-      ];
+    'klayk',
+    for (final tag in description.split(RegExp(r'\s+')))
+      if (tag.startsWith('#')) tag.substring(1),
+  ];
 
   String _coverMimeFor(String path) {
     final p = path.toLowerCase();
@@ -7796,27 +9240,15 @@ class _UploadScreenState extends State<UploadScreen> {
     if (_picking) return;
     setState(() => _picking = true);
     try {
-      final picked = await ImagePicker().pickVideo(
-        source: ImageSource.gallery,
-      );
+      final picked = await ImagePicker().pickVideo(source: ImageSource.gallery);
       if (picked != null && mounted) {
-        _cancelPendingUpload();
-        final uploaded = _uploadedVideoPath;
-        setState(() {
-          _selectedVideo = File(picked.path);
-          _uploadedVideoPath = null;
-          _uploadProgress = null;
-        });
-        if (uploaded != null) {
-          ContentService.instance.removeVideoObject(uploaded);
-        }
-        _startUploadIfConfigured();
+        _adoptVideo(File(picked.path));
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Não foi possível selecionar o vídeo'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.videoPickError),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -7857,27 +9289,25 @@ class _UploadScreenState extends State<UploadScreen> {
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
   Future<void> _publish() async {
     FocusScope.of(context).unfocus();
+    final l10n = AppLocalizations.of(context)!;
 
     if (_publishing) return;
 
     if (!SupabaseService.instance.isConfigured) {
-      _showMessage('Vídeo enviado com sucesso!');
+      _showMessage(l10n.videoSentSuccessfully);
       _descriptionController.clear();
       return;
     }
 
     final video = _selectedVideo;
     if (video == null) {
-      _showMessage('Selecione um vídeo primeiro');
+      _showMessage(l10n.selectVideoFirst);
       return;
     }
 
@@ -7915,7 +9345,7 @@ class _UploadScreenState extends State<UploadScreen> {
         videoPath: videoPath,
         coverUrl: coverUrl,
         description: description,
-        audioName: 'Áudio original',
+        audioName: l10n.originalAudio,
         hashtags: hashtags,
       );
 
@@ -7928,11 +9358,13 @@ class _UploadScreenState extends State<UploadScreen> {
           _uploadProgress = null;
         });
       }
-      _showMessage('Vídeo enviado com sucesso!');
+      _showMessage(l10n.videoSentSuccessfully);
     } on UploadCancelledException {
-      if (mounted) _showMessage('Upload cancelado. Tente novamente.');
+      if (mounted) _showMessage(l10n.uploadCancelled);
     } catch (_) {
-      if (mounted) _showMessage('Não foi possível publicar o vídeo');
+      if (mounted) {
+        _showMessage(l10n.publishVideoFail);
+      }
     } finally {
       if (mounted) setState(() => _publishing = false);
     }
@@ -7955,20 +9387,22 @@ class _UploadScreenState extends State<UploadScreen> {
   /// (aparece em "Rascunhos"; nunca no feed até publicar).
   Future<void> _saveDraft() async {
     FocusScope.of(context).unfocus();
+    final l10n = AppLocalizations.of(context)!;
 
     if (_savingDraft) return;
 
     final store = widget.draftsStore ?? DraftsService.instance;
-    final backend = widget.draftsStore != null || SupabaseService.instance.isConfigured;
+    final backend =
+        widget.draftsStore != null || SupabaseService.instance.isConfigured;
     if (!backend) {
-      _showMessage('Rascunho salvo!');
+      _showMessage(l10n.draftSavedShort);
       _descriptionController.clear();
       return;
     }
 
     final video = _selectedVideo;
     if (video == null) {
-      _showMessage('Selecione um vídeo primeiro');
+      _showMessage(l10n.selectVideoFirst);
       return;
     }
 
@@ -8005,7 +9439,7 @@ class _UploadScreenState extends State<UploadScreen> {
         videoPath: videoPath,
         coverPath: coverPath ?? '',
         description: description,
-        audioName: 'Áudio original',
+        audioName: l10n.originalAudio,
         hashtags: _parseHashtags(description),
       );
 
@@ -8015,9 +9449,9 @@ class _UploadScreenState extends State<UploadScreen> {
           _descriptionController.clear();
         });
       }
-      _showMessage('Rascunho salvo! Você pode finalizar em Rascunhos.');
+      _showMessage(l10n.draftSaved);
     } catch (_) {
-      _showMessage('Não foi possível salvar o rascunho');
+      _showMessage(l10n.draftSaveFail);
     } finally {
       if (mounted) setState(() => _savingDraft = false);
     }
@@ -8029,9 +9463,9 @@ class _UploadScreenState extends State<UploadScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text(
-          'Enviar vídeo',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        title: Text(
+          AppLocalizations.of(context)!.sendVideoButton,
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         centerTitle: true,
       ),
@@ -8075,8 +9509,9 @@ class _UploadScreenState extends State<UploadScreen> {
                                       _uploadProgress = null;
                                     });
                                     if (uploaded != null) {
-                                      ContentService.instance
-                                          .removeVideoObject(uploaded);
+                                      ContentService.instance.removeVideoObject(
+                                        uploaded,
+                                      );
                                     }
                                   },
                             child: Container(
@@ -8104,9 +9539,9 @@ class _UploadScreenState extends State<UploadScreen> {
                           size: 64,
                         ),
                         const SizedBox(height: 12),
-                        const Text(
-                          'Selecione um vídeo',
-                          style: TextStyle(
+                        Text(
+                          AppLocalizations.of(context)!.selectVideoPlaceholder,
+                          style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 15,
                           ),
@@ -8124,7 +9559,9 @@ class _UploadScreenState extends State<UploadScreen> {
                                   ),
                                 )
                               : const Icon(Icons.photo_library_outlined),
-                          label: const Text('Escolher da galeria'),
+                          label: Text(
+                            AppLocalizations.of(context)!.galleryPick,
+                          ),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.white,
                             side: const BorderSide(color: Color(0xFF8A2BE2)),
@@ -8133,7 +9570,8 @@ class _UploadScreenState extends State<UploadScreen> {
                       ],
                     ),
             ),
-            if (SupabaseService.instance.isConfigured && _videoTask != null) ...[
+            if (SupabaseService.instance.isConfigured &&
+                _videoTask != null) ...[
               const SizedBox(height: 12),
               _UploadProgressBar(
                 progress: _uploadProgress ?? _videoTask!.progress,
@@ -8141,9 +9579,9 @@ class _UploadScreenState extends State<UploadScreen> {
               ),
             ],
             const SizedBox(height: 16),
-            const Text(
-              'Descrição',
-              style: TextStyle(
+            Text(
+              AppLocalizations.of(context)!.descriptionLabel,
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
@@ -8156,7 +9594,7 @@ class _UploadScreenState extends State<UploadScreen> {
               style: const TextStyle(color: Colors.white),
               cursorColor: const Color(0xFF8A2BE2),
               decoration: InputDecoration(
-                hintText: 'O que está acontecendo?',
+                hintText: AppLocalizations.of(context)!.whatsHappening,
                 hintStyle: const TextStyle(color: Colors.white38),
                 filled: true,
                 fillColor: const Color(0xFF1E1B2E),
@@ -8187,8 +9625,8 @@ class _UploadScreenState extends State<UploadScreen> {
                           child: CircularProgressIndicator(
                             strokeWidth: 2.5,
                             color: Colors.white,
-                            value: _uploadProgress != null &&
-                                    _uploadProgress! < 1
+                            value:
+                                _uploadProgress != null && _uploadProgress! < 1
                                 ? _uploadProgress
                                 : null,
                           ),
@@ -8196,8 +9634,10 @@ class _UploadScreenState extends State<UploadScreen> {
                         const SizedBox(width: 10),
                         Text(
                           _uploadProgress != null && _uploadProgress! < 1
-                              ? 'Publicando ${(_uploadProgress! * 100).round()}%'
-                              : 'Finalizando…',
+                              ? AppLocalizations.of(context)!.publishingPercent(
+                                  (_uploadProgress! * 100).round(),
+                                )
+                              : AppLocalizations.of(context)!.finalizing,
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
@@ -8205,9 +9645,9 @@ class _UploadScreenState extends State<UploadScreen> {
                         ),
                       ],
                     )
-                  : const Text(
-                      'Publicar',
-                      style: TextStyle(
+                  : Text(
+                      AppLocalizations.of(context)!.publishAction,
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
@@ -8235,7 +9675,9 @@ class _UploadScreenState extends State<UploadScreen> {
                     )
                   : const Icon(Icons.note_add_outlined, size: 20),
               label: Text(
-                _savingDraft ? 'Salvando...' : 'Salvar rascunho',
+                _savingDraft
+                    ? AppLocalizations.of(context)!.savingDraft
+                    : AppLocalizations.of(context)!.saveDraft,
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
@@ -8282,7 +9724,9 @@ class _UploadProgressBar extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          done ? 'Vídeo pronto para publicar' : 'Enviando vídeo… $pct%',
+          done
+              ? AppLocalizations.of(context)!.videoReadyToPublish
+              : AppLocalizations.of(context)!.uploadingVideo(pct),
           style: TextStyle(
             color: done ? const Color(0xFF8B5CF6) : Colors.white70,
             fontSize: 12.5,
@@ -8336,7 +9780,11 @@ class _VideoPlaybackPreviewState extends State<VideoPlaybackPreview> {
   Widget build(BuildContext context) {
     if (_error) {
       return const Center(
-        child: Icon(Icons.videocam_off_rounded, color: Colors.white38, size: 48),
+        child: Icon(
+          Icons.videocam_off_rounded,
+          color: Colors.white38,
+          size: 48,
+        ),
       );
     }
     if (_controller == null || !_controller!.value.isInitialized) {
@@ -8358,8 +9806,6 @@ class _VideoPlaybackPreviewState extends State<VideoPlaybackPreview> {
 // ============================================================
 // TELA DE MENSAGENS
 // ============================================================
-
-
 
 // ============================================================
 // PESQUISA
@@ -8467,17 +9913,22 @@ class KlayKSearchDelegate extends SearchDelegate {
                 height: 44,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
                   children: _scopes.map((s) {
                     final sel = scope == s['value'];
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: ChoiceChip(
-                        label: Text(s['label']!,
-                            style: TextStyle(
-                                color: sel ? Colors.white : Colors.white70,
-                                fontSize: 13)),
+                        label: Text(
+                          s['label']!,
+                          style: TextStyle(
+                            color: sel ? Colors.white : Colors.white70,
+                            fontSize: 13,
+                          ),
+                        ),
                         selected: sel,
                         selectedColor: const Color(0xFF8A2BE2),
                         backgroundColor: const Color(0xFF1B1A26),
@@ -8493,103 +9944,115 @@ class KlayKSearchDelegate extends SearchDelegate {
             Expanded(
               child: FutureBuilder<List<SearchResult>>(
                 future: SocialService.instance.search(query, scope: scope),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(
-                    child: CircularProgressIndicator(color: Color(0xFF8B5CF6)));
-              }
-              final results = snapshot.data ?? const <SearchResult>[];
-              if (results.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'Nada encontrado',
-                    style: TextStyle(color: Colors.white54),
-                  ),
-                );
-              }
-              return ListView.builder(
-                itemCount: results.length,
-                itemBuilder: (context, i) {
-                  final r = results[i];
-                  final IconData typeIcon = switch (r.type) {
-                    'user' => Icons.person_rounded,
-                    'post' => Icons.play_circle_outline_rounded,
-                    'hashtag' => Icons.tag_rounded,
-                    'live' => Icons.sensors_rounded,
-                    _ => Icons.search,
-                  };
-                  return ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: const Color(0xFF1E1B2E),
-                      backgroundImage:
-                          r.avatarUrl != null && r.avatarUrl!.isNotEmpty
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF8B5CF6),
+                      ),
+                    );
+                  }
+                  final results = snapshot.data ?? const <SearchResult>[];
+                  if (results.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'Nada encontrado',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    );
+                  }
+                  return ListView.builder(
+                    itemCount: results.length,
+                    itemBuilder: (context, i) {
+                      final r = results[i];
+                      final IconData typeIcon = switch (r.type) {
+                        'user' => Icons.person_rounded,
+                        'post' => Icons.play_circle_outline_rounded,
+                        'hashtag' => Icons.tag_rounded,
+                        'live' => Icons.sensors_rounded,
+                        _ => Icons.search,
+                      };
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: const Color(0xFF1E1B2E),
+                          backgroundImage:
+                              r.avatarUrl != null && r.avatarUrl!.isNotEmpty
                               ? NetworkImage(r.avatarUrl!)
                               : null,
-                      child: r.type == 'user'
-                          ? (r.avatarUrl == null || r.avatarUrl!.isEmpty
-                              ? Icon(typeIcon,
-                                  color: const Color(0xFFB28DFF), size: 20)
-                              : null)
-                          : Icon(typeIcon,
-                              color: const Color(0xFFB28DFF), size: 20),
-                    ),
-                    title: r.type == 'user'
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  r.title,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
+                          child: r.type == 'user'
+                              ? (r.avatarUrl == null || r.avatarUrl!.isEmpty
+                                    ? Icon(
+                                        typeIcon,
+                                        color: const Color(0xFFB28DFF),
+                                        size: 20,
+                                      )
+                                    : null)
+                              : Icon(
+                                  typeIcon,
+                                  color: const Color(0xFFB28DFF),
+                                  size: 20,
+                                ),
+                        ),
+                        title: r.type == 'user'
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      r.title,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
                                   ),
+                                  if (r.isVerified) ...[
+                                    const SizedBox(width: 4),
+                                    const VerifiedBadge(size: 14),
+                                  ],
+                                ],
+                              )
+                            : Text(
+                                r.title,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              if (r.isVerified) ...[
-                                const SizedBox(width: 4),
-                                const VerifiedBadge(size: 14),
-                              ],
-                            ],
-                          )
-                        : Text(
-                            r.title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                    subtitle: Text(
-                      r.subtitle.isEmpty
-                          ? r.type.toUpperCase()
-                          : (r.type == 'user' ? '@${r.subtitle}' : r.title),
-                      style: const TextStyle(color: Colors.white54),
-                    ),
-                    trailing: r.type == 'user'
-                        ? const Icon(Icons.chevron_right, color: Colors.white24)
-                        : null,
-                    onTap: () {
-                      _record();
-                      switch (r.type) {
-                        case 'user':
-                          close(context, null);
-                          _openAuthor(context, r.id);
-                          break;
-                        case 'hashtag':
-                          query = '#${r.subtitle}';
-                          _scope.value = 'post';
-                          break;
-                        default:
-                          close(context, null);
-                      }
+                        subtitle: Text(
+                          r.subtitle.isEmpty
+                              ? r.type.toUpperCase()
+                              : (r.type == 'user' ? '@${r.subtitle}' : r.title),
+                          style: const TextStyle(color: Colors.white54),
+                        ),
+                        trailing: r.type == 'user'
+                            ? const Icon(
+                                Icons.chevron_right,
+                                color: Colors.white24,
+                              )
+                            : null,
+                        onTap: () {
+                          _record();
+                          switch (r.type) {
+                            case 'user':
+                              close(context, null);
+                              _openAuthor(context, r.id);
+                              break;
+                            case 'hashtag':
+                              query = '#${r.subtitle}';
+                              _scope.value = 'post';
+                              break;
+                            default:
+                              close(context, null);
+                          }
+                        },
+                      );
                     },
                   );
                 },
-              );
-            },
-          ),
-        ),
+              ),
+            ),
           ],
         );
       },
@@ -8603,9 +10066,7 @@ class KlayKSearchDelegate extends SearchDelegate {
 
   void _openAuthor(BuildContext context, String userId) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => UserProfileScreen(userId: userId),
-      ),
+      MaterialPageRoute(builder: (_) => UserProfileScreen(userId: userId)),
     );
   }
 
@@ -8616,7 +10077,9 @@ class KlayKSearchDelegate extends SearchDelegate {
     return ValueListenableBuilder<int>(
       valueListenable: _homeTick,
       builder: (context, tick, _) {
-        return FutureBuilder<({List<String> recents, List<HashtagTrend> trends})>(
+        return FutureBuilder<
+          ({List<String> recents, List<HashtagTrend> trends})
+        >(
           future: () async {
             final results = await Future.wait<Object>([
               SocialService.instance.fetchSearchHistory(limit: 10),
@@ -8630,132 +10093,142 @@ class KlayKSearchDelegate extends SearchDelegate {
           builder: (context, snapshot) {
             final recents = snapshot.data?.recents ?? const <String>[];
             final trends = snapshot.data?.trends ?? const <HashtagTrend>[];
-        return ListView(
-          children: [
-            if (recents.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 8, 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Recentes',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                      ),
+            return ListView(
+              children: [
+                if (recents.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 8, 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Recentes',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_sweep_rounded,
+                            color: Colors.white38,
+                            size: 20,
+                          ),
+                          tooltip: 'Limpar recentes',
+                          onPressed: () {
+                            SocialService.instance.clearSearchHistory();
+                            _homeTick.value++;
+                          },
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_sweep_rounded,
-                          color: Colors.white38, size: 20),
-                      tooltip: 'Limpar recentes',
-                      onPressed: () {
-                        SocialService.instance.clearSearchHistory();
-                        _homeTick.value++;
+                  ),
+                  ...recents.map(
+                    (term) => ListTile(
+                      dense: true,
+                      leading: const Icon(
+                        Icons.history_rounded,
+                        color: Color(0xFFB28DFF),
+                      ),
+                      title: Text(
+                        term,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      onTap: () {
+                        query = term;
+                        _record();
                       },
                     ),
-                  ],
-                ),
-              ),
-              ...recents.map(
-                (term) => ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.history_rounded,
-                      color: Color(0xFFB28DFF)),
-                  title: Text(term,
-                      style: const TextStyle(color: Colors.white)),
-                  onTap: () {
-                    query = term;
-                    _record();
-                  },
-                ),
-              ),
-            ],
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
-              child: Text(
-                'Categorias',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _categories.map((category) {
-                  return ChoiceChip(
-                    label: Text(category),
-                    selected: false,
-                    onSelected: (_) {
-                      query = category;
-                      _record();
-                    },
-                    backgroundColor: const Color(0xFF1E1B2E),
-                    selectedColor: const Color(0xFF8A2BE2),
-                    labelStyle: const TextStyle(color: Colors.white),
-                  );
-                }).toList(),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
-              child: Text(
-                'Em alta',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            if (trends.isNotEmpty)
-              ...trends.map(
-                (t) => ListTile(
-                  dense: true,
-                  leading: const Icon(
-                    Icons.trending_up,
-                    color: Color(0xFFB28DFF),
                   ),
-                  title: Text(
-                    '#${t.tag}',
-                    style: const TextStyle(color: Colors.white),
+                ],
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+                  child: Text(
+                    'Categorias',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                  trailing: Text(
-                    '${t.count}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                  onTap: () {
-                    query = '#${t.tag}';
-                    _scope.value = 'post';
-                    _record();
-                  },
                 ),
-              )
-            else
-              ..._trending.map(
-                (term) => ListTile(
-                  leading: const Icon(
-                    Icons.trending_up,
-                    color: Color(0xFFB28DFF),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _categories.map((category) {
+                      return ChoiceChip(
+                        label: Text(category),
+                        selected: false,
+                        onSelected: (_) {
+                          query = category;
+                          _record();
+                        },
+                        backgroundColor: const Color(0xFF1E1B2E),
+                        selectedColor: const Color(0xFF8A2BE2),
+                        labelStyle: const TextStyle(color: Colors.white),
+                      );
+                    }).toList(),
                   ),
-                  title: Text(
-                    term,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  onTap: () {
-                    query = term;
-                    _record();
-                  },
                 ),
-              ),
-          ],
-        );
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  child: Text(
+                    'Em alta',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (trends.isNotEmpty)
+                  ...trends.map(
+                    (t) => ListTile(
+                      dense: true,
+                      leading: const Icon(
+                        Icons.trending_up,
+                        color: Color(0xFFB28DFF),
+                      ),
+                      title: Text(
+                        '#${t.tag}',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      trailing: Text(
+                        '${t.count}',
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
+                      onTap: () {
+                        query = '#${t.tag}';
+                        _scope.value = 'post';
+                        _record();
+                      },
+                    ),
+                  )
+                else
+                  ..._trending.map(
+                    (term) => ListTile(
+                      leading: const Icon(
+                        Icons.trending_up,
+                        color: Color(0xFFB28DFF),
+                      ),
+                      title: Text(
+                        term,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      onTap: () {
+                        query = term;
+                        _record();
+                      },
+                    ),
+                  ),
+              ],
+            );
           },
         );
       },
@@ -8806,14 +10279,8 @@ class KlayKSearchDelegate extends SearchDelegate {
         ),
         ..._trending.map(
           (term) => ListTile(
-            leading: const Icon(
-              Icons.trending_up,
-              color: Color(0xFFB28DFF),
-            ),
-            title: Text(
-              term,
-              style: const TextStyle(color: Colors.white),
-            ),
+            leading: const Icon(Icons.trending_up, color: Color(0xFFB28DFF)),
+            title: Text(term, style: const TextStyle(color: Colors.white)),
             onTap: () => close(context, term),
           ),
         ),
@@ -8824,24 +10291,20 @@ class KlayKSearchDelegate extends SearchDelegate {
   Widget _buildResultList(BuildContext context, List<String> items) {
     if (items.isEmpty) {
       return const Center(
-        child: Text(
-          'Nada encontrado',
-          style: TextStyle(color: Colors.white54),
-        ),
+        child: Text('Nada encontrado', style: TextStyle(color: Colors.white54)),
       );
     }
 
     return ListView(
-      children: items.map(
-        (term) => ListTile(
-          leading: const Icon(Icons.search, color: Colors.white38),
-          title: Text(
-            term,
-            style: const TextStyle(color: Colors.white),
-          ),
-          onTap: () => close(context, term),
-        ),
-      ).toList(),
+      children: items
+          .map(
+            (term) => ListTile(
+              leading: const Icon(Icons.search, color: Colors.white38),
+              title: Text(term, style: const TextStyle(color: Colors.white)),
+              onTap: () => close(context, term),
+            ),
+          )
+          .toList(),
     );
   }
 }

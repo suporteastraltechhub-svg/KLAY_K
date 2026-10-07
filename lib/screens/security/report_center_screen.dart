@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/security_models.dart';
 import '../../services/security_service.dart';
 
@@ -47,8 +48,7 @@ class _ReportCenterScreenState extends State<ReportCenterScreen> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _newReport() async {
@@ -63,12 +63,15 @@ class _ReportCenterScreenState extends State<ReportCenterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Centro de denúncias',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.reportCenterTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
       ),
       body: _loading
@@ -82,42 +85,48 @@ class _ReportCenterScreenState extends State<ReportCenterScreen> {
                   ElevatedButton.icon(
                     onPressed: _newReport,
                     icon: const Icon(Icons.report_gmailerrorred_rounded),
-                    label: const Text('Nova denúncia',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    label: Text(
+                      l10n.reportCenterNewReport,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _kAccent,
                       foregroundColor: Colors.white,
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    'Suas denúncias são analisadas pela equipe de moderação. '
-                    'Você verá aqui o estado e a resolução de cada uma.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                  Text(
+                    l10n.reportCenterIntro,
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
                   ),
                   const SizedBox(height: 12),
                   if (_reports.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 60),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 60),
                       child: Column(
                         children: [
-                          Icon(Icons.shield_outlined,
-                              color: Colors.white24, size: 44),
-                          SizedBox(height: 10),
-                          Text('Nenhuma denúncia enviada.',
-                              style: TextStyle(color: Colors.white54)),
+                          const Icon(
+                            Icons.shield_outlined,
+                            color: Colors.white24,
+                            size: 44,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            l10n.reportCenterEmpty,
+                            style: const TextStyle(color: Colors.white54),
+                          ),
                         ],
                       ),
                     )
                   else
-                    for (final r in _reports) _reportTile(r),
+                    for (final r in _reports) _reportTile(r, l10n),
                 ],
               ),
             ),
     );
   }
 
-  Widget _reportTile(ReportEntry r) {
+  Widget _reportTile(ReportEntry r, AppLocalizations l10n) {
     final color = _statusColor(r.status);
     return Card(
       color: const Color(0xFF16151F),
@@ -131,8 +140,10 @@ class _ReportCenterScreenState extends State<ReportCenterScreen> {
             Row(
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: _kAccent.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
@@ -140,50 +151,62 @@ class _ReportCenterScreenState extends State<ReportCenterScreen> {
                   child: Text(
                     r.targetLabel.toUpperCase(),
                     style: const TextStyle(
-                        color: _kAccent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700),
+                      color: _kAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    _statusLabel(r.status),
+                    _statusLabel(l10n, r.status).toUpperCase(),
                     style: TextStyle(
-                        color: color, fontSize: 11, fontWeight: FontWeight.w700),
+                      color: color,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            Text(r.reason,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15)),
+            Text(
+              r.reason,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
             if (r.details.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(r.details,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white60)),
+              Text(
+                r.details,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white60),
+              ),
             ],
             if (r.resolution.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text('Resolução: ${r.resolution}',
-                  style:
-                      const TextStyle(color: _kSafe, fontSize: 13)),
+              Text(
+                l10n.reportCenterResolution(r.resolution),
+                style: const TextStyle(color: _kSafe, fontSize: 13),
+              ),
             ],
             const SizedBox(height: 6),
             Text(
-              'Enviada em ${_fmt(r.createdAt)}'
-              '${r.reviewedAt != null ? ' · revisada em ${_fmt(r.reviewedAt)}' : ''}',
+              '${l10n.reportCenterSentAt(_fmt(r.createdAt))}'
+              '${r.reviewedAt != null ? l10n.reportCenterReviewedAt(_fmt(r.reviewedAt)) : ''}',
               style: const TextStyle(color: Colors.white38, fontSize: 11),
             ),
           ],
@@ -205,16 +228,16 @@ class _ReportCenterScreenState extends State<ReportCenterScreen> {
     }
   }
 
-  String _statusLabel(String status) {
+  String _statusLabel(AppLocalizations l10n, String status) {
     switch (status) {
       case 'resolved':
-        return 'RESOLVIDA';
+        return l10n.reportStatusResolved;
       case 'dismissed':
-        return 'DISPENSADA';
+        return l10n.reportStatusDismissed;
       case 'reviewing':
-        return 'EM ANÁLISE';
+        return l10n.reportStatusReviewing;
       default:
-        return 'PENDENTE';
+        return l10n.reportStatusPending;
     }
   }
 
@@ -249,11 +272,12 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
   }
 
   Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context)!;
     final targetId = _targetId.text.trim();
     final reason = _reason.text.trim();
-    if (targetId.isEmpty) return _snack('Informe o ID do alvo.');
+    if (targetId.isEmpty) return _snack(l10n.reportTargetIdRequired);
     if (reason.length < 3) {
-      return _snack('Descreva o motivo (pelo menos 3 caracteres).');
+      return _snack(l10n.reportReasonMinChars);
     }
     setState(() => _submitting = true);
     try {
@@ -274,13 +298,13 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
     final pad = MediaQuery.of(context).viewInsets.bottom;
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: EdgeInsets.only(bottom: pad),
       child: SingleChildScrollView(
@@ -289,50 +313,62 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Nova denúncia',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18)),
+            Text(
+              l10n.reportCenterNewReport,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
             const SizedBox(height: 4),
-            const Text(
-                'Denúncias duplicadas ou em excesso são rejeitadas pelo backend.',
-                style: TextStyle(color: Colors.white38, fontSize: 12)),
+            Text(
+              l10n.reportAntiAbuse,
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               initialValue: _targetType,
               dropdownColor: const Color(0xFF1B1A26),
               style: const TextStyle(color: Colors.white),
-              decoration: _decoration('Tipo de alvo'),
-              items: const [
-                DropdownMenuItem(value: 'user', child: Text('Usuário')),
-                DropdownMenuItem(value: 'post', child: Text('Post')),
-                DropdownMenuItem(value: 'live', child: Text('Live')),
-                DropdownMenuItem(value: 'comment', child: Text('Comentário')),
-                DropdownMenuItem(value: 'chat', child: Text('Chat de live')),
+              decoration: _decoration(l10n.reportTargetType),
+              items: [
+                DropdownMenuItem(value: 'user', child: Text(l10n.user)),
+                DropdownMenuItem(
+                  value: 'post',
+                  child: Text(l10n.reportTargetPost),
+                ),
+                DropdownMenuItem(value: 'live', child: Text(l10n.live)),
+                DropdownMenuItem(
+                  value: 'comment',
+                  child: Text(l10n.reportTargetComment),
+                ),
+                DropdownMenuItem(
+                  value: 'chat',
+                  child: Text(l10n.reportTargetChat),
+                ),
               ],
-              onChanged: (v) =>
-                  setState(() => _targetType = v ?? 'post'),
+              onChanged: (v) => setState(() => _targetType = v ?? 'post'),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _targetId,
               style: const TextStyle(color: Colors.white),
-              decoration: _decoration('ID do alvo (ex.: id do post, live ou usuário)'),
+              decoration: _decoration(l10n.reportTargetIdHint),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _reason,
               style: const TextStyle(color: Colors.white),
               maxLines: 2,
-              decoration: _decoration('Motivo (mín. 3 caracteres)'),
+              decoration: _decoration(l10n.reportReasonHint),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _details,
               style: const TextStyle(color: Colors.white),
               maxLines: 3,
-              decoration: _decoration('Detalhes (opcional)'),
+              decoration: _decoration(l10n.reportDetailsHint),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -348,10 +384,14 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
-                    : const Text('Enviar denúncia',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    : Text(
+                        l10n.reportSubmit,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
               ),
             ),
           ],
@@ -361,13 +401,13 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
   }
 
   InputDecoration _decoration(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: Colors.white38),
-        filled: true,
-        fillColor: const Color(0xFF1B1A26),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
-      );
+    hintText: hint,
+    hintStyle: const TextStyle(color: Colors.white38),
+    filled: true,
+    fillColor: const Color(0xFF1B1A26),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide.none,
+    ),
+  );
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/drafts_service.dart';
 import '../theme/klayk_theme.dart';
 import '../widgets/klayk_ux.dart';
@@ -42,21 +43,22 @@ class _DraftsScreenState extends State<DraftsScreen> {
 
   Future<void> _publish(Draft d) async {
     if (_publishingId != null) return;
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _publishingId = d.id);
     try {
       final post = await _svc.publish(d.id);
       if (!mounted) return;
       if (post != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Vídeo publicado com sucesso!')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.draftPublished)));
         await _load();
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível publicar o rascunho.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.draftPublishFail)));
       }
     } finally {
       if (mounted) setState(() => _publishingId = null);
@@ -64,20 +66,24 @@ class _DraftsScreenState extends State<DraftsScreen> {
   }
 
   Future<void> _remove(Draft d) async {
+    final l10n = AppLocalizations.of(context)!;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF17151F),
-        title: const Text('Excluir rascunho?'),
-        content: const Text('Esta ação não pode ser desfeita.'),
+        title: Text(l10n.deleteDraftTitle),
+        content: Text(l10n.cannotUndoAction),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Excluir'),
+            child: Text(l10n.delete),
           ),
         ],
       ),
@@ -89,6 +95,7 @@ class _DraftsScreenState extends State<DraftsScreen> {
 
   /// Edita a legenda/hashtags do rascunho (publicação usa o que estiver aqui).
   Future<void> _edit(Draft d) async {
+    final l10n = AppLocalizations.of(context)!;
     final desc = TextEditingController(text: d.description);
     final tags = TextEditingController(
       text: d.hashtags.map((h) => '#$h').join(' '),
@@ -97,7 +104,7 @@ class _DraftsScreenState extends State<DraftsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF17151F),
-        title: const Text('Editar rascunho'),
+        title: Text(l10n.editDraftTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -107,9 +114,9 @@ class _DraftsScreenState extends State<DraftsScreen> {
               style: const TextStyle(color: Colors.white),
               cursorColor: const Color(0xFF8A2BE2),
               decoration: InputDecoration(
-                labelText: 'Descrição',
+                labelText: l10n.descriptionLabel,
                 labelStyle: const TextStyle(color: Colors.white38),
-                hintText: 'O que está acontecendo?',
+                hintText: l10n.whatsHappening,
                 hintStyle: const TextStyle(color: Colors.white24),
                 filled: true,
                 fillColor: const Color(0xFF1E1B2E),
@@ -125,9 +132,9 @@ class _DraftsScreenState extends State<DraftsScreen> {
               style: const TextStyle(color: Colors.white),
               cursorColor: const Color(0xFF8A2BE2),
               decoration: InputDecoration(
-                labelText: 'Hashtags',
+                labelText: l10n.hashtagsLabel,
                 labelStyle: const TextStyle(color: Colors.white38),
-                hintText: '#klayk #amigo',
+                hintText: l10n.draftTagsPlaceholder,
                 hintStyle: const TextStyle(color: Colors.white24),
                 filled: true,
                 fillColor: const Color(0xFF1E1B2E),
@@ -142,11 +149,14 @@ class _DraftsScreenState extends State<DraftsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Salvar'),
+            child: Text(l10n.save),
           ),
         ],
       ),
@@ -156,41 +166,38 @@ class _DraftsScreenState extends State<DraftsScreen> {
       for (final t in tags.text.split(RegExp(r'\s+')))
         if (t.startsWith('#')) t.substring(1),
     ];
-    await _svc.update(
-      d,
-      description: desc.text.trim(),
-      hashtags: parsed,
-    );
+    await _svc.update(d, description: desc.text.trim(), hashtags: parsed);
     await _load();
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: kcolors(context).bg,
-      appBar: AppBar(title: const Text('Rascunhos')),
+      appBar: AppBar(title: Text(l10n.drafts)),
       body: _loading
           ? const Center(child: KlaykLoader())
           : _drafts.isEmpty
-              ? const KlaykEmptyState(
-                  icon: Icons.note_alt_rounded,
-                  title: 'Nenhum rascunho',
-                  message: 'Rascunhos privados ainda não criados. '
-                      'Guardamos vídeos incompletos para você publicar depois.',
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _drafts.length,
-                    itemBuilder: (context, i) => _draftTile(_drafts[i]),
-                  ),
-                ),
+          ? KlaykEmptyState(
+              icon: Icons.note_alt_rounded,
+              title: l10n.noDrafts,
+              message: l10n.noDraftsBody,
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: _drafts.length,
+                itemBuilder: (context, i) => _draftTile(_drafts[i]),
+              ),
+            ),
     );
   }
 
   Widget _draftTile(Draft d) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     final publishing = _publishingId == d.id;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -217,17 +224,18 @@ class _DraftsScreenState extends State<DraftsScreen> {
                   Text(
                     d.description.trim().isNotEmpty
                         ? d.description
-                        : 'Rascunho sem legenda',
+                        : l10n.draftNoCaption,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Editado em ${_formatDate(d.updatedAt)}',
-                    style: const TextStyle(
-                        fontSize: 11, color: Colors.white38),
+                    l10n.editedOnDate(_formatDate(d.updatedAt)),
+                    style: const TextStyle(fontSize: 11, color: Colors.white38),
                   ),
                 ],
               ),
@@ -235,30 +243,36 @@ class _DraftsScreenState extends State<DraftsScreen> {
             IconButton(
               onPressed: publishing ? null : () => _edit(d),
               icon: const Icon(Icons.edit_outlined, color: Colors.white38),
-              tooltip: 'Editar',
+              tooltip: l10n.edit,
             ),
             IconButton(
               onPressed: publishing ? null : () => _remove(d),
-              icon: const Icon(Icons.delete_outline_rounded,
-                  color: Colors.white38),
-              tooltip: 'Excluir',
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.white38,
+              ),
+              tooltip: l10n.delete,
             ),
             FilledButton.icon(
               onPressed: publishing ? null : () => _publish(d),
               style: FilledButton.styleFrom(
                 backgroundColor: colors.primary,
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
               icon: publishing
                   ? const SizedBox(
                       width: 14,
                       height: 14,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.upload_rounded, size: 16),
-              label: const Text('Publicar'),
+              label: Text(l10n.publishAction),
             ),
           ],
         ),

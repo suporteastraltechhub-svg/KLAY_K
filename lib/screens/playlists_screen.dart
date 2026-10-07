@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../design/klayk_design.dart';
+import '../l10n/app_localizations.dart';
 import '../models/playlist_models.dart';
 import '../services/playlist_service.dart';
 import '../services/supabase_service.dart';
@@ -75,16 +76,19 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => PlaylistDetailScreen(
-            playlist: created,
-            ownsIt: created.isMine,
-          ),
+          builder: (_) =>
+              PlaylistDetailScreen(playlist: created, ownsIt: created.isMine),
         ),
       );
     } catch (e) {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context)!;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e is StateError ? e.message : 'Não foi possível criar a playlist.')),
+        SnackBar(
+          content: Text(
+            e is StateError ? e.message : l10n.playlistsCreateFailed,
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _creating = false);
@@ -107,11 +111,15 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Playlists', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.playlistsTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
       body: Column(
         children: [
@@ -122,7 +130,7 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
               onSubmitted: (_) => _load(),
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: 'Buscar playlists…',
+                hintText: l10n.playlistsSearchHint,
                 hintStyle: const TextStyle(color: Colors.white38),
                 prefixIcon: const Icon(Icons.search, color: Colors.white38),
                 suffixIcon: _searchCtrl.text.trim().isEmpty
@@ -162,31 +170,34 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
             ? const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
               )
             : const Icon(Icons.add_rounded),
-        label: Text(_creating ? 'Criando…' : 'Nova playlist'),
+        label: Text(_creating ? l10n.playlistsCreating : l10n.playlistsNew),
       ),
     );
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar as playlists. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.playlistsLoadFailTitle,
+        message: l10n.playlistsLoadFailMsg,
+        actionLabel: l10n.retry,
         actionIcon: Icons.refresh_rounded,
         onAction: _load,
       );
     }
     if (_all.isEmpty) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.video_library_outlined,
-        title: 'Nenhuma playlist por aqui',
-        message:
-            'Quando um criador montar uma playlist pública, ela aparece aqui. Toque em "Nova playlist" para criar a sua.',
+        title: l10n.playlistsEmptyTitle,
+        message: l10n.playlistsEmptyMsg,
       );
     }
     return RefreshIndicator(
@@ -196,12 +207,13 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
         itemCount: _all.length,
         separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, i) => _playlistCard(_all[i]),
+        itemBuilder: (context, i) => _playlistCard(context, _all[i]),
       ),
     );
   }
 
-  Widget _playlistCard(KlayKPlaylist p) {
+  Widget _playlistCard(BuildContext context, KlayKPlaylist p) {
+    final l10n = AppLocalizations.of(context)!;
     final colors = kc(context);
     return GestureDetector(
       onTap: () => _openPlaylist(p),
@@ -224,7 +236,11 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
                         border: Border.all(color: const Color(0xFF2A2540)),
                       ),
                       alignment: Alignment.center,
-                      child: const Icon(Icons.video_library_rounded, color: _kAccent, size: 26),
+                      child: const Icon(
+                        Icons.video_library_rounded,
+                        color: _kAccent,
+                        size: 26,
+                      ),
                     )
                   : Image.network(
                       p.coverUrl,
@@ -236,7 +252,11 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
                         height: 64,
                         color: const Color(0xFF2A2350),
                         alignment: Alignment.center,
-                        child: const Icon(Icons.video_library_rounded, color: Color(0xFF8B5CF6), size: 26),
+                        child: const Icon(
+                          Icons.video_library_rounded,
+                          color: Color(0xFF8B5CF6),
+                          size: 26,
+                        ),
                       ),
                     ),
             ),
@@ -251,19 +271,30 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
                         child: Text(
                           p.name,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                       if (p.isMine) ...[
                         const SizedBox(width: 4),
-                        const Icon(Icons.person_pin_rounded, color: Colors.white38, size: 14),
+                        const Icon(
+                          Icons.person_pin_rounded,
+                          color: Colors.white38,
+                          size: 14,
+                        ),
                       ],
                     ],
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${p.postCount} vídeos',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+                    l10n.playlistsVideoCount(p.postCount),
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12.5,
+                    ),
                   ),
                   if (p.description.isNotEmpty) ...[
                     const SizedBox(height: 2),
@@ -271,23 +302,38 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
                       p.description,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white38, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      Icon(Icons.person_outline_rounded, color: colors.primarySoft, size: 14),
+                      Icon(
+                        Icons.person_outline_rounded,
+                        color: colors.primarySoft,
+                        size: 14,
+                      ),
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
                           p.creatorName,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                       const Spacer(),
-                      const Icon(Icons.play_circle_outline_rounded, color: Colors.white38, size: 18),
+                      const Icon(
+                        Icons.play_circle_outline_rounded,
+                        color: Colors.white38,
+                        size: 18,
+                      ),
                     ],
                   ),
                 ],
@@ -326,9 +372,16 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return AlertDialog(
       backgroundColor: const Color(0xFF17141F),
-      title: const Text('Nova playlist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+      title: Text(
+        l10n.playlistsNew,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -337,9 +390,9 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
             autofocus: true,
             maxLength: 60,
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: 'Nome da playlist…',
-              hintStyle: TextStyle(color: Colors.white38),
+            decoration: InputDecoration(
+              hintText: l10n.playlistsNameHint,
+              hintStyle: const TextStyle(color: Colors.white38),
             ),
           ),
           TextField(
@@ -347,9 +400,9 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
             maxLines: 2,
             maxLength: 140,
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: 'Descrição (opcional)…',
-              hintStyle: TextStyle(color: Colors.white38),
+            decoration: InputDecoration(
+              hintText: l10n.playlistsDescHint,
+              hintStyle: const TextStyle(color: Colors.white38),
             ),
           ),
         ],
@@ -357,12 +410,17 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+          child: Text(
+            l10n.cancel,
+            style: const TextStyle(color: Colors.white54),
+          ),
         ),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF8B5CF6),
+          ),
           onPressed: _submit,
-          child: const Text('Criar'),
+          child: Text(l10n.createAction),
         ),
       ],
     );

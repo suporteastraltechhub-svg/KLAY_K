@@ -55,8 +55,11 @@ class LiveBotService {
   }
 
   /// Cria um anúncio (dono/moderador).
-  Future<void> addAnnouncement(String liveId, String message,
-      {int intervalSeconds = 120}) async {
+  Future<void> addAnnouncement(
+    String liveId,
+    String message, {
+    int intervalSeconds = 120,
+  }) async {
     await _rpc('live_bot_add_announcement', {
       'p_live_id': liveId,
       'p_message': message,
@@ -65,7 +68,10 @@ class LiveBotService {
   }
 
   /// Ativa/desativa um anúncio (dono/moderador).
-  Future<void> setAnnouncementEnabled(String announcementId, bool enabled) async {
+  Future<void> setAnnouncementEnabled(
+    String announcementId,
+    bool enabled,
+  ) async {
     await _rpc('live_bot_set_announcement_enabled', {
       'p_announcement_id': announcementId,
       'p_enabled': enabled,
@@ -103,8 +109,7 @@ class LiveBotService {
   // -------------------------------------------------------------------------
 
   /// Canal de broadcast para o bot ler/selecionar comentários em tempo real.
-  RealtimeChannel channel(String liveId) =>
-      _db.channel('live-bot-$liveId');
+  RealtimeChannel channel(String liveId) => _db.channel('live-bot-$liveId');
 
   void disposeChannel(RealtimeChannel channel) {
     _db.removeChannel(channel);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/post_models.dart';
 import '../../models/user_profile.dart';
 import '../../services/content_service.dart';
@@ -21,7 +22,12 @@ import 'profile_lists_screen.dart';
 /// conteúdo real. Os itens administrativos (Carteira, Loja, Conquistas…) não
 /// foram apagados — foram movidos para as Configurações.
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  /// Ação "Criar vídeo" quando o usuário não tem vídeos publicados. Quando
+  /// nula, o estado vazio não mostra o botão. Convenção: abrir o fluxo de
+  /// upload já existente (`UploadScreen`), injetado pela raiz do app.
+  final Future<void> Function()? onCreateVideo;
+
+  const ProfileScreen({super.key, this.onCreateVideo});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -61,8 +67,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final profile = await ProfileService.instance.fetchMyProfile();
       final user = SupabaseService.instance.currentUser;
       final posts = user != null
-          ? await ContentService.instance
-              .fetchFeed(userId: user.id, limit: 9)
+          ? await ContentService.instance.fetchFeed(userId: user.id, limit: 9)
           : const <FeedPost>[];
       if (!mounted) return;
       setState(() {
@@ -85,9 +90,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final p = _p;
     if (p == null) return;
     final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => EditProfileScreen(profile: p),
-      ),
+      MaterialPageRoute(builder: (_) => EditProfileScreen(profile: p)),
     );
     if (changed == true) _load();
   }
@@ -95,26 +98,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _openFollowers() async {
     final uid = ProfileService.instance.myId;
     if (uid == null) return;
-    await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ProfileListsScreen(userId: uid, following: false)));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileListsScreen(userId: uid, following: false),
+      ),
+    );
   }
 
   Future<void> _openFollowing() async {
     final uid = ProfileService.instance.myId;
     if (uid == null) return;
-    await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ProfileListsScreen(userId: uid, following: true)));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileListsScreen(userId: uid, following: true),
+      ),
+    );
   }
 
   Future<void> _share() async {
     final p = _p;
     if (p == null) return;
+    final l10n = AppLocalizations.of(context)!;
     final handle = p.handle.replaceAll('@', '').trim();
     try {
       await Share.share(
         p.handle.isEmpty
-            ? 'Confira meu perfil no KLAY K.'
-            : 'Confira meu perfil no KLAY K: https://klayk.app/u/$handle',
+            ? l10n.profileShareMsg
+            : l10n.profileShareMsgLink('https://klayk.app/u/$handle'),
       );
     } catch (_) {}
   }
@@ -154,17 +164,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final p = _p;
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Perfil',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.profileTab,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
             onPressed: _openSettings,
             icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Configurações',
+            tooltip: l10n.settingsTitle,
           ),
           const SizedBox(width: 4),
         ],
@@ -172,68 +185,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
       body: _loading
           ? const KlaykListSkeleton(rows: 6, withAvatar: true)
           : p == null
-              ? KlaykErrorState(
-                  message: 'Não foi possível carregar seu perfil.',
-                  onRetry: _load,
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: kProfileAccent,
-                  backgroundColor: const Color(0xFF1B1A26),
-                  child: ListView(
-                    padding: const EdgeInsets.all(14),
-                    children: [
-                      ProfileHeader(
-                        profile: p,
-                        showBanner: false,
-                        actions: [
-                          ProfileActionButton(
-                            isSelf: true,
-                            isFollowing: false,
-                            onPressed: _openEdit,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _share,
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.white,
-                                side: const BorderSide(
-                                    color: Color(0xFF3A3550)),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              icon: const Icon(Icons.share_outlined,
-                                  size: 17),
-                              label: const Text('Compartilhar'),
+          ? KlaykErrorState(message: l10n.profileLoadFail, onRetry: _load)
+          : RefreshIndicator(
+              onRefresh: _load,
+              color: kProfileAccent,
+              backgroundColor: const Color(0xFF1B1A26),
+              child: ListView(
+                padding: const EdgeInsets.all(14),
+                children: [
+                  ProfileHeader(
+                    profile: p,
+                    showBanner: false,
+                    actions: [
+                      ProfileActionButton(
+                        isSelf: true,
+                        isFollowing: false,
+                        onPressed: _openEdit,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _share,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Color(0xFF2A2540)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                        ],
+                          icon: const Icon(Icons.share_outlined, size: 17),
+                          label: Text(l10n.share),
+                        ),
                       ),
-                      const SizedBox(height: 6),
-                      ProfileStats(
-                        profile: p,
-                        onFollowersTap: _openFollowers,
-                        onFollowingTap: _openFollowing,
-                      ),
-                      KlaykProfileTabs(
-                        selected: _tab,
-                        onChanged: _changeTab,
-                      ),
-                      const SizedBox(height: 8),
-                      _buildTabContent(),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  ProfileStats(
+                    profile: p,
+                    onFollowersTap: _openFollowers,
+                    onFollowingTap: _openFollowing,
+                  ),
+                  KlaykProfileTabs(selected: _tab, onChanged: _changeTab),
+                  const SizedBox(height: 8),
+                  _buildTabContent(),
+                ],
+              ),
+            ),
     );
   }
 
   Widget _buildTabContent() {
+    final l10n = AppLocalizations.of(context)!;
     if (_tab == 0) {
-      return KlaykProfileVideoGrid(videos: _videos);
+      return KlaykProfileVideoGrid(
+        videos: _videos,
+        onDeleted: _load,
+        onEmpty: widget.onCreateVideo == null ? null : _createFromEmpty,
+      );
     }
     final posts = _tab == 1 ? _liked : _saved;
     if (_tabLoading && posts.isEmpty) {
@@ -249,13 +258,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ? Icons.favorite_border_rounded
             : Icons.bookmark_border_rounded,
         title: isLiked
-            ? 'Você ainda não curtiu vídeos'
-            : 'Você ainda não salvou vídeos',
+            ? l10n.profileLikedEmptyTitle
+            : l10n.profileSavedEmptyTitle,
         message: isLiked
-            ? 'Os vídeos que você curtir no feed aparecem aqui.'
-            : 'Os vídeos que você salvar no feed aparecem aqui.',
+            ? l10n.profileLikedEmptyMsg
+            : l10n.profileSavedEmptyMsg,
       );
     }
     return KlaykProfileVideoGrid(videos: posts);
+  }
+
+  /// Abre o fluxo de criação de vídeo injetado pela raiz do app e recarrega a
+  /// aba Vídeos quando o usuário voltar.
+  Future<void> _createFromEmpty() async {
+    final create = widget.onCreateVideo;
+    if (create == null) return;
+    await create();
+    _load();
   }
 }

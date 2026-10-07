@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../design/klayk_design.dart';
+import '../l10n/app_localizations.dart';
 import '../models/ad_models.dart';
 import '../services/ads_service.dart';
 import '../widgets/ad_widgets.dart';
@@ -71,7 +72,11 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
     }
   }
 
-  Future<void> _action(String fn, String creativeId, {String reason = ''}) async {
+  Future<void> _action(
+    String fn,
+    String creativeId, {
+    String reason = '',
+  }) async {
     switch (fn) {
       case 'approve':
         await AdsService.instance.adminApprove(creativeId, reason: reason);
@@ -89,11 +94,19 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final content = _loading
         ? const KlaykListSkeleton(rows: 6, withAvatar: false)
         : _tab.index == 0
-            ? _adsTab()
-            : _reportsTab();
+        ? _adsTab(l10n)
+        : _reportsTab(l10n);
+    final tabs = [
+      Tab(icon: const Icon(Icons.campaign_rounded), text: l10n.advertisements),
+      Tab(
+        icon: const Icon(Icons.report_gmailerrorred_outlined),
+        text: l10n.adsTabReports,
+      ),
+    ];
     if (!widget.showAppBar) {
       return Column(
         children: [
@@ -104,12 +117,7 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
               indicatorColor: _kAccent,
               labelColor: Colors.white,
               unselectedLabelColor: Colors.white54,
-              tabs: const [
-                Tab(icon: Icon(Icons.campaign_rounded), text: 'Anúncios'),
-                Tab(
-                    icon: Icon(Icons.report_gmailerrorred_outlined),
-                    text: 'Denúncias'),
-              ],
+              tabs: tabs,
             ),
           ),
           Expanded(child: content),
@@ -120,23 +128,23 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Publicidade', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.adsAdminTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         bottom: TabBar(
           controller: _tab,
           indicatorColor: _kAccent,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
-          tabs: const [
-            Tab(icon: Icon(Icons.campaign_rounded), text: 'Anúncios'),
-            Tab(icon: Icon(Icons.report_gmailerrorred_outlined), text: 'Denúncias'),
-          ],
+          tabs: tabs,
         ),
       ),
       body: content,
     );
   }
 
-  Widget _adsTab() {
+  Widget _adsTab(AppLocalizations l10n) {
     return Column(
       children: [
         Padding(
@@ -150,7 +158,7 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
               itemBuilder: (_, i) {
                 final s = _kStatusFilters[i];
                 return KlayKChip(
-                  label: s.isEmpty ? 'Todos' : s.replaceAll('_', ' '),
+                  label: s.isEmpty ? l10n.all : s.replaceAll('_', ' '),
                   selected: _filterStatus == s,
                   onTap: () => setState(() => _filterStatus = s),
                 );
@@ -160,28 +168,28 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
         ),
         Expanded(
           child: _rows.isEmpty
-              ? const KlaykEmptyState(
+              ? KlaykEmptyState(
                   icon: Icons.campaign_outlined,
-                  title: 'Nenhum anúncio para moderação',
-                  message: 'Quando um anunciante enviar anúncios, eles aparecerão aqui.',
+                  title: l10n.adsNoAdsToModerate,
+                  message: l10n.adsNoAdsToModerateBody,
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
                   itemCount: _rows.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 12),
-                  itemBuilder: (_, i) => _adminRow(_rows[i]),
+                  itemBuilder: (_, i) => _adminRow(l10n, _rows[i]),
                 ),
         ),
       ],
     );
   }
 
-  Widget _reportsTab() {
+  Widget _reportsTab(AppLocalizations l10n) {
     if (_reports.isEmpty) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.report_gmailerrorred_outlined,
-        title: 'Nenhuma denúncia',
-        message: 'Denúncias de usuários sobre anúncios aparecerão aqui.',
+        title: l10n.adsNoReports,
+        message: l10n.adsNoReportsBody,
       );
     }
     return ListView.separated(
@@ -218,7 +226,7 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
             ],
             const SizedBox(height: 4),
             Text(
-              'Reportado por @${_reports[i].reporterUsername}',
+              l10n.adsReportedBy(_reports[i].reporterUsername),
               style: const TextStyle(color: Colors.white38, fontSize: 11),
             ),
           ],
@@ -227,7 +235,7 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
     );
   }
 
-  Widget _adminRow(AdminAdRow row) {
+  Widget _adminRow(AppLocalizations l10n, AdminAdRow row) {
     return KlayKCard(
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -252,7 +260,10 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
                     Text(
                       '${row.businessName} · ${row.campaignName}',
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -263,15 +274,15 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
           const SizedBox(height: 10),
           Row(
             children: [
-              _pill('${row.impressions}', 'Views'),
+              _pill('${row.impressions}', l10n.adsMetricViews),
               const SizedBox(width: 8),
-              _pill('${row.clicks}', 'Clicks'),
+              _pill('${row.clicks}', l10n.adsMetricClicks),
             ],
           ),
           if (row.rejectionReason.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              'Motivo: ${row.rejectionReason}',
+              l10n.adsReasonLabel(row.rejectionReason),
               style: const TextStyle(color: Colors.redAccent, fontSize: 12),
             ),
           ],
@@ -279,24 +290,40 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
           Wrap(
             spacing: 8,
             children: [
-              _actionBtn('Prévia', Icons.visibility_outlined, () {
-                _showPreview(row);
+              _actionBtn(l10n.adsActionPreview, Icons.visibility_outlined, () {
+                _showPreview(l10n, row);
               }),
               if (row.creativeStatus != AdStatus.approved)
-                _actionBtn('Aprovar', Icons.check_circle, () async {
-                  await _showReason('Aprovar', (r) => _action('approve', row.creativeId, reason: r));
+                _actionBtn(l10n.approveAction, Icons.check_circle, () async {
+                  await _showReason(
+                    l10n,
+                    l10n.approveAction,
+                    (r) => _action('approve', row.creativeId, reason: r),
+                  );
                 }),
               if (row.creativeStatus != AdStatus.blocked)
-                _actionBtn('Bloquear', Icons.block, () async {
-                  await _showReason('Bloquear', (r) => _action('block', row.creativeId, reason: r));
+                _actionBtn(l10n.block, Icons.block, () async {
+                  await _showReason(
+                    l10n,
+                    l10n.block,
+                    (r) => _action('block', row.creativeId, reason: r),
+                  );
                 }),
               if (row.creativeStatus != AdStatus.rejected)
-                _actionBtn('Rejeitar', Icons.highlight_off, () async {
-                  await _showReason('Rejeitar', (r) => _action('reject', row.creativeId, reason: r));
+                _actionBtn(l10n.rejectAction, Icons.highlight_off, () async {
+                  await _showReason(
+                    l10n,
+                    l10n.rejectAction,
+                    (r) => _action('reject', row.creativeId, reason: r),
+                  );
                 }),
               if (row.creativeStatus != AdStatus.paused)
-                _actionBtn('Pausar', Icons.pause_circle, () async {
-                  await _showReason('Pausar', (r) => _action('pause', row.creativeId, reason: r));
+                _actionBtn(l10n.pauseTooltip, Icons.pause_circle, () async {
+                  await _showReason(
+                    l10n,
+                    l10n.pauseTooltip,
+                    (r) => _action('pause', row.creativeId, reason: r),
+                  );
                 }),
             ],
           ),
@@ -335,7 +362,7 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
   /// Prévia visual do anúncio para moderação. Quando ainda não aprovado,
   /// exibe com o chip "PRÉ-VISUALIZAÇÃO" (nunca parece publicidade pública);
   /// quando aprovado, mostra a aparência real do anúncio publicado (§55/§56).
-  void _showPreview(AdminAdRow row) {
+  void _showPreview(AppLocalizations l10n, AdminAdRow row) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF12101A),
@@ -366,8 +393,8 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
                   Expanded(
                     child: Text(
                       row.creativeStatus == AdStatus.approved
-                          ? 'Aparência ao publicar'
-                          : 'Pré-visualização do anúncio',
+                          ? l10n.adsPreviewPublished
+                          : l10n.adsPreviewPending,
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
@@ -402,7 +429,11 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
     );
   }
 
-  Future<void> _showReason(String title, Future<void> Function(String reason) onOk) async {
+  Future<void> _showReason(
+    AppLocalizations l10n,
+    String title,
+    Future<void> Function(String reason) onOk,
+  ) async {
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -410,26 +441,34 @@ class _AdsAdminScreenState extends State<AdsAdminScreen>
         backgroundColor: const Color(0xFF17141F),
         title: Text(
           title,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           maxLines: 3,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'Motivo (obligatório)…',
-            hintStyle: TextStyle(color: Colors.white38),
+          decoration: InputDecoration(
+            hintText: l10n.adsReasonHint,
+            hintStyle: const TextStyle(color: Colors.white38),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8B5CF6),
+            ),
             child: Text(title),
           ),
         ],

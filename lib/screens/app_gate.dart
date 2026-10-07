@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/experience_settings.dart';
+import '../services/push_service.dart';
 import '../services/supabase_service.dart';
 import 'auth_screen.dart';
 import 'splash_screen.dart';
@@ -79,6 +80,8 @@ class _AppGateState extends State<AppGate> {
     if (authed) {
       // Carrega preferências de experiência (animações, auto-play etc.) cedo.
       await ExperienceSettings.instance.load();
+      // Registra o token de push (FCM) deste dispositivo para a sessão real.
+      await PushService.instance.register();
     }
     _maybeReady();
     _scheduleSkipIfFast();
@@ -98,13 +101,15 @@ class _AppGateState extends State<AppGate> {
     if (user == null) return;
     kAppIdentity.displayName =
         user.userMetadata?['full_name'] as String? ?? kAppIdentity.displayName;
-    kAppIdentity.username = '@${user.userMetadata?['username'] ?? kAppIdentity.username.replaceFirst('@', '')}';
+    kAppIdentity.username =
+        '@${user.userMetadata?['username'] ?? kAppIdentity.username.replaceFirst('@', '')}';
   }
 
   void _onAuthState(AuthState state) {
     if (!mounted) return;
     if (state.event == AuthChangeEvent.signedIn ||
-        state.event == AuthChangeEvent.initialSession && state.session != null) {
+        state.event == AuthChangeEvent.initialSession &&
+            state.session != null) {
       _syncIdentity(SupabaseService.instance.currentUser);
       setState(() {
         _authed = true;
@@ -112,7 +117,10 @@ class _AppGateState extends State<AppGate> {
         _sessionKnown = true;
       });
       ExperienceSettings.instance.load();
+      PushService.instance.register();
     } else if (state.event == AuthChangeEvent.signedOut) {
+      // Desassocia tokens de push deste usuário (RPC security definer).
+      PushService.instance.logout();
       setState(() {
         _authed = false;
         _demoMode = false;

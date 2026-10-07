@@ -42,6 +42,10 @@ Deno.serve(async (req) => {
   const gameName = sanitizeText(body.game_name, 60);
   const coverUrl = sanitizeText(body.cover_url, 500);
   const ageRestricted = body.age_restricted === true;
+  const rtmpEnabled = body.rtmp_enabled === true;
+  const rtmpUrl = rtmpEnabled ? sanitizeText(body.rtmp_url, 500) : null;
+  const streamKey = rtmpEnabled && rtmpUrl ? sanitizeText(body.stream_key, 100) : null;
+  const liveType = sanitizeText(body.live_type, 50) || 'camera';
 
   const roomName = `live-${crypto.randomUUID()}`;
 
@@ -66,6 +70,10 @@ Deno.serve(async (req) => {
       game_name: gameName || null,
       cover_url: coverUrl || null,
       age_restricted: ageRestricted,
+      rtmp_enabled: rtmpEnabled,
+      rtmp_url: rtmpUrl,
+      stream_key: streamKey,
+      live_type: liveType,
     })
     .select("id")
     .single();
@@ -108,5 +116,5 @@ Deno.serve(async (req) => {
     console.error("create-live event insert error:", eventError.message);
   }
 
-  return json({ live_id: data.id, room_name: roomName });
+  return json({ live_id: data.id, room_name: roomName, rtmp_enabled: rtmpEnabled, live_type: liveType });
 });

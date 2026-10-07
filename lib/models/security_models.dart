@@ -30,13 +30,13 @@ class AccountSession {
   });
 
   factory AccountSession.fromJson(Map<String, dynamic> j) => AccountSession(
-        id: _str(j['id']),
-        userAgent: _str(j['user_agent']),
-        ip: _str(j['ip']),
-        aal: _str(j['aal'], 'aal1'),
-        createdAt: _dt(j['created_at']),
-        refreshedAt: _dt(j['refreshed_at']),
-      );
+    id: _str(j['id']),
+    userAgent: _str(j['user_agent']),
+    ip: _str(j['ip']),
+    aal: _str(j['aal'], 'aal1'),
+    createdAt: _dt(j['created_at']),
+    refreshedAt: _dt(j['refreshed_at']),
+  );
 
   /// "Chrome em Android" simplificado: primeiro segmento + "em " + dispositivo.
   String get deviceLabel {
@@ -99,11 +99,11 @@ class SafetyProfile {
   });
 
   factory SafetyProfile.fromJson(Map<String, dynamic> j) => SafetyProfile(
-        birthDate: _dt(j['birth_date']),
-        age: (j['age'] as num?)?.toInt(),
-        youthMode: j['youth_mode'] == true,
-        adultContentOk: j['adult_content_ok'] == true,
-      );
+    birthDate: _dt(j['birth_date']),
+    age: (j['age'] as num?)?.toInt(),
+    youthMode: j['youth_mode'] == true,
+    adultContentOk: j['adult_content_ok'] == true,
+  );
 
   bool get hasProvenAge => age != null;
   bool get isProvenMinor => hasProvenAge && (age ?? 99) < 18;
@@ -134,16 +134,16 @@ class ReportEntry {
   });
 
   factory ReportEntry.fromJson(Map<String, dynamic> j) => ReportEntry(
-        id: _str(j['id']),
-        targetType: _str(j['target_type']),
-        targetId: _str(j['target_id']),
-        reason: _str(j['reason']),
-        details: _str(j['details']),
-        status: _str(j['status'], 'pending'),
-        resolution: _str(j['resolution']),
-        createdAt: _dt(j['created_at']),
-        reviewedAt: _dt(j['reviewed_at']),
-      );
+    id: _str(j['id']),
+    targetType: _str(j['target_type']),
+    targetId: _str(j['target_id']),
+    reason: _str(j['reason']),
+    details: _str(j['details']),
+    status: _str(j['status'], 'pending'),
+    resolution: _str(j['resolution']),
+    createdAt: _dt(j['created_at']),
+    reviewedAt: _dt(j['reviewed_at']),
+  );
 
   String get targetLabel {
     switch (targetType) {
@@ -188,16 +188,16 @@ class ProfileFlagEntry {
   });
 
   factory ProfileFlagEntry.fromJson(Map<String, dynamic> j) => ProfileFlagEntry(
-        id: _str(j['id']),
-        flaggedUserId: _str(j['flagged_user_id']),
-        flaggerId: _str(j['flagger_id']),
-        source: _str(j['source']),
-        reason: _str(j['reason']),
-        decision: _str(j['decision']),
-        note: _str(j['note']),
-        createdAt: _dt(j['created_at']),
-        resolvedAt: _dt(j['resolved_at']),
-      );
+    id: _str(j['id']),
+    flaggedUserId: _str(j['flagged_user_id']),
+    flaggerId: _str(j['flagger_id']),
+    source: _str(j['source']),
+    reason: _str(j['reason']),
+    decision: _str(j['decision']),
+    note: _str(j['note']),
+    createdAt: _dt(j['created_at']),
+    resolvedAt: _dt(j['resolved_at']),
+  );
 
   bool get isOpen => decision == '';
 }
@@ -225,15 +225,15 @@ class SuspectProfile {
   });
 
   factory SuspectProfile.fromJson(Map<String, dynamic> j) => SuspectProfile(
-        id: _str(j['id']),
-        username: _str(j['username']),
-        displayName: _str(j['display_name']),
-        accountAgeDays: (j['account_age_days'] as num?)?.toInt() ?? 0,
-        hasAvatar: j['has_avatar'] == true,
-        hasBio: j['has_bio'] == true,
-        isDefaultUsername: j['is_default_username'] == true,
-        openFlags: (j['open_flags'] as num?)?.toInt() ?? 0,
-      );
+    id: _str(j['id']),
+    username: _str(j['username']),
+    displayName: _str(j['display_name']),
+    accountAgeDays: (j['account_age_days'] as num?)?.toInt() ?? 0,
+    hasAvatar: j['has_avatar'] == true,
+    hasBio: j['has_bio'] == true,
+    isDefaultUsername: j['is_default_username'] == true,
+    openFlags: (j['open_flags'] as num?)?.toInt() ?? 0,
+  );
 
   bool get suspicious =>
       !hasAvatar || !hasBio || isDefaultUsername || openFlags > 0;

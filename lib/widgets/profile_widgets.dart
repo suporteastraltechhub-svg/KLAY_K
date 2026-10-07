@@ -1,27 +1,31 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/user_profile.dart';
+import '../services/link_guard_service.dart';
 import 'verified_badge.dart';
 
 const Color kProfileAccent = Color(0xFF8B5CF6);
 
-/// Formata um número de forma compacta (estilo redes sociais).
-String formatCount(int n) {
-  if (n >= 1000000000) return '${(n / 1000000000).toStringAsFixed(1).replaceAll('.0', '')} bi';
-  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1).replaceAll('.0', '')} mi';
-  if (n >= 1000) return '${(n / 1000).toStringAsFixed(1).replaceAll('.0', '')} mil';
-  return '$n';
+/// Formata um número de forma compacta (estilo redes sociais), respeitando
+/// o idioma ativo (ex.: 1,2 mi em pt · 1.2K em en).
+String formatCount(BuildContext context, int n) {
+  final l10n = AppLocalizations.of(context)!;
+  return NumberFormat.compact(locale: l10n.localeName).format(n);
 }
 
-/// Cabeçalho de perfil reutilizável (cap, avatar, nome, bio e metadados).
+/// Cabeçalho de perfil reutilizável — layout moderno centralizado:
+/// avatar circular com borda roxa, @username, nome de exibição, badges,
+/// bio, metadados e ações. Segue a ordem: avatar → @username → nome →
+/// bio → ação principal → stats.
 class ProfileHeader extends StatelessWidget {
   final UserProfile profile;
   final List<Widget> actions;
   final VoidCallback? onNameTap;
 
-  /// Quando `false`, remove a imagem/capa de fundo e sobe o conteúdo do
-  /// perfil (perfil compacto). Padrão `true` preserva as outras telas.
+  /// Quando `true`, exibe a capa (banner) acima do avatar. O perfil moderno
+  /// por padrão é limpo (sem capa) — quem quiser a capa ativa explicitamente.
   final bool showBanner;
 
   const ProfileHeader({
@@ -29,218 +33,185 @@ class ProfileHeader extends StatelessWidget {
     required this.profile,
     this.actions = const [],
     this.onNameTap,
-    this.showBanner = true,
+    this.showBanner = false,
   });
 
   Future<void> _openWebsite(BuildContext context) async {
     final url = profile.website;
     if (url == null || url.isEmpty) return;
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível abrir o link.')),
-        );
-      }
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível abrir o link.')),
-        );
-      }
+    final l10n = AppLocalizations.of(context)!;
+    final opened = await LinkGuard.instance.openExternal(context, url);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.linkOpenFail)));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasBanner = profile.bannerUrl != null && profile.bannerUrl!.isNotEmpty;
+    final l10n = AppLocalizations.of(context)!;
+    final hasBanner =
+        showBanner &&
+        profile.bannerUrl != null &&
+        profile.bannerUrl!.isNotEmpty;
+
+    // Mostra o nome de exibição apenas quando ele difere do @username.
+    final showDisplayName =
+        profile.displayName != null &&
+        profile.displayName!.trim().isNotEmpty &&
+        profile.displayName!.trim() != (profile.username ?? '');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ---------- Capa (opcional) ----------
-        if (showBanner)
+        if (hasBanner)
           ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Stack(
-              children: [
-                SizedBox(
-                  height: 170,
-                  child: hasBanner
-                      ? Image.network(
-                          profile.bannerUrl!,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder: (_, __, ___) => _bannerFallback(context),
-                        )
-                      : _bannerFallback(context),
-                ),
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    height: 60,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.55),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+            borderRadius: BorderRadius.circular(0),
+            child: SizedBox(
+              height: 140,
+              child: Image.network(
+                profile.bannerUrl!,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => _bannerFallback(context),
+              ),
             ),
           ),
 
-        // ---------- Avatar / identidade ----------
-        Transform.translate(
-          offset: showBanner ? const Offset(0, -34) : Offset.zero,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, showBanner ? 0 : 14, 16, 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  width: 76,
-                  height: 76,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFFA78BFA), Color(0xFF7C3AED)],
-                    ),
-                    border: Border.all(color: Colors.black, width: 3),
-                  ),
-                  padding: const EdgeInsets.all(2),
-                  child: ClipOval(
-                    child: profile.avatarUrl != null &&
-                            profile.avatarUrl!.isNotEmpty
-                        ? Image.network(
-                            profile.avatarUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => _avatarFallback(),
-                          )
-                        : _avatarFallback(),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                profile.name,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            if (profile.isFounder) ...[
-                              const SizedBox(width: 5),
-                              const FounderBadge(compact: true),
-                            ] else if (profile.isVerified) ...[
-                              const SizedBox(width: 5),
-                              const VerifiedBadge(size: 19, color: kProfileAccent),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          profile.handle,
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 13,
-                          ),
-                        ),
-                        if (profile.isFounderOrAdmin) ...[
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: [
-                              if (profile.isFounder) const FounderBadge(),
-                              if (profile.isAdmin || profile.isFounder)
-                                const AdminBadge(),
-                              if (profile.isFounder || profile.isVerified)
-                                const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    VerifiedBadge(size: 16),
-                                    SizedBox(width: 4),
-                                    Text('Conta verificada oficialmente',
-                                        style: TextStyle(
-                                            color: Colors.white54,
-                                            fontSize: 11)),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        ],
-                        if ((profile.profession ?? '').isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.work_outline,
-                                  color: Colors.white38, size: 14),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  profile.profession!,
-                                  style: const TextStyle(
-                                      color: Colors.white70, fontSize: 12),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        // ---------- Ações ----------
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: EdgeInsets.fromLTRB(20, hasBanner ? 18 : 26, 20, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (actions.isNotEmpty) ...[
-                Row(children: actions),
-                const SizedBox(height: 12),
-              ],
-              if (profile.bio != null && profile.bio!.trim().isNotEmpty) ...[
-                Text(
-                  profile.bio!.trim(),
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    height: 1.4,
+              // ---------- Avatar (centralizado, borda roxa + glow) ----------
+              Center(child: _avatar(context)),
+              const SizedBox(height: 14),
+
+              // ---------- @username ----------
+              Semantics(
+                header: true,
+                child: GestureDetector(
+                  onTap: onNameTap,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          profile.handle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      if (!profile.isFounderOrAdmin &&
+                          profile.hasVerifiedBadge) ...[
+                        const SizedBox(width: 6),
+                        const VerifiedBadge(size: 18, color: kProfileAccent),
+                      ],
+                    ],
                   ),
                 ),
-                const SizedBox(height: 10),
+              ),
+
+              // ---------- Nome de exibição ----------
+              if (showDisplayName) ...[
+                const SizedBox(height: 4),
+                Text(
+                  profile.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 13.5),
+                ),
               ],
-              _metaRow(context),
+
+              // ---------- Badges (fundador / admin / verificado) ----------
+              if (profile.isFounderOrAdmin) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (profile.isFounder) const FounderBadge(),
+                    if (profile.isAdmin || profile.isFounder)
+                      const AdminBadge(),
+                    if (profile.isFounder || profile.isVerified)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const VerifiedBadge(size: 15),
+                          const SizedBox(width: 4),
+                          Text(
+                            l10n.verifiedAccountNote,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ],
+
+              // ---------- Profissão ----------
+              if ((profile.profession ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.work_outline,
+                      color: Colors.white38,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        profile.profession!.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+
+              // ---------- Bio ----------
+              if (profile.bio != null && profile.bio!.trim().isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  profile.bio!.trim(),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13.5,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+
+              // ---------- Metadados (local / pronomes / link) ----------
+              ..._metaRow(context),
+
+              // ---------- Ações principais ----------
+              if (actions.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                Row(children: actions),
+              ],
             ],
           ),
         ),
@@ -248,8 +219,49 @@ class ProfileHeader extends StatelessWidget {
     );
   }
 
-  Widget _metaRow(BuildContext context) {
-    final parts = <InlineSpan>[];
+  Widget _avatar(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final hasAvatar =
+        profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty;
+    return Semantics(
+      label: l10n.profilePhoto,
+      image: true,
+      child: Container(
+        width: 96,
+        height: 96,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFB794FF), Color(0xFF6D28D9)],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: kProfileAccent.withValues(alpha: 0.32),
+              blurRadius: 20,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: ClipOval(
+          child: hasAvatar
+              ? Image.network(
+                  profile.avatarUrl!,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) => _avatarFallback(),
+                )
+              : _avatarFallback(),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _metaRow(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final parts = <Widget>[];
 
     if (profile.location != null && profile.location!.trim().isNotEmpty) {
       parts.add(_metaItem(Icons.place_outlined, profile.location!.trim()));
@@ -258,53 +270,58 @@ class ProfileHeader extends StatelessWidget {
       parts.add(_metaItem(Icons.tag, profile.pronouns!.trim()));
     }
     if (profile.website != null && profile.website!.trim().isNotEmpty) {
-      parts.add(_metaItem(
-        Icons.link,
-        'Link direto',
-        onTap: () => _openWebsite(context),
-        accent: true,
-      ));
+      parts.add(
+        _metaItem(
+          Icons.link,
+          l10n.directLink,
+          onTap: () => _openWebsite(context),
+          accent: true,
+        ),
+      );
     }
 
-    if (parts.isEmpty) return const SizedBox.shrink();
-    return Text.rich(
-      TextSpan(children: parts),
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-      textAlign: TextAlign.left,
-    );
+    if (parts.isEmpty) return const [];
+    return <Widget>[
+      const SizedBox(height: 12),
+      Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 14,
+        runSpacing: 6,
+        children: parts,
+      ),
+    ];
   }
 
-  WidgetSpan _metaItem(
+  Widget _metaItem(
     IconData icon,
     String text, {
     VoidCallback? onTap,
     bool accent = false,
   }) {
-    return WidgetSpan(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                color: accent ? kProfileAccent : Colors.white38, size: 15),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                text,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: accent ? kProfileAccent : Colors.white70,
-                  fontSize: 13,
-                  fontWeight: accent ? FontWeight.w600 : FontWeight.w400,
-                  decoration: accent ? TextDecoration.underline : null,
-                  decorationColor: accent ? kProfileAccent : null,
-                ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: accent ? kProfileAccent : Colors.white38, size: 15),
+          const SizedBox(width: 4),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 220),
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: accent ? kProfileAccent : Colors.white70,
+                fontSize: 13,
+                fontWeight: accent ? FontWeight.w600 : FontWeight.w400,
+                decoration: accent ? TextDecoration.underline : null,
+                decorationColor: accent ? kProfileAccent : null,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -315,15 +332,11 @@ class ProfileHeader extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF3B2A63),
-            Color(0xFF1E1B2E),
-          ],
+          colors: [Color(0xFF3B2A63), Color(0xFF1E1B2E)],
         ),
       ),
       child: const Center(
-        child: Icon(Icons.palette_outlined,
-            color: Colors.white12, size: 46),
+        child: Icon(Icons.palette_outlined, color: Colors.white12, size: 46),
       ),
     );
   }
@@ -331,13 +344,13 @@ class ProfileHeader extends StatelessWidget {
   Widget _avatarFallback() {
     return Container(
       color: const Color(0xFF2A2740),
-      child: const Icon(Icons.person, color: Colors.white54, size: 34),
+      child: const Icon(Icons.person, color: Colors.white54, size: 40),
     );
   }
 }
 
-/// Linha de métricas do perfil (Seguidores / Seguindo / Vídeos / Curtidas).
-/// Seguidores e Seguindo são clicáveis.
+/// Linha de métricas compacta do perfil: Seguidores / Seguindo / Curtidas.
+/// Seguidores e Seguindo ficam clicáveis (listas reais) com destaque em roxo.
 class ProfileStats extends StatelessWidget {
   final UserProfile profile;
   final VoidCallback? onFollowersTap;
@@ -352,70 +365,40 @@ class ProfileStats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(14),
-      ),
+    final l10n = AppLocalizations.of(context)!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          Expanded(
-            child: _stat(
-              context,
-              formatCount(profile.followersCount),
-              'Seguidores',
-              onTap: onFollowersTap,
-              highlighted: onFollowersTap != null,
-            ),
+          _stat(
+            context,
+            formatCount(context, profile.followersCount),
+            l10n.followers,
+            onTap: onFollowersTap,
           ),
-          _verticalDivider(),
-          Expanded(
-            child: _stat(
-              context,
-              formatCount(profile.followingCount),
-              'Seguindo',
-              onTap: onFollowingTap,
-              highlighted: onFollowingTap != null,
-            ),
+          _stat(
+            context,
+            formatCount(context, profile.followingCount),
+            l10n.following,
+            onTap: onFollowingTap,
           ),
-          _verticalDivider(),
-          Expanded(
-            child: _stat(
-              context,
-              formatCount(profile.postsCount),
-              'Vídeos',
-              onTap: null,
-              highlighted: false,
-            ),
-          ),
-          _verticalDivider(),
-          Expanded(
-            child: _stat(
-              context,
-              formatCount(profile.totalLikes),
-              'Curtidas',
-              onTap: null,
-              highlighted: false,
-            ),
+          _stat(
+            context,
+            formatCount(context, profile.totalLikes),
+            l10n.likesLabel,
+            onTap: null,
           ),
         ],
       ),
     );
   }
 
-  Widget _verticalDivider() => Container(
-        width: 1,
-        height: 30,
-        color: Colors.white10,
-      );
-
   Widget _stat(
     BuildContext context,
     String value,
     String label, {
     required VoidCallback? onTap,
-    required bool highlighted,
   }) {
     final child = Column(
       mainAxisSize: MainAxisSize.min,
@@ -423,17 +406,17 @@ class ProfileStats extends StatelessWidget {
         Text(
           value,
           style: TextStyle(
-            color: highlighted ? Colors.white : Colors.white70,
-            fontSize: 15,
+            color: onTap != null ? kProfileAccent : Colors.white,
+            fontSize: 17,
             fontWeight: FontWeight.w800,
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 3),
         Text(
           label,
           style: TextStyle(
-            color: highlighted ? Colors.white60 : Colors.white38,
-            fontSize: 11,
+            color: onTap != null ? Colors.white60 : Colors.white54,
+            fontSize: 11.5,
           ),
         ),
       ],
@@ -443,7 +426,7 @@ class ProfileStats extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
         child: child,
       ),
     );
@@ -451,6 +434,7 @@ class ProfileStats extends StatelessWidget {
 }
 
 /// Botão de ação principal do perfil (Seguir / Seguindo / Editar perfil).
+/// Preserva a mesma API — apenas a aparência foi reformulada.
 class ProfileActionButton extends StatelessWidget {
   final bool isSelf;
   final bool isFollowing;
@@ -467,52 +451,59 @@ class ProfileActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     if (isSelf) {
       return Expanded(
         child: OutlinedButton.icon(
           onPressed: busy ? null : onPressed,
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.white,
-            side: const BorderSide(color: Color(0xFF3A3550)),
+            side: const BorderSide(color: Color(0xFF2A2540)),
             padding: const EdgeInsets.symmetric(vertical: 12),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
           ),
           icon: const Icon(Icons.badge_outlined, size: 18),
-          label: const Text('Editar perfil'),
+          label: Text(l10n.editProfile),
         ),
       );
     }
     return Expanded(
-      child: FilledButton(
+      child: FilledButton.icon(
         onPressed: busy ? null : onPressed,
         style: FilledButton.styleFrom(
           backgroundColor: isFollowing
-              ? const Color(0xFF242233)
+              ? const Color(0xFF241F33)
               : kProfileAccent,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 13),
+          side: isFollowing ? const BorderSide(color: Color(0xFF4C3F7A)) : null,
+          elevation: isFollowing ? 0 : 4,
+          shadowColor: kProfileAccent.withValues(alpha: 0.6),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
         ),
-        child: busy
+        icon: busy
             ? const SizedBox(
-                width: 18,
-                height: 18,
+                width: 17,
+                height: 17,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   color: Colors.white,
                 ),
               )
-            : Text(
-                isFollowing ? 'Seguindo' : 'Seguir',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
+            : Icon(
+                isFollowing
+                    ? Icons.check_rounded
+                    : Icons.person_add_alt_1_rounded,
+                size: 19,
               ),
+        label: Text(
+          isFollowing ? l10n.following : l10n.follow,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }

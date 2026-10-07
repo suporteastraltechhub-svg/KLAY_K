@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../design/klayk_design.dart';
+import '../l10n/app_localizations.dart';
 import '../models/rising_creator_models.dart';
 import '../services/social_service.dart';
 import '../services/supabase_service.dart';
@@ -61,42 +62,44 @@ class _RisingCreatorsScreenState extends State<RisingCreatorsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Em ascensão', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.risingCreatorsTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         actions: [
           IconButton(
-            tooltip: 'Atualizar',
+            tooltip: l10n.risingCreatorsRefresh,
             onPressed: _loading ? null : _load,
             icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
           ),
         ],
       ),
-      body: _loading
-          ? const KlaykListSkeleton(rows: 6)
-          : _buildBody(),
+      body: _loading ? const KlaykListSkeleton(rows: 6) : _buildBody(),
     );
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar os criadores. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.playlistsLoadFailTitle,
+        message: l10n.risingCreatorsLoadFailMsg,
+        actionLabel: l10n.retry,
         actionIcon: Icons.refresh_rounded,
         onAction: _load,
       );
     }
     if (_creators.isEmpty) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.trending_up_rounded,
-        title: 'Nenhum criador em alta por enquanto',
-        message:
-            'Quando alguém tiver curtidas, seguidores ou posts novos nos últimos 7 dias, aparece aqui.',
+        title: l10n.risingCreatorsEmptyTitle,
+        message: l10n.risingCreatorsEmptyMsg,
       );
     }
     return RefreshIndicator(
@@ -112,6 +115,7 @@ class _RisingCreatorsScreenState extends State<RisingCreatorsScreen> {
   }
 
   Widget _creatorCard(RisingCreator c, int rank) {
+    final l10n = AppLocalizations.of(context)!;
     final colors = kc(context);
     return KlayKCard(
       onTap: () => _openCreator(c.creatorId),
@@ -128,7 +132,11 @@ class _RisingCreatorsScreenState extends State<RisingCreatorsScreen> {
             ),
             child: Text(
               '$rank',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -144,12 +152,20 @@ class _RisingCreatorsScreenState extends State<RisingCreatorsScreen> {
                       child: Text(
                         c.name,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
                       ),
                     ),
                     if (c.isVerified) ...[
                       const SizedBox(width: 5),
-                      const Icon(Icons.verified_rounded, color: _kAccent, size: 16),
+                      const Icon(
+                        Icons.verified_rounded,
+                        color: _kAccent,
+                        size: 16,
+                      ),
                     ],
                   ],
                 ),
@@ -157,19 +173,29 @@ class _RisingCreatorsScreenState extends State<RisingCreatorsScreen> {
                   const SizedBox(height: 1),
                   Text(
                     c.handle,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12.5,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF2A2350),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     c.momentumLabel,
-                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
@@ -179,11 +205,15 @@ class _RisingCreatorsScreenState extends State<RisingCreatorsScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Icon(Icons.trending_up_rounded, color: colors.primarySoft, size: 22),
+              Icon(
+                Icons.trending_up_rounded,
+                color: colors.primarySoft,
+                size: 22,
+              ),
               const SizedBox(height: 2),
-              const Text(
-                '7 dias',
-                style: TextStyle(color: Colors.white38, fontSize: 11),
+              Text(
+                l10n.risingCreatorsLast7Days,
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
             ],
           ),

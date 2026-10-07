@@ -19,12 +19,12 @@ class GiftCategory {
   });
 
   factory GiftCategory.fromJson(Map<String, dynamic> json) => GiftCategory(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        emoji: json['emoji'] as String? ?? '',
-        order: (json['order'] as num?)?.toInt() ?? 0,
-        active: json['active'] as bool? ?? true,
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    emoji: json['emoji'] as String? ?? '',
+    order: (json['order'] as num?)?.toInt() ?? 0,
+    active: json['active'] as bool? ?? true,
+  );
 }
 
 class GiftRarity {
@@ -45,13 +45,13 @@ class GiftRarity {
   });
 
   factory GiftRarity.fromJson(Map<String, dynamic> json) => GiftRarity(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        emoji: json['emoji'] as String? ?? '',
-        order: (json['order'] as num?)?.toInt() ?? 0,
-        color: json['color'] as String? ?? '#FFFFFF',
-        active: json['active'] as bool? ?? true,
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    emoji: json['emoji'] as String? ?? '',
+    order: (json['order'] as num?)?.toInt() ?? 0,
+    color: json['color'] as String? ?? '#FFFFFF',
+    active: json['active'] as bool? ?? true,
+  );
 }
 
 class GiftEffect {
@@ -72,15 +72,15 @@ class GiftEffect {
   });
 
   factory GiftEffect.fromJson(Map<String, dynamic> json) => GiftEffect(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        kind: json['kind'] as String? ?? 'preset',
-        params: json['params'] is Map
-            ? Map<String, dynamic>.from(json['params'] as Map)
-            : const {},
-        tier: (json['tier'] as num?)?.toInt() ?? 1,
-        active: json['active'] as bool? ?? true,
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    kind: json['kind'] as String? ?? 'preset',
+    params: json['params'] is Map
+        ? Map<String, dynamic>.from(json['params'] as Map)
+        : const {},
+    tier: (json['tier'] as num?)?.toInt() ?? 1,
+    active: json['active'] as bool? ?? true,
+  );
 }
 
 class GiftEvent {
@@ -101,17 +101,17 @@ class GiftEvent {
   });
 
   factory GiftEvent.fromJson(Map<String, dynamic> json) => GiftEvent(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        description: json['description'] as String? ?? '',
-        startsAt: json['starts_at'] != null
-            ? DateTime.tryParse(json['starts_at'] as String)?.toLocal()
-            : null,
-        endsAt: json['ends_at'] != null
-            ? DateTime.tryParse(json['ends_at'] as String)?.toLocal()
-            : null,
-        active: json['active'] as bool? ?? true,
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    description: json['description'] as String? ?? '',
+    startsAt: json['starts_at'] != null
+        ? DateTime.tryParse(json['starts_at'] as String)?.toLocal()
+        : null,
+    endsAt: json['ends_at'] != null
+        ? DateTime.tryParse(json['ends_at'] as String)?.toLocal()
+        : null,
+    active: json['active'] as bool? ?? true,
+  );
 }
 
 class Gift {
@@ -210,8 +210,8 @@ class Gift {
       isEventGift: json['is_event_gift'] as bool? ?? false,
       isLimited: json['is_limited'] as bool? ?? false,
       isTradable: json['is_tradable'] as bool? ?? true,
-      regions: (json['regions'] as List?)?.whereType<String>().toList() ??
-          const [],
+      regions:
+          (json['regions'] as List?)?.whereType<String>().toList() ?? const [],
       eventId: json['event_id'] as String?,
       featuredStart: json['featured_start'] != null
           ? DateTime.tryParse(json['featured_start'] as String)?.toLocal()
@@ -270,8 +270,8 @@ class GiftTransaction {
         creditsPerUnit: (json['credits_per_unit'] as num?)?.toInt() ?? 0,
         creditsTotal: (json['credits_total'] as num?)?.toInt() ?? 0,
         balanceAfter: (json['balance_after'] as num?)?.toInt() ?? 0,
-        createdAt: DateTime.tryParse(json['created_at'] as String? ?? '')
-                ?.toLocal() ??
+        createdAt:
+            DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
             DateTime.now(),
       );
 }

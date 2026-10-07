@@ -67,39 +67,49 @@ class KlayKEvent {
       organizerId: json['organizer_id']?.toString() ?? '',
       participantCount: (json['participant_count'] as num?)?.toInt() ?? 0,
       isPublic: json['is_public'] as bool? ?? true,
-      createdAt: dt(json['created_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+      createdAt:
+          dt(json['created_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
       iAmGoing: json['i_am_going'] as bool? ?? false,
     );
   }
 
   KlayKEvent copyWith({bool? iAmGoing, int? participantCount}) => KlayKEvent(
-        id: id,
-        title: title,
-        slug: slug,
-        description: description,
-        category: category,
-        location: location,
-        bannerUrl: bannerUrl,
-        startsAt: startsAt,
-        endsAt: endsAt,
-        organizerId: organizerId,
-        participantCount: participantCount ?? this.participantCount,
-        isPublic: isPublic,
-        createdAt: createdAt,
-        iAmGoing: iAmGoing ?? this.iAmGoing,
-      );
+    id: id,
+    title: title,
+    slug: slug,
+    description: description,
+    category: category,
+    location: location,
+    bannerUrl: bannerUrl,
+    startsAt: startsAt,
+    endsAt: endsAt,
+    organizerId: organizerId,
+    participantCount: participantCount ?? this.participantCount,
+    isPublic: isPublic,
+    createdAt: createdAt,
+    iAmGoing: iAmGoing ?? this.iAmGoing,
+  );
 
   /// Ícone por categoria (com fallback neutro).
-  String get icon =>
-      _kCategoryIcons[category.trim().toLowerCase()] ?? '📅';
+  String get icon => _kCategoryIcons[category.trim().toLowerCase()] ?? '📅';
 
   /// Label legível de data/hora de início.
   String get whenLabel {
     final s = startsAt;
     if (s == null) return 'Data a definir';
     const months = [
-      'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
-      'jul', 'ago', 'set', 'out', 'nov', 'dez',
+      'jan',
+      'fev',
+      'mar',
+      'abr',
+      'mai',
+      'jun',
+      'jul',
+      'ago',
+      'set',
+      'out',
+      'nov',
+      'dez',
     ];
     final h = s.hour.toString().padLeft(2, '0');
     final m = s.minute.toString().padLeft(2, '0');

@@ -12,6 +12,7 @@ import '../services/profile_service.dart';
 import '../services/social_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/klayk_ux.dart';
+import '../l10n/app_localizations.dart';
 import 'audio_rooms_screen.dart';
 import 'communities/communities_screen.dart';
 import 'events_screen.dart';
@@ -113,45 +114,55 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Meu KLAY K', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.myKlayK,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
       body: _loading
           ? const KlaykListSkeleton(rows: 7)
           : _failed
-              ? KlaykEmptyState(
-                  icon: Icons.cloud_off_outlined,
-                  title: 'Erro ao carregar',
-                  message: 'Não conseguimos carregar seus dados. Tentar novamente.',
-                  actionLabel: 'Tentar novamente',
-                  actionIcon: Icons.refresh_rounded,
-                  onAction: _load,
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: _kAccent,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    children: [
-                      _buildHeader(),
-                      const SizedBox(height: 16),
-                      if (_level != null) _buildLevelCard(_level!),
-                      const SizedBox(height: 16),
-                      _buildStatsRow(),
-                      const SizedBox(height: 20),
-                      _sectionHeader('Minha atividade', icon: Icons.auto_awesome_rounded),
-                      const SizedBox(height: 4),
-                      _buildActivityGrid(),
-                      const SizedBox(height: 20),
-                      _sectionHeader('Minha carteira', icon: Icons.account_balance_wallet_outlined),
-                      const SizedBox(height: 4),
-                      _buildWalletCard(),
-                    ],
+          ? KlaykEmptyState(
+              icon: Icons.cloud_off_outlined,
+              title: l10n.errorLoading,
+              message: l10n.loadDataFail,
+              actionLabel: l10n.retry,
+              actionIcon: Icons.refresh_rounded,
+              onAction: _load,
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              color: _kAccent,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  _buildHeader(),
+                  const SizedBox(height: 16),
+                  if (_level != null) _buildLevelCard(_level!),
+                  const SizedBox(height: 16),
+                  _buildStatsRow(),
+                  const SizedBox(height: 20),
+                  _sectionHeader(
+                    l10n.sectionMyActivity,
+                    icon: Icons.auto_awesome_rounded,
                   ),
-                ),
+                  const SizedBox(height: 4),
+                  _buildActivityGrid(),
+                  const SizedBox(height: 20),
+                  _sectionHeader(
+                    l10n.sectionMyWallet,
+                    icon: Icons.account_balance_wallet_outlined,
+                  ),
+                  const SizedBox(height: 4),
+                  _buildWalletCard(),
+                ],
+              ),
+            ),
     );
   }
 
@@ -161,7 +172,9 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
     final handle = p?.handle ?? kAppIdentity.username;
     final avatar = (p?.avatarUrl?.isNotEmpty == true)
         ? p!.avatarUrl
-        : (kAppIdentity.avatarUrl?.isNotEmpty == true ? kAppIdentity.avatarUrl : null);
+        : (kAppIdentity.avatarUrl?.isNotEmpty == true
+              ? kAppIdentity.avatarUrl
+              : null);
     final verified = p?.hasVerifiedBadge == true;
     return Row(
       children: [
@@ -174,7 +187,11 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
                   alignment: Alignment.center,
                   child: Text(
                     name.isNotEmpty ? name.characters.first.toUpperCase() : '?',
-                    style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 )
               : Image.network(
@@ -188,8 +205,14 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
                     color: const Color(0xFF2A2350),
                     alignment: Alignment.center,
                     child: Text(
-                      name.isNotEmpty ? name.characters.first.toUpperCase() : '?',
-                      style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800),
+                      name.isNotEmpty
+                          ? name.characters.first.toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ),
@@ -205,24 +228,36 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
                     child: Text(
                       name,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                      ),
                     ),
                   ),
                   if (verified) ...[
                     const SizedBox(width: 6),
-                    const Icon(Icons.verified_rounded, color: _kAccent, size: 18),
+                    const Icon(
+                      Icons.verified_rounded,
+                      color: _kAccent,
+                      size: 18,
+                    ),
                   ],
                 ],
               ),
               const SizedBox(height: 2),
               Text(
                 handle,
-                style: const TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Este é o resumo da sua presença no KLAY K.',
-                style: TextStyle(color: Colors.white38, fontSize: 12.5),
+              Text(
+                AppLocalizations.of(context)!.presenceSummary,
+                style: const TextStyle(color: Colors.white38, fontSize: 12.5),
               ),
             ],
           ),
@@ -232,6 +267,7 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
   }
 
   Widget _buildLevelCard(LevelProgress level) {
+    final l10n = AppLocalizations.of(context)!;
     final next = level.xpNextLevel;
     return KlayKCard(
       padding: const EdgeInsets.all(16),
@@ -252,7 +288,11 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
                 alignment: Alignment.center,
                 child: Text(
                   '${level.level}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -261,15 +301,22 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Nível ${level.level} · ${level.levelTitle}',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+                      l10n.levelLine(level.level, level.levelTitle),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       next == null
-                          ? '${level.xpTotal} XP total'
-                          : '${level.xpTotal} XP · faltam ${level.xpToNext} para subir',
-                      style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+                          ? l10n.xpTotalLine(level.xpTotal)
+                          : l10n.xpToNextLine(level.xpTotal, level.xpToNext),
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12.5,
+                      ),
                     ),
                   ],
                 ),
@@ -292,20 +339,41 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
   }
 
   Widget _buildStatsRow() {
+    final l10n = AppLocalizations.of(context)!;
     return Row(
       children: [
-        _statCard('$_following', 'Seguindo', Icons.person_add_alt_1_outlined, onTap: () => _open(const FriendsScreen())),
+        _statCard(
+          '$_following',
+          l10n.following,
+          Icons.person_add_alt_1_outlined,
+          onTap: () => _open(const FriendsScreen()),
+        ),
         const SizedBox(width: 8),
-        _statCard('$_friends', 'Amigos', Icons.group_outlined, onTap: () => _open(const FriendsScreen())),
+        _statCard(
+          '$_friends',
+          l10n.friends,
+          Icons.group_outlined,
+          onTap: () => _open(const FriendsScreen()),
+        ),
         const SizedBox(width: 8),
-        _statCard('$_communities', 'Comunidades', Icons.groups_outlined, onTap: () => _open(const CommunitiesScreen())),
+        _statCard(
+          '$_communities',
+          l10n.communities,
+          Icons.groups_outlined,
+          onTap: () => _open(const CommunitiesScreen()),
+        ),
         const SizedBox(width: 8),
-        _statCard('$_posts', 'Vídeos', Icons.movie_outlined),
+        _statCard('$_posts', l10n.videos, Icons.movie_outlined),
       ],
     );
   }
 
-  Widget _statCard(String value, String label, IconData icon, {VoidCallback? onTap}) {
+  Widget _statCard(
+    String value,
+    String label,
+    IconData icon, {
+    VoidCallback? onTap,
+  }) {
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -317,7 +385,11 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
               const SizedBox(height: 6),
               Text(
                 value,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
@@ -344,7 +416,11 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
           ],
           Text(
             title,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
           ),
         ],
       ),
@@ -352,34 +428,81 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
   }
 
   Widget _buildActivityGrid() {
+    final l10n = AppLocalizations.of(context)!;
     return Column(
       children: [
         Row(
           children: [
-            Expanded(child: _activityTile(Icons.waves_rounded, 'Salas de voz', '$_audioRooms', subtitle: 'as suas', onTap: () => _open(const AudioRoomsScreen()))),
+            Expanded(
+              child: _activityTile(
+                Icons.waves_rounded,
+                l10n.voiceRooms,
+                '$_audioRooms',
+                subtitle: l10n.voiceRoomsMine,
+                onTap: () => _open(const AudioRoomsScreen()),
+              ),
+            ),
             const SizedBox(width: 10),
-            Expanded(child: _activityTile(Icons.auto_awesome_rounded, 'Momentos', '$_moments', subtitle: 'ativos', onTap: () => _open(const MomentsScreen()))),
+            Expanded(
+              child: _activityTile(
+                Icons.auto_awesome_rounded,
+                l10n.moments,
+                '$_moments',
+                subtitle: l10n.momentsActive,
+                onTap: () => _open(const MomentsScreen()),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(child: _activityTile(Icons.event_rounded, 'Eventos', '$_events', subtitle: 'confirmados', onTap: () => _open(const EventsScreen()))),
+            Expanded(
+              child: _activityTile(
+                Icons.event_rounded,
+                l10n.events,
+                '$_events',
+                subtitle: l10n.eventsConfirmed,
+                onTap: () => _open(const EventsScreen()),
+              ),
+            ),
             const SizedBox(width: 10),
-            Expanded(child: _activityTile(Icons.groups_rounded, 'Comunidades', '$_communities', subtitle: 'que participo', onTap: () => _open(const CommunitiesScreen()))),
+            Expanded(
+              child: _activityTile(
+                Icons.groups_rounded,
+                l10n.communities,
+                '$_communities',
+                subtitle: l10n.communitiesJoined,
+                onTap: () => _open(const CommunitiesScreen()),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(child: _activityTile(Icons.group_add_rounded, 'Amizades', '$_friends', subtitle: 'rede', onTap: () => _open(const FriendsScreen()))),
+            Expanded(
+              child: _activityTile(
+                Icons.group_add_rounded,
+                l10n.friendships,
+                '$_friends',
+                subtitle: l10n.friendshipNetwork,
+                onTap: () => _open(const FriendsScreen()),
+              ),
+            ),
           ],
         ),
       ],
     );
   }
 
-  Widget _activityTile(IconData icon, String title, String count, {required String subtitle, required VoidCallback onTap}) {
+  Widget _activityTile(
+    IconData icon,
+    String title,
+    String count, {
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: KlayKCard(
@@ -404,22 +527,37 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
                 children: [
                   Text(
                     count,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
+                    ),
                   ),
                   Text(
                     title,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                    ),
                   ),
                   Text(
                     subtitle,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11.5,
+                    ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: Colors.white38, size: 20),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.white38,
+              size: 20,
+            ),
           ],
         ),
       ),
@@ -427,10 +565,11 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
   }
 
   Widget _buildWalletCard() {
+    final l10n = AppLocalizations.of(context)!;
     final entries = <(String, IconData, String)>[
-      ('credits', Icons.stars_rounded, 'Créditos'),
-      ('diamonds', Icons.diamond_rounded, 'Diamantes'),
-      ('rubies', Icons.toll_rounded, 'Rubis'),
+      ('credits', Icons.stars_rounded, l10n.credits),
+      ('diamonds', Icons.diamond_rounded, l10n.diamonds),
+      ('rubies', Icons.toll_rounded, l10n.rubies),
     ];
     final hasAny = entries.any((e) {
       final v = _wallet[e.$1];
@@ -449,22 +588,36 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
                       const SizedBox(height: 6),
                       Text(
                         _fmt(_wallet[key]),
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
                       ),
                       const SizedBox(height: 2),
-                      Text(label, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                      Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                        ),
+                      ),
                     ],
                   ),
               ],
             )
-          : const Row(
+          : Row(
               children: [
-                Icon(Icons.account_balance_wallet_outlined, color: Color(0xFF8B5CF6), size: 22),
-                SizedBox(width: 10),
+                const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: Color(0xFF8B5CF6),
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Sua carteira aparece aqui assim que começar a ganhar créditos.',
-                    style: TextStyle(color: Colors.white54, fontSize: 13),
+                    l10n.walletEmpty,
+                    style: const TextStyle(color: Colors.white54, fontSize: 13),
                   ),
                 ),
               ],
@@ -473,7 +626,9 @@ class _MeuKlayKScreenState extends State<MeuKlayKScreen> {
   }
 
   String _fmt(Object? v) {
-    if (v is num) return v.truncate() == v ? v.toInt().toString() : v.toString();
+    if (v is num) {
+      return v.truncate() == v ? v.toInt().toString() : v.toString();
+    }
     return v?.toString() ?? '0';
   }
 }

@@ -65,6 +65,10 @@ verify_jwt = true
 
 [functions.gift-admin]
 # CRUD do catálogo. Requer usuário com profiles.is_admin = true (validado no
-# backend com o service role). Realiza toda a escrita com o service role.
+# backend com service role). Realiza toda a escrita com service role.
 verify_jwt = true
 [functions.gift-admin.cors]
+
+[functions.send-push]
+verify_jwt = false
+[functions.send-push.cors]

@@ -55,7 +55,9 @@ class KlayKMoment {
       imageUrl: json['image_url']?.toString() ?? '',
       sticker: json['sticker']?.toString() ?? '',
       createdAt: dt(json['created_at']),
-      expiresAt: DateTime.tryParse(json['expires_at']?.toString() ?? '')?.toLocal(),
+      expiresAt: DateTime.tryParse(
+        json['expires_at']?.toString() ?? '',
+      )?.toLocal(),
       authorDisplayName: profile['display_name']?.toString() ?? '',
       authorUsername: profile['username']?.toString() ?? '',
       authorAvatarUrl: profile['avatar_url']?.toString(),

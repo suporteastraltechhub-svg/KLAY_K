@@ -83,27 +83,47 @@ class GiftAnimationOverlayState extends State<GiftAnimationOverlay>
   late final Color _color;
   late final Color _trail;
   late final bool _reduced;
+  late final double _intensity;
+
+  /// Combos x5/x10/x66 escalam a força do efeito (partículas maiores e em
+  /// maior número) — presente com combo deixa claro que veio em volume.
+  double get intensity {
+    final a = widget.amount;
+    if (a >= 66) return 2.1;
+    if (a >= 10) return 1.7;
+    if (a >= 5) return 1.32;
+    return 1.0;
+  }
 
   @override
   void initState() {
     super.initState();
-    _reduced = ExperienceSettings.instance.reduceAnimations ||
+    _reduced =
+        ExperienceSettings.instance.reduceAnimations ||
         ExperienceSettings.instance.reduceEffects;
+    _intensity = intensity;
     _kind = animKindFor(widget.gift.animationKey);
     final fx = widget.gift.effects;
     _color = _parseColor(fx['color']?.toString(), const Color(0xFFFFD700));
-    _trail =
-        _parseColor(fx['trail']?.toString(), const Color(0xFFFFE082));
-    _controller = AnimationController(
-      vsync: this,
-      duration: _durationFor(_kind),
-    )..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          widget.onComplete();
-        }
-      });
+    _trail = _parseColor(fx['trail']?.toString(), const Color(0xFFFFE082));
+    final base = _durationFor(_kind);
+    _controller =
+        AnimationController(
+          vsync: this,
+          duration: Duration(
+            milliseconds:
+                (base.inMilliseconds * (1.0 + 0.22 * (_intensity - 1.0)))
+                    .round(),
+          ),
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            widget.onComplete();
+          }
+        });
     _controller.forward();
   }
+
+  bool get _isMega => widget.amount >= 10;
 
   Duration _durationFor(GiftAnimKind k) {
     if (_reduced) return const Duration(milliseconds: 700);
@@ -117,6 +137,70 @@ class GiftAnimationOverlayState extends State<GiftAnimationOverlay>
       default:
         return const Duration(milliseconds: 2600);
     }
+  }
+
+  /// Selo do combo (×5/×10/×66) — vidro roxo com brilho na cor do presente,
+  /// proporcional ao volume enviado.
+  Widget _comboBadge() {
+    final a = widget.amount;
+    if (a <= 1) return const SizedBox.shrink();
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: _isMega ? 16 : 9,
+        vertical: _isMega ? 6 : 3,
+      ),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF3B1E63), Color(0xFF170F26)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _color.withValues(alpha: _isMega ? 0.85 : 0.45),
+          width: _isMega ? 1.6 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _color.withValues(alpha: 0.35),
+            blurRadius: 16,
+            spreadRadius: _isMega ? 1 : 0,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '×$a',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: _isMega ? 17 : 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          if (_isMega) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: _color.withValues(alpha: 0.28),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                'COMBO',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.1,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   @override
@@ -142,31 +226,36 @@ class GiftAnimationOverlayState extends State<GiftAnimationOverlay>
                 color: const Color(0xE6161420),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                    color: _color.withValues(alpha: 0.6), width: 1.5),
+                  color: _color.withValues(alpha: 0.6),
+                  width: 1.5,
+                ),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('${widget.gift.icon} ${widget.gift.name}',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800)),
+                  Text(
+                    '${widget.gift.icon} ${widget.gift.name}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                   if (widget.senderName.isNotEmpty) ...[
                     const SizedBox(height: 6),
-                    Text(widget.senderName,
-                        style: TextStyle(
-                            color: _color,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700)),
+                    Text(
+                      widget.senderName,
+                      style: TextStyle(
+                        color: _color,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
                   if (widget.amount > 1) ...[
-                    const SizedBox(height: 2),
-                    Text('x${widget.amount}',
-                        style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    _comboBadge(),
                   ],
                 ],
               ),
@@ -193,6 +282,7 @@ class GiftAnimationOverlayState extends State<GiftAnimationOverlay>
                 trail: _trail,
                 icon: widget.gift.icon,
                 progress: anim.value,
+                intensity: _intensity,
               ),
             ),
             // Cabeçalho: nome do presente + remetente.
@@ -207,16 +297,25 @@ class GiftAnimationOverlayState extends State<GiftAnimationOverlay>
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (widget.amount > 1) ...[
+                            _comboBadge(),
+                            const SizedBox(height: 8),
+                          ],
                           Text(
                             '${widget.gift.icon} ${widget.gift.name}',
-                            style: const TextStyle(
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
                               color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
+                              fontSize: _isMega ? 25 : 20,
+                              fontWeight: FontWeight.w900,
                               shadows: [
                                 Shadow(
-                                  blurRadius: 12,
-                                  color: Colors.black54,
+                                  blurRadius: _isMega ? 18 : 12,
+                                  color: Colors.black87,
+                                ),
+                                Shadow(
+                                  blurRadius: 24,
+                                  color: _color.withValues(alpha: 0.35),
                                 ),
                               ],
                             ),
@@ -228,19 +327,7 @@ class GiftAnimationOverlayState extends State<GiftAnimationOverlay>
                                 widget.senderName,
                                 style: TextStyle(
                                   color: _color,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          if (widget.amount > 1)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Text(
-                                'x${widget.amount}',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 13,
+                                  fontSize: _isMega ? 16 : 14,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -265,6 +352,7 @@ class _ParticlePainter extends CustomPainter {
   final Color trail;
   final String icon;
   final double progress;
+  final double intensity;
 
   _ParticlePainter({
     required this.kind,
@@ -272,12 +360,26 @@ class _ParticlePainter extends CustomPainter {
     required this.trail,
     required this.icon,
     required this.progress,
+    this.intensity = 1.0,
   });
+
+  /// Escala a quantidade de partículas conforme o fator do combo (mais volume
+  /// = mais partículas, sem estourar o limite de desenho por frame).
+  int _cnt(int base) =>
+      (base * (1.0 + 0.5 * (intensity - 1.0))).round().clamp(base, base * 3);
 
   @override
   void paint(Canvas canvas, Size size) {
     final rnd = math.Random(7);
     final center = Offset(size.width / 2, size.height / 2);
+
+    // Combo: dimensões maiores mantêm o centro de massa no meio da tela,
+    // então a explosão só fica mais ampla — nunca sai "em cima" do vídeo.
+    final s = (1.0 + 0.45 * (intensity - 1.0)).clamp(1.0, 1.6);
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.scale(s);
+    canvas.translate(-center.dx, -center.dy);
 
     switch (kind) {
       case GiftAnimKind.sparkle:
@@ -311,8 +413,10 @@ class _ParticlePainter extends CustomPainter {
 
     // Elemento principal (glifo/ícone) central com leve flutuação.
     if (kind != GiftAnimKind.dragoncelestial) {
-      _drawGlyph(canvas, center, icon, 46);
+      _drawGlyph(canvas, center, icon, 46 * (0.8 + 0.2 * intensity));
     }
+
+    canvas.restore();
   }
 
   void _drawGlyph(Canvas canvas, Offset center, String glyph, double size) {
@@ -321,9 +425,12 @@ class _ParticlePainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: glyph,
-        style: TextStyle(fontSize: size, shadows: [
-          Shadow(blurRadius: 24, color: color.withValues(alpha: 0.8)),
-        ]),
+        style: TextStyle(
+          fontSize: size,
+          shadows: [
+            Shadow(blurRadius: 24, color: color.withValues(alpha: 0.8)),
+          ],
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -332,12 +439,12 @@ class _ParticlePainter extends CustomPainter {
 
   void _drawSparkle(Canvas canvas, Offset center) {
     const n = 40;
-    for (var i = 0; i < n; i++) {
+    for (var i = 0; i < _cnt(n); i++) {
       final t = ((progress * n) + i) % n / n;
       final angle = i * 2.39996;
       final radius = 30 + progress * (200 + (i % 7) * 20);
-      final p = center +
-          Offset(math.cos(angle) * radius, math.sin(angle) * radius);
+      final p =
+          center + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
       final alpha = (1.0 - t).clamp(0.0, 1.0);
       final paint = Paint()
         ..color = trail.withValues(alpha: alpha)
@@ -348,37 +455,49 @@ class _ParticlePainter extends CustomPainter {
 
   void _drawBurst(Canvas canvas, Offset center, String g) {
     final isHeart = g == '❤️';
-    for (var i = 0; i < 26; i++) {
+    for (var i = 0; i < _cnt(26); i++) {
       final t = ((progress * 26) + i) % 26 / 26;
       final angle = i * 0.483;
       final spd = 60 + (i % 5) * 22;
       final radius = progress * (90 + spd);
-      final p = center +
+      final p =
+          center +
           Offset(math.cos(angle) * radius, math.sin(angle) * radius * 0.9);
       final alpha = (1.0 - t).clamp(0.0, 1.0);
-      _paintGlyphAt(canvas, p, isHeart ? '❤️' : '💖',
-          (10 + (i % 4) * 4) * (0.6 + t), color.withValues(alpha: alpha));
+      _paintGlyphAt(
+        canvas,
+        p,
+        isHeart ? '❤️' : '💖',
+        (10 + (i % 4) * 4) * (0.6 + t),
+        color.withValues(alpha: alpha),
+      );
     }
   }
 
   void _drawRain(Canvas canvas, Size size, String g) {
     const n = 30;
-    for (var i = 0; i < n; i++) {
+    for (var i = 0; i < _cnt(n); i++) {
       final x = ((i * 137.0) % size.width);
       final fall = (((progress * 1.6) + i * 0.17) % 1.0);
       final y = -40 + fall * (size.height + 80);
       final alpha = (1.0 - fall * 0.6).clamp(0.0, 1.0);
-      _paintGlyphAt(canvas, Offset(x, y), g, 18 + (i % 3) * 6,
-          Colors.white.withValues(alpha: alpha));
+      _paintGlyphAt(
+        canvas,
+        Offset(x, y),
+        g,
+        18 + (i % 3) * 6,
+        Colors.white.withValues(alpha: alpha),
+      );
     }
   }
 
   void _drawFire(Canvas canvas, Offset center) {
-    for (var i = 0; i < 60; i++) {
+    for (var i = 0; i < _cnt(60); i++) {
       final t = ((progress * 60) + i) % 60 / 60;
       final angle = (i % 6) * 1.047 + (i % 2 == 0 ? progress * 0.4 : 0);
       final radius = 20 + t * (150 + (i % 4) * 30);
-      final p = center +
+      final p =
+          center +
           Offset(math.cos(angle) * radius, math.sin(angle) * radius * 0.7);
       final alpha = (1.0 - t) * 0.9;
       final c = i % 2 == 0 ? const Color(0xFFFF7043) : const Color(0xFFFFB300);
@@ -392,15 +511,11 @@ class _ParticlePainter extends CustomPainter {
   void _drawCosmicGate(Canvas canvas, Offset center) {
     final r = 40 + progress * 220;
     final paint = Paint()
-      ..shader = ui.Gradient.radial(
-        center,
-        r,
-        [
-          color.withValues(alpha: 0.5),
-          color.withValues(alpha: 0.05),
-          Colors.transparent,
-        ],
-      );
+      ..shader = ui.Gradient.radial(center, r, [
+        color.withValues(alpha: 0.5),
+        color.withValues(alpha: 0.05),
+        Colors.transparent,
+      ]);
     canvas.drawCircle(center, r, paint);
     for (var i = 0; i < 3; i++) {
       final rr = (40 + progress * 220) * (0.5 + i * 0.25);
@@ -411,8 +526,10 @@ class _ParticlePainter extends CustomPainter {
       canvas.save();
       canvas.translate(center.dx, center.dy);
       canvas.rotate(progress * (2 + i));
-      canvas.drawOval(Rect.fromCenter(
-          center: Offset.zero, width: rr, height: rr * 0.5), ring);
+      canvas.drawOval(
+        Rect.fromCenter(center: Offset.zero, width: rr, height: rr * 0.5),
+        ring,
+      );
       canvas.restore();
     }
   }
@@ -427,7 +544,10 @@ class _ParticlePainter extends CustomPainter {
       final base = center + Offset(-140 + i * 70, 120);
       final h = progress * (80 + (i % 3) * 20);
       canvas.drawLine(
-          base, base - Offset(0, h), paint..color = trail.withValues(alpha: 0.7));
+        base,
+        base - Offset(0, h),
+        paint..color = trail.withValues(alpha: 0.7),
+      );
     }
     _drawGlyph(canvas, center - Offset(0, 40 * progress), '👑', 48);
   }
@@ -446,7 +566,9 @@ class _ParticlePainter extends CustomPainter {
       final ring = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5
-        ..color = Colors.white.withValues(alpha: (1 - progress).clamp(0.0, 1.0));
+        ..color = Colors.white.withValues(
+          alpha: (1 - progress).clamp(0.0, 1.0),
+        );
       canvas.drawCircle(center, r * (0.4 + i * 0.22), ring);
     }
   }
@@ -489,7 +611,7 @@ class _ParticlePainter extends CustomPainter {
     final dragonPos = Offset(x, y);
 
     // Rastro de partículas.
-    _drawParticleTrail(canvas, Offset(w, y), dragonPos, 24);
+    _drawParticleTrail(canvas, Offset(w, y), dragonPos, _cnt(24));
 
     // Brilho ao redor do dragão.
     final glow = Paint()
@@ -501,7 +623,7 @@ class _ParticlePainter extends CustomPainter {
     _drawGlyph(canvas, dragonPos, '🐉', 64);
 
     // Espalha partículas flutuantes douradas pela tela.
-    for (var i = 0; i < 40; i++) {
+    for (var i = 0; i < _cnt(40); i++) {
       final px = (rnd.nextDouble() * w);
       final py = (rnd.nextDouble() * h);
       final alpha = (1 - cross) * 0.8;
@@ -517,7 +639,7 @@ class _ParticlePainter extends CustomPainter {
       final sparkle = Paint()
         ..color = Colors.white.withValues(alpha: (1 - progress).clamp(0.0, 1.0))
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-      for (var i = 0; i < 16; i++) {
+      for (var i = 0; i < _cnt(16); i++) {
         final a = i * 0.392;
         final r = 150 * (1 + (progress - 0.93) * 2);
         canvas.drawCircle(
@@ -530,10 +652,18 @@ class _ParticlePainter extends CustomPainter {
   }
 
   void _paintGlyphAt(
-      Canvas canvas, Offset at, String g, double size, Color color) {
+    Canvas canvas,
+    Offset at,
+    String g,
+    double size,
+    Color color,
+  ) {
     if (g.isEmpty) return;
     final tp = TextPainter(
-      text: TextSpan(text: g, style: TextStyle(fontSize: size)),
+      text: TextSpan(
+        text: g,
+        style: TextStyle(fontSize: size),
+      ),
       textDirection: TextDirection.ltr,
     )..layout();
     tp.paint(canvas, at - Offset(tp.width / 2, tp.height / 2));
@@ -541,7 +671,7 @@ class _ParticlePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ParticlePainter old) =>
-      old.progress != progress;
+      old.progress != progress || old.intensity != intensity;
 }
 
 /// Painel/possível widget auxiliar para exibir o saldo de créditos.
@@ -560,7 +690,11 @@ class CreditsPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.monetization_on_rounded, color: Color(0xFFFFD700), size: 16),
+          const Icon(
+            Icons.monetization_on_rounded,
+            color: Color(0xFFFFD700),
+            size: 16,
+          ),
           const SizedBox(width: 4),
           Text(
             '$credits',

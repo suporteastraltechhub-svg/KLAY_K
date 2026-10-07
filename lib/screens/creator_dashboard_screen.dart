@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/social_service.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
@@ -44,18 +45,21 @@ class _CreatorDashboardScreenState extends State<CreatorDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Painel do criador',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.creatorDashboardTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
             onPressed: _load,
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Atualizar',
+            tooltip: l10n.creatorDashboardRefresh,
           ),
         ],
       ),
@@ -66,7 +70,7 @@ class _CreatorDashboardScreenState extends State<CreatorDashboardScreen> {
               children: [
                 _levelCard(),
                 const SizedBox(height: 16),
-                _sectionHeader('TOTAL'),
+                _sectionHeader(l10n.creatorDashboardSectionTotal),
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -75,41 +79,63 @@ class _CreatorDashboardScreenState extends State<CreatorDashboardScreen> {
                   crossAxisSpacing: 10,
                   childAspectRatio: 1.5,
                   children: [
-                    _statCard(_fmt(_stats.totalViews), 'Visualizações',
-                        Icons.visibility_rounded),
-                    _statCard(_fmt(_stats.totalLikes), 'Curtidas',
-                        Icons.favorite_rounded),
-                    _statCard(_fmt(_stats.totalComments), 'Comentários',
-                        Icons.comment_rounded),
-                    _statCard(_fmt(_stats.totalLiveViews), 'Views em live',
-                        Icons.sensors_rounded),
+                    _statCard(
+                      _fmt(l10n, _stats.totalViews),
+                      l10n.creatorDashboardViews,
+                      Icons.visibility_rounded,
+                    ),
+                    _statCard(
+                      _fmt(l10n, _stats.totalLikes),
+                      l10n.creatorDashboardLikes,
+                      Icons.favorite_rounded,
+                    ),
+                    _statCard(
+                      _fmt(l10n, _stats.totalComments),
+                      l10n.creatorDashboardComments,
+                      Icons.comment_rounded,
+                    ),
+                    _statCard(
+                      _fmt(l10n, _stats.totalLiveViews),
+                      l10n.creatorDashboardLiveViews,
+                      Icons.sensors_rounded,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                _sectionHeader('AUDIÊNCIA'),
+                _sectionHeader(l10n.creatorDashboardSectionAudience),
                 Row(
                   children: [
                     Expanded(
-                      child: _audienceCard(_fmt(_stats.followersCount),
-                          'Seguidores', Icons.people_rounded),
+                      child: _audienceCard(
+                        _fmt(l10n, _stats.followersCount),
+                        l10n.creatorDashboardFollowers,
+                        Icons.people_rounded,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: _audienceCard(_fmt(_stats.followingCount),
-                          'Seguindo', Icons.person_add_alt_1_rounded),
+                      child: _audienceCard(
+                        _fmt(l10n, _stats.followingCount),
+                        l10n.creatorDashboardFollowing,
+                        Icons.person_add_alt_1_rounded,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                _sectionHeader('CONTEÚDO'),
-                _audienceCard(_fmt(_stats.postsCount), 'Publicações',
-                    Icons.video_library_rounded),
+                _sectionHeader(l10n.creatorDashboardSectionContent),
+                _audienceCard(
+                  _fmt(l10n, _stats.postsCount),
+                  l10n.creatorDashboardPosts,
+                  Icons.video_library_rounded,
+                ),
               ],
             ),
     );
   }
 
   Widget _levelCard() {
+    final l10n = AppLocalizations.of(context)!;
     // Nível derivado de XP de conquistas (ver social_service.fetchLevel).
     return Container(
       padding: const EdgeInsets.all(18),
@@ -132,22 +158,25 @@ class _CreatorDashboardScreenState extends State<CreatorDashboardScreen> {
             child: Text(
               '$_level',
               style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800),
+                color: Colors.white,
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
           const SizedBox(width: 14),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Seu nível de criador',
-                    style: TextStyle(color: Colors.white, fontSize: 15)),
-                SizedBox(height: 2),
                 Text(
-                  'Suba de nível desbloqueando conquistas e publicando conteúdo.',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                  l10n.creatorDashboardLevelTitle,
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  l10n.creatorDashboardLevelBody,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
               ],
             ),
@@ -172,13 +201,18 @@ class _CreatorDashboardScreenState extends State<CreatorDashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(value,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800)),
-              Text(label,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
             ],
           ),
         ],
@@ -200,13 +234,18 @@ class _CreatorDashboardScreenState extends State<CreatorDashboardScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(value,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800)),
-              Text(label,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
             ],
           ),
         ],
@@ -215,21 +254,27 @@ class _CreatorDashboardScreenState extends State<CreatorDashboardScreen> {
   }
 
   Widget _sectionHeader(String text) => Padding(
-        padding: const EdgeInsets.only(top: 4, bottom: 10),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: _kAccent,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.only(top: 4, bottom: 10),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: _kAccent,
+        fontSize: 12,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.2,
+      ),
+    ),
+  );
 
-  static String _fmt(int n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1).replaceAll('.0', '')} mi';
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1).replaceAll('.0', '')} mil';
+  static String _fmt(AppLocalizations l10n, int n) {
+    if (n >= 1000000) {
+      return '${(n / 1000000).toStringAsFixed(1).replaceAll('.0', '')}'
+          '${l10n.creatorDashboardFmtMillion}';
+    }
+    if (n >= 1000) {
+      return '${(n / 1000).toStringAsFixed(1).replaceAll('.0', '')}'
+          '${l10n.creatorDashboardFmtThousand}';
+    }
     return '$n';
   }
 }

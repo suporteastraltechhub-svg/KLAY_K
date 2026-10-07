@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/account_service.dart';
 import '../theme/klayk_theme.dart';
 import '../widgets/klayk_ux.dart';
@@ -23,30 +24,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int _page = 0;
   bool _saving = false;
 
-  static final List<_OnboardingSlide> _slides = [
-    const _OnboardingSlide(
+  List<_OnboardingSlide> _slides(AppLocalizations l10n) => [
+    _OnboardingSlide(
       emoji: '👋',
-      title: 'Bem-vindo ao KLAY K',
-      text: 'Seu espaço de vídeos curtos, lives e encontros. Explore, '
-          'participe da comunidade e acompanhe seus criadores favoritos.',
+      title: l10n.onboarding1Title,
+      text: l10n.onboarding1Text,
     ),
-    const _OnboardingSlide(
+    _OnboardingSlide(
       emoji: '🎬',
-      title: 'Assista e crie',
-      text: 'Navegue pelo feed, curta, comente e publique seus próprios '
-          'vídeos. Tudo pensado para ser leve e rápido.',
+      title: l10n.onboarding2Title,
+      text: l10n.onboarding2Text,
     ),
-    const _OnboardingSlide(
+    _OnboardingSlide(
       emoji: '🔥',
-      title: 'Viva e conecte',
-      text: 'Participe de lives em tempo real, envie presentes e bata papo '
-          'com quem assiste você também.',
+      title: l10n.onboarding3Title,
+      text: l10n.onboarding3Text,
     ),
-    const _OnboardingSlide(
+    _OnboardingSlide(
       emoji: '💎',
-      title: 'Ganhe recompensas',
-      text: 'Complete missões, abra baús, ganhe conquistas e cristais. Use '
-          'nas loja, nos jogos e na central de recompensas.',
+      title: l10n.onboarding4Title,
+      text: l10n.onboarding4Text,
     ),
   ];
 
@@ -57,7 +54,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _next() async {
-    if (_page < _slides.length - 1) {
+    final l10n = AppLocalizations.of(context)!;
+    final slides = _slides(l10n);
+    if (_page < slides.length - 1) {
       _controller.nextPage(
         duration: const Duration(milliseconds: 280),
         curve: Curves.easeOut,
@@ -82,6 +81,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
+    final slides = _slides(l10n);
+    final isLast = _page == slides.length - 1;
     return Scaffold(
       body: Stack(
         children: [
@@ -93,30 +95,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     alignment: Alignment.centerRight,
                     child: TextButton(
                       onPressed: _saving ? null : _skip,
-                      child: const Text('Pular'),
+                      child: Text(l10n.onboardingSkip),
                     ),
                   ),
                   Expanded(
                     child: PageView.builder(
                       controller: _controller,
-                      itemCount: _slides.length,
+                      itemCount: slides.length,
                       onPageChanged: (i) => setState(() => _page = i),
-                      itemBuilder: (context, i) => _slideView(_slides[i]),
+                      itemBuilder: (context, i) => _slideView(slides[i]),
                     ),
                   ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(
-                      _slides.length,
+                      slides.length,
                       (i) => AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         margin: const EdgeInsets.symmetric(horizontal: 4),
                         width: i == _page ? 22 : 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: i == _page
-                              ? colors.primary
-                              : colors.border,
+                          color: i == _page ? colors.primary : colors.border,
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
@@ -142,11 +142,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 ),
                               )
                             : Text(
-                                _page == _slides.length - 1
-                                    ? 'Começar 🚀'
-                                    : 'Continuar',
+                                isLast
+                                    ? l10n.onboardingStart
+                                    : l10n.onboardingContinue,
                                 style: const TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.w800),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                       ),
                     ),
@@ -187,17 +189,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Text(
               slide.title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             Text(
               slide.text,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                  fontSize: 15, height: 1.5, color: Colors.white70),
+                fontSize: 15,
+                height: 1.5,
+                color: Colors.white70,
+              ),
             ),
           ],
         ),

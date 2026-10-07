@@ -53,8 +53,8 @@ class KlayKPlaylist {
       description: json['description']?.toString() ?? '',
       coverUrl: json['cover_url']?.toString() ?? '',
       isPublic: json['is_public'] as bool? ?? true,
-      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '')
-              ?.toLocal() ??
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
           DateTime.fromMillisecondsSinceEpoch(0),
       creatorDisplayName: profile['display_name']?.toString() ?? '',
       creatorUsername: profile['username']?.toString() ?? '',

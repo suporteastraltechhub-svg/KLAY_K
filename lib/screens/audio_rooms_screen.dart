@@ -8,6 +8,7 @@ import '../theme/klayk_theme.dart';
 import '../widgets/ad_spot.dart';
 import '../widgets/ad_widgets.dart';
 import '../widgets/klayk_ux.dart';
+import '../l10n/app_localizations.dart';
 import 'voice_room_screen.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
@@ -112,6 +113,7 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
   }
 
   Future<void> _openCreateDialog() async {
+    final l10n = AppLocalizations.of(context)!;
     final title = await showDialog<String>(
       context: context,
       builder: (_) => _CreateRoomDialog(friendsMode: widget.friendsMode),
@@ -126,11 +128,8 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => VoiceRoomScreen(
-            room: created,
-            joinWithMic: true,
-            isOwner: true,
-          ),
+          builder: (_) =>
+              VoiceRoomScreen(room: created, joinWithMic: true, isOwner: true),
         ),
       );
     } catch (_) {
@@ -139,8 +138,8 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
         SnackBar(
           content: Text(
             widget.friendsMode
-                ? 'Não foi possível iniciar a Live com amigos.'
-                : 'Não foi possível criar a sala de voz.',
+                ? l10n.voiceRoomFriendsCreateFail
+                : l10n.voiceRoomCreateFail,
           ),
         ),
       );
@@ -165,12 +164,13 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
         title: Text(
-          widget.friendsMode ? 'Amigos' : 'Áudio',
+          widget.friendsMode ? l10n.friends : l10n.audio,
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
       ),
@@ -182,7 +182,9 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
           ),
           _categoryStrip(),
           const SizedBox(height: 4),
-          Expanded(child: _loading ? const KlaykListSkeleton(rows: 6) : _buildBody()),
+          Expanded(
+            child: _loading ? const KlaykListSkeleton(rows: 6) : _buildBody(),
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -193,10 +195,13 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
             ? const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
               )
             : const Icon(Icons.mic_rounded),
-        label: Text(_creating ? 'Criando…' : 'Criar sala'),
+        label: Text(_creating ? l10n.creatingRoom : l10n.createRoom),
       ),
     );
   }
@@ -207,7 +212,7 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
       onChanged: _onSearch,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
-        hintText: 'Buscar salas de voz…',
+        hintText: AppLocalizations.of(context)!.searchVoiceRooms,
         hintStyle: const TextStyle(color: Colors.white38),
         prefixIcon: const Icon(Icons.search, color: Colors.white38),
         suffixIcon: _searchCtrl.text.trim().isEmpty
@@ -235,6 +240,7 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
   }
 
   Widget _categoryStrip() {
+    final l10n = AppLocalizations.of(context)!;
     final cats = [..._categories];
     return SizedBox(
       height: 46,
@@ -246,7 +252,7 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
         itemBuilder: (context, i) {
           if (i == 0) {
             return KlayKChip(
-              label: 'Todas',
+              label: l10n.notifAll,
               selected: _selectedCategory == null,
               onTap: () => _selectCategory(null),
             );
@@ -263,22 +269,22 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar as salas de voz. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.errorLoading,
+        message: l10n.voiceRoomsLoadFail,
+        actionLabel: l10n.retry,
         actionIcon: Icons.refresh_rounded,
         onAction: () => _load(category: _selectedCategory),
       );
     }
     if (_rooms.isEmpty) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.mic_none_rounded,
-        title: 'Nenhuma sala ao vivo',
-        message:
-            'Quando alguém abrir uma sala de voz, ela aparece aqui. Toque em "Criar sala" para começar a sua.',
+        title: l10n.noLiveRooms,
+        message: l10n.noLiveRoomsBody,
       );
     }
     return RefreshIndicator(
@@ -287,23 +293,29 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
         children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: Row(
               children: [
-                Icon(Icons.waves_rounded, color: _kAccent, size: 18),
-                SizedBox(width: 6),
+                const Icon(Icons.waves_rounded, color: _kAccent, size: 18),
+                const SizedBox(width: 6),
                 Text(
-                  'Ao vivo agora',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+                  l10n.liveNowTitle,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
                 ),
               ],
             ),
           ),
-          ..._rooms.map((r) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _roomCard(r),
-              )),
+          ..._rooms.map(
+            (r) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _roomCard(r),
+            ),
+          ),
           for (var i = 0; i < _rooms.length; i++)
             if ((i + 1) % 4 == 0 && _ads.ads.isNotEmpty)
               Padding(
@@ -342,7 +354,11 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
                 border: Border.all(color: const Color(0xFF2A2540)),
               ),
               alignment: Alignment.center,
-              child: const Icon(Icons.graphic_eq_rounded, color: _kAccent, size: 22),
+              child: const Icon(
+                Icons.graphic_eq_rounded,
+                color: _kAccent,
+                size: 22,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -355,21 +371,39 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
                         child: Text(
                           r.title,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFF2A2350),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Row(
+                        child: Row(
                           children: [
-                            Icon(Icons.circle, color: Colors.greenAccent, size: 8),
-                            SizedBox(width: 4),
-                            Text('AO VIVO', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
+                            const Icon(
+                              Icons.circle,
+                              color: Colors.greenAccent,
+                              size: 8,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              AppLocalizations.of(context)!.liveBadge,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -380,20 +414,29 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
                     r.description.isEmpty ? r.category : r.description,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Row(
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: r.ownerAvatarUrl == null || r.ownerAvatarUrl!.isEmpty
+                        child:
+                            r.ownerAvatarUrl == null ||
+                                r.ownerAvatarUrl!.isEmpty
                             ? Container(
                                 width: 20,
                                 height: 20,
                                 color: const Color(0xFF2A2540),
                                 alignment: Alignment.center,
-                                child: const Text('🎙️', style: TextStyle(fontSize: 11)),
+                                child: const Text(
+                                  '🎙️',
+                                  style: TextStyle(fontSize: 11),
+                                ),
                               )
                             : Image.network(
                                 r.ownerAvatarUrl!,
@@ -405,7 +448,10 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
                                   height: 20,
                                   color: const Color(0xFF2A2540),
                                   alignment: Alignment.center,
-                                  child: const Text('🎙️', style: TextStyle(fontSize: 11)),
+                                  child: const Text(
+                                    '🎙️',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
                                 ),
                               ),
                       ),
@@ -413,14 +459,25 @@ class _AudioRoomsScreenState extends State<AudioRoomsScreen> {
                       Text(
                         r.ownerName,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const Spacer(),
-                      Icon(Icons.people_outline_rounded, color: colors.primarySoft, size: 15),
+                      Icon(
+                        Icons.people_outline_rounded,
+                        color: colors.primarySoft,
+                        size: 15,
+                      ),
                       const SizedBox(width: 3),
                       Text(
                         '${r.participantCount}',
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -459,11 +516,15 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return AlertDialog(
       backgroundColor: const Color(0xFF17141F),
       title: Text(
-        widget.friendsMode ? 'Live com amigos' : 'Criar sala de voz',
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        widget.friendsMode ? l10n.liveWithFriends : l10n.createVoiceRoom,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+        ),
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -474,21 +535,25 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
             autofocus: true,
             maxLength: 80,
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: 'Nome da sala…',
-              hintStyle: TextStyle(color: Colors.white38),
+            decoration: InputDecoration(
+              hintText: l10n.roomNameHint,
+              hintStyle: const TextStyle(color: Colors.white38),
             ),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.waves_rounded, color: Color(0xFF8B5CF6), size: 18),
+              const Icon(
+                Icons.waves_rounded,
+                color: Color(0xFF8B5CF6),
+                size: 18,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   widget.friendsMode
-                      ? 'Você será o anfitrião: seus amigos podem entrar para falar com você.'
-                      : 'Você será o dono e poderá falar assim que entrar.',
+                      ? l10n.roomHostHelper
+                      : l10n.roomOwnerHelper,
                   style: const TextStyle(color: Colors.white54, fontSize: 13),
                 ),
               ),
@@ -499,12 +564,17 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+          child: Text(
+            l10n.cancel,
+            style: const TextStyle(color: Colors.white54),
+          ),
         ),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF8B5CF6),
+          ),
           onPressed: _submit,
-          child: const Text('Criar e entrar'),
+          child: Text(l10n.createAndJoin),
         ),
       ],
     );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/account_service.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
@@ -44,25 +45,28 @@ class _VerificationScreenState extends State<VerificationScreen> {
   }
 
   Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context)!;
     final reason = _reasonCtrl.text.trim();
     if (reason.isEmpty) {
-      _snack('Explique por que você merece o selo de verificação.');
+      _snack(l10n.verificationReasonEmpty);
       return;
     }
     setState(() => _submitting = true);
     try {
-      final req = await AccountService.instance.submitVerificationRequest(reason);
+      final req = await AccountService.instance.submitVerificationRequest(
+        reason,
+      );
       if (!mounted) return;
       setState(() {
         _request = req;
         _submitting = false;
       });
-      _snack('Solicitação enviada! Fique atento à resposta.');
+      _snack(l10n.verificationSubmitted);
     } catch (e) {
       if (mounted) setState(() => _submitting = false);
       final msg = e.toString().contains('23505')
-          ? 'Você já tem uma solicitação em andamento.'
-          : 'Erro ao enviar: $e';
+          ? l10n.verificationPendingDuplicate
+          : l10n.verificationSubmitError(e.toString());
       _snack(msg);
       _load();
     }
@@ -73,12 +77,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Verificação de perfil',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.profileVerification,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
       ),
       body: _loading
@@ -105,44 +112,46 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  _bodyHeader(),
+                  _bodyHeader(l10n),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800),
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _bodyText(),
+                  _bodyText(l10n),
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.white70, height: 1.4),
                 ),
                 const SizedBox(height: 24),
                 if (_verified)
-                  const Center(
-                    child: Text('Seu perfil é verificado. Obrigado!',
-                        style: TextStyle(color: Colors.white54)),
+                  Center(
+                    child: Text(
+                      l10n.verificationVerifiedThanks,
+                      style: const TextStyle(color: Colors.white54),
+                    ),
                   )
                 else if (_request != null)
-                  _statusCard(_request!)
+                  _statusCard(_request!, l10n)
                 else ...[
                   TextField(
                     controller: _reasonCtrl,
                     maxLines: 4,
                     maxLength: 300,
                     decoration: InputDecoration(
-                      hintText:
-                          'Explique por que devemos verificar seu perfil (ex.: '
-                          'artista, marca ou figura pública)...',
-                      hintStyle:
-                          const TextStyle(color: Colors.white38, fontSize: 13),
+                      hintText: l10n.verificationReasonHint,
+                      hintStyle: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 13,
+                      ),
                       filled: true,
                       fillColor: const Color(0xFF1B1A26),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: Color(0xFF3A3550)),
+                        borderSide: const BorderSide(color: Color(0xFF3A3550)),
                       ),
                     ),
                     style: const TextStyle(color: Colors.white),
@@ -159,77 +168,78 @@ class _VerificationScreenState extends State<VerificationScreen> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
-                        : const Text('Solicitar verificação',
-                            style:
-                                TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                        : Text(
+                            l10n.requestVerification,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                   ),
                 ],
                 const SizedBox(height: 20),
-                const Text(
-                  'A aprovação é feita pela equipe do KLAY K. Não é possível '
-                  'comprar ou solicitar aprovação instantânea.',
+                Text(
+                  l10n.verificationApprovalNote,
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
                 ),
               ],
             ),
     );
   }
 
-  String _bodyHeader() {
-    if (_verified) return 'Perfil verificado';
+  String _bodyHeader(AppLocalizations l10n) {
+    if (_verified) return l10n.verificationHeaderVerified;
     if (_request != null) {
       return switch (_request!.status) {
-        'approved' => 'Verificação aprovada',
-        'rejected' => 'Solicitação recusada',
-        _ => 'Solicitação em análise',
+        'approved' => l10n.verificationHeaderApproved,
+        'rejected' => l10n.verificationHeaderRejected,
+        _ => l10n.verificationHeaderPending,
       };
     }
-    return 'Solicite seu selo de verificação';
+    return l10n.verificationHeaderRequest;
   }
 
-  String _bodyText() {
+  String _bodyText(AppLocalizations l10n) {
     if (_verified) {
-      return 'Seu perfil possui o selo de verificação oficial do KLAY K.';
+      return l10n.verificationBodyVerified;
     }
     if (_request != null) {
       return switch (_request!.status) {
-        'approved' =>
-          'Parabéns! Sua conta agora exibe o selo de verificação oficial.',
-        'rejected' =>
-          'Infelizmente sua solicitação não foi aprovada neste momento. '
-              'Você pode tentar novamente mais tarde.',
-        _ =>
-          'Recebemos sua solicitação. Nossa equipe está avaliando e você será '
-              'notificado assim que houver uma resposta.',
+        'approved' => l10n.verificationBodyApproved,
+        'rejected' => l10n.verificationBodyRejected,
+        _ => l10n.verificationBodyPending,
       };
     }
-    return 'Destaque sua autenticidade com o selo oficial do KLAY K. Envie sua '
-        'solicitação e a equipe irá analisá-la.';
+    return l10n.verificationBodyRequest;
   }
 
-  Widget _statusCard(VerificationRequest req) {
+  Widget _statusCard(VerificationRequest req, AppLocalizations l10n) {
     final (icon, color, title, sub) = switch (req.status) {
       'approved' => (
-          Icons.check_circle,
-          Colors.greenAccent,
-          'Aprovado',
-          'Selo concedido à sua conta.'
-        ),
+        Icons.check_circle,
+        Colors.greenAccent,
+        l10n.verificationBadgeApproved,
+        l10n.verificationBadgeApprovedSub,
+      ),
       'rejected' => (
-          Icons.cancel,
-          const Color(0xFFFF4D6A),
-          'Recusado',
-          req.adminNote.isNotEmpty ? req.adminNote : 'Tente novamente mais tarde.'
-        ),
+        Icons.cancel,
+        const Color(0xFFFF4D6A),
+        l10n.verificationBadgeRejected,
+        req.adminNote.isNotEmpty
+            ? req.adminNote
+            : l10n.verificationBadgeRejectedSub,
+      ),
       _ => (
-          Icons.hourglass_top,
-          Colors.orangeAccent,
-          'Em análise',
-          'Você será avisado assim que houver um veredito.'
-        ),
+        Icons.hourglass_top,
+        Colors.orangeAccent,
+        l10n.statusInProgress,
+        l10n.verificationBadgePendingSub,
+      ),
     };
     return Container(
       padding: const EdgeInsets.all(16),
@@ -245,12 +255,18 @@ class _VerificationScreenState extends State<VerificationScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w800)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(sub,
-                    style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                Text(
+                  sub,
+                  style: const TextStyle(color: Colors.white60, fontSize: 13),
+                ),
               ],
             ),
           ),

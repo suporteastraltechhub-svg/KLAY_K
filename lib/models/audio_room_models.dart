@@ -83,24 +83,25 @@ class AudioRoom {
   }
 
   AudioRoom copyWith({int? participantCount, int? speakerCount}) => AudioRoom(
-        id: id,
-        title: title,
-        slug: slug,
-        description: description,
-        category: category,
-        roomName: roomName,
-        ownerId: ownerId,
-        ownerDisplayName: ownerDisplayName,
-        ownerUsername: ownerUsername,
-        ownerAvatarUrl: ownerAvatarUrl,
-        participantCount: participantCount ?? this.participantCount,
-        speakerCount: speakerCount ?? this.speakerCount,
-        isPublic: isPublic,
-        iOwnIt: iOwnIt,
-      );
+    id: id,
+    title: title,
+    slug: slug,
+    description: description,
+    category: category,
+    roomName: roomName,
+    ownerId: ownerId,
+    ownerDisplayName: ownerDisplayName,
+    ownerUsername: ownerUsername,
+    ownerAvatarUrl: ownerAvatarUrl,
+    participantCount: participantCount ?? this.participantCount,
+    speakerCount: speakerCount ?? this.speakerCount,
+    isPublic: isPublic,
+    iOwnIt: iOwnIt,
+  );
 
   /// Ícone por categoria (com fallback neutro).
-  String get icon => _kAudioCategoryIcons[category.trim().toLowerCase()] ?? '🎙️';
+  String get icon =>
+      _kAudioCategoryIcons[category.trim().toLowerCase()] ?? '🎙️';
 
   /// Nome exibível do dono (fallback: username / "Usuário").
   String get ownerName {

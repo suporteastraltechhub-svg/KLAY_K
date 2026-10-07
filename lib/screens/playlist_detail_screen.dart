@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../design/klayk_design.dart';
+import '../l10n/app_localizations.dart';
 import '../models/playlist_models.dart';
 import '../services/playlist_service.dart';
 import '../services/supabase_service.dart';
@@ -50,14 +51,18 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
       // Postagens da playlist (reais, via playlist_posts + posts).
       final ppRes = await SupabaseService.instance.client
           .from('playlist_posts')
-          .select('id, post_id, position, posts(cover_url, description, created_at)')
+          .select(
+            'id, post_id, position, posts(cover_url, description, created_at)',
+          )
           .eq('playlist_id', widget.playlist.id)
           .order('position', ascending: true);
       final rows = ppRes as List? ?? const [];
       final posts = rows.whereType<Map>().map((r) {
         final p = r['posts'];
         final postMap = p is Map
-            ? Map<String, dynamic>.from(p.map((k, v) => MapEntry(k.toString(), v)))
+            ? Map<String, dynamic>.from(
+                p.map((k, v) => MapEntry(k.toString(), v)),
+              )
             : const <String, dynamic>{};
         return _PostRow(
           playlistPostId: r['id']?.toString() ?? '',
@@ -88,10 +93,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   Future<void> _remove(_PostRow post) async {
     if (_busy) return;
     setState(() => _busy = true);
-    await PlaylistService.instance.removePost(
-      widget.playlist.id,
-      post.postId,
-    );
+    await PlaylistService.instance.removePost(widget.playlist.id, post.postId);
     if (!mounted) return;
     setState(() => _busy = false);
     _load();
@@ -109,19 +111,18 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
       ),
-      body: _loading
-          ? const KlaykListSkeleton(rows: 5)
-          : _buildBody(),
+      body: _loading ? const KlaykListSkeleton(rows: 5) : _buildBody(),
     );
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar esta playlist. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.playlistsLoadFailTitle,
+        message: l10n.playlistDetailLoadFailMsg,
+        actionLabel: l10n.retry,
         actionIcon: Icons.refresh_rounded,
         onAction: _load,
       );
@@ -135,10 +136,10 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           child: _posts.isEmpty
               ? KlaykEmptyState(
                   icon: Icons.playlist_play_rounded,
-                  title: 'Playlist vazia',
+                  title: l10n.playlistDetailEmptyTitle,
                   message: widget.ownsIt
-                      ? 'Você ainda não adicionou vídeos. Os vídeos que você publicar podem ser organizados aqui.'
-                      : 'Este criador ainda não adicionou vídeos a esta playlist.',
+                      ? l10n.playlistDetailEmptyMine
+                      : l10n.playlistDetailEmptyOther,
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -152,6 +153,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   }
 
   Widget _header() {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: Row(
@@ -162,15 +164,19 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                 ? Container(
                     width: 72,
                     height: 72,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                         colors: [Color(0xFF2A2350), Color(0xFF161026)],
                       ),
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(Icons.video_library_rounded, color: Color(0xFF8B5CF6), size: 30),
+                    child: const Icon(
+                      Icons.video_library_rounded,
+                      color: Color(0xFF8B5CF6),
+                      size: 30,
+                    ),
                   )
                 : Image.network(
                     widget.playlist.coverUrl,
@@ -181,7 +187,11 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                       width: 72,
                       height: 72,
                       color: const Color(0xFF2A2350),
-                      child: const Icon(Icons.video_library_rounded, color: Color(0xFF8B5CF6), size: 30),
+                      child: const Icon(
+                        Icons.video_library_rounded,
+                        color: Color(0xFF8B5CF6),
+                        size: 30,
+                      ),
                     ),
                   ),
           ),
@@ -192,18 +202,26 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
               children: [
                 Text(
                   widget.playlist.name,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 17,
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${_posts.length} ${_posts.length == 1 ? 'vídeo' : 'vídeos'}',
+                  l10n.playlistDetailVideoCount(_posts.length),
                   style: const TextStyle(color: Colors.white54, fontSize: 13),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'por ${widget.playlist.creatorName}',
+                  l10n.playlistDetailByCreator(widget.playlist.creatorName),
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -214,6 +232,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   }
 
   Widget _postCard(_PostRow post) {
+    final l10n = AppLocalizations.of(context)!;
     return KlayKCard(
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -226,7 +245,11 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                     height: 48,
                     color: const Color(0xFF2A2350),
                     alignment: Alignment.center,
-                    child: const Icon(Icons.play_circle_fill_rounded, color: Color(0xFF8B5CF6), size: 22),
+                    child: const Icon(
+                      Icons.play_circle_fill_rounded,
+                      color: Color(0xFF8B5CF6),
+                      size: 22,
+                    ),
                   )
                 : Image.network(
                     post.cover,
@@ -237,7 +260,11 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                       width: 64,
                       height: 48,
                       color: const Color(0xFF2A2350),
-                      child: const Icon(Icons.play_circle_fill_rounded, color: Color(0xFF8B5CF6), size: 22),
+                      child: const Icon(
+                        Icons.play_circle_fill_rounded,
+                        color: Color(0xFF8B5CF6),
+                        size: 22,
+                      ),
                     ),
                   ),
           ),
@@ -247,14 +274,18 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  post.title.isEmpty ? 'Vídeo sem descrição' : post.title,
+                  post.title.isEmpty ? l10n.playlistDetailNoTitle : post.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.3),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    height: 1.3,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Vídeo #${post.position + 1}',
+                  l10n.playlistDetailVideoPosition(post.position + 1),
                   style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
               ],
@@ -262,9 +293,13 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           ),
           if (widget.ownsIt)
             IconButton(
-              tooltip: 'Remover da playlist',
+              tooltip: l10n.playlistDetailRemoveTooltip,
               onPressed: _busy ? null : () => _remove(post),
-              icon: const Icon(Icons.remove_circle_outline_rounded, color: Colors.white38, size: 20),
+              icon: const Icon(
+                Icons.remove_circle_outline_rounded,
+                color: Colors.white38,
+                size: 20,
+              ),
             ),
         ],
       ),

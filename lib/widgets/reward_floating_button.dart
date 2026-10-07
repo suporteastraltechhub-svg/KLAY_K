@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/wallet_sheet.dart';
 import '../services/reward_service.dart';
 import '../services/supabase_service.dart';
+import 'bubble_dismissal.dart';
 
 /// Botão flutuante premium de "Ganhar Moedas" do feed.
 ///
@@ -20,7 +21,11 @@ import '../services/supabase_service.dart';
 /// recompensa (15 moedas) é sempre validada no backend (`claim_watch_cycle_reward`);
 /// o saldo é sempre o devolvido pelo servidor.
 class RewardFloatingButton extends StatefulWidget {
-  const RewardFloatingButton({super.key, required this.visibleTab, this.paused});
+  const RewardFloatingButton({
+    super.key,
+    required this.visibleTab,
+    this.paused,
+  });
 
   /// Índice da aba: exibimos somente no Feed (0).
   final int visibleTab;
@@ -46,7 +51,9 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
   late final AnimationController _plusAnim;
   Offset _pos = const Offset(16, 200);
   bool _loaded = false;
+  bool _bubbleLoaded = false;
   String? _floatingText;
+  final BubbleDismissal _dismissal = BubbleDismissal('reward_btn_hidden_until');
 
   static const String _posKey = 'reward_btn_pos';
 
@@ -60,6 +67,12 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
     );
     WidgetsBinding.instance.addObserver(this);
     widget.paused?.addListener(_onPausedChanged);
+    _dismissal.ensureLoaded().then((_) {
+      if (mounted) {
+        setState(() => _bubbleLoaded = true);
+        _controller.setActive(_shouldRun());
+      }
+    });
     _loadPos();
   }
 
@@ -72,7 +85,10 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
   @override
   void didUpdateWidget(covariant RewardFloatingButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.paused != widget.paused) {
+    // Só troca o listener quando o notifier é realmente outro. Antes, o
+    // `removeListener` rodava em todo rebuild — mesmo com o mesmo notifier —
+    // e o `ValueNotifier` repetia a mesma notificação.
+    if (!identical(oldWidget.paused, widget.paused)) {
       oldWidget.paused?.removeListener(_onPausedChanged);
       widget.paused?.addListener(_onPausedChanged);
     }
@@ -88,6 +104,10 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
   bool get _pausedBySignal => widget.paused?.value ?? false;
 
   bool _shouldRun() {
+    if (!_bubbleLoaded) return false;
+    // X com cooldown (igual QuestBubble): esconde temporariamente e a bolinha
+    // volta sozinha após o período — nunca desabilita o recurso para sempre.
+    if (_dismissal.isHidden()) return false;
     if (_pausedBySignal) return false;
     if (widget.visibleTab != 0) return false;
     if (!SupabaseService.instance.isConfigured) return false;
@@ -161,18 +181,32 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
     await WalletSheet.show(context);
   }
 
+  /// Fecha a bolinha por um cooldown local (padrão 4h), como a QuestBubble —
+  /// ela volta a aparecer sozinha depois; nunca desabilitamos o recurso.
+  void _hide() {
+    setState(() {
+      _pos = const Offset(16, 200);
+    });
+    _persistPos();
+    _dismissal.dismiss();
+    _controller.setActive(false);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_loaded) return const SizedBox.shrink();
     if (!_shouldRun()) return const SizedBox.shrink();
 
     final size = MediaQuery.of(context).size;
-    final maxX = (size.width - RewardFloatingButton.size).clamp(0.0, double.infinity);
-    final maxY = (size.height - 120 - RewardFloatingButton.size).clamp(0.0, double.infinity);
-    final pos = Offset(
-      _pos.dx.clamp(12.0, maxX),
-      _pos.dy.clamp(120.0, maxY),
+    final maxX = (size.width - RewardFloatingButton.size).clamp(
+      0.0,
+      double.infinity,
     );
+    final maxY = (size.height - 120 - RewardFloatingButton.size).clamp(
+      0.0,
+      double.infinity,
+    );
+    final pos = Offset(_pos.dx.clamp(12.0, maxX), _pos.dy.clamp(120.0, maxY));
 
     return Positioned(
       left: 0,
@@ -194,11 +228,25 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
                     behavior: HitTestBehavior.opaque,
                     onTap: _open,
                     onPanUpdate: (d) {
-                      setState(() =>
-                          _pos = Offset(pos.dx + d.delta.dx, pos.dy + d.delta.dy));
+                      setState(
+                        () => _pos = Offset(
+                          pos.dx + d.delta.dx,
+                          pos.dy + d.delta.dy,
+                        ),
+                      );
                     },
                     onPanEnd: (_) => _persistPos(),
                     child: _buildButton(),
+                  ),
+                  // X com cooldown: fecha a bolinha temporariamente.
+                  GestureDetector(
+                    key: const ValueKey('reward_btn_close'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _hide,
+                    child: const Padding(
+                      padding: EdgeInsets.only(top: 3),
+                      child: Icon(Icons.close, size: 14, color: Colors.white38),
+                    ),
                   ),
                   // Texto flutuante premium "+15 moedas".
                   AnimatedBuilder(
@@ -213,7 +261,9 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
                           child: Container(
                             margin: const EdgeInsets.only(top: 6),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
                                 colors: [Color(0xFF8B5CF6), Color(0xFF38BDF8)],
@@ -319,10 +369,7 @@ class CircularRewardProgress extends StatelessWidget {
         ),
         child: Center(
           // Margem interna para o anel não encostar/cobrir a arte.
-          child: Padding(
-            padding: EdgeInsets.all(ringWidth + 2),
-            child: child,
-          ),
+          child: Padding(padding: EdgeInsets.all(ringWidth + 2), child: child),
         ),
       ),
     );

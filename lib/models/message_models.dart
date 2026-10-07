@@ -52,8 +52,8 @@ class Conversation {
       peerAvatar: peer?['avatar_url'] as String?,
       peerVerified: peer?['is_verified'] as bool? ?? false,
       unread: (json['unread'] as num?)?.toInt() ?? 0,
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '')
-              ?.toLocal() ??
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
           DateTime.now(),
     );
   }
@@ -91,8 +91,8 @@ class DirectMessage {
           ? DateTime.tryParse(json['read_at'] as String)?.toLocal()
           : null,
       deleted: json['deleted'] as bool? ?? false,
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '')
-              ?.toLocal() ??
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
           DateTime.now(),
       isMine: senderId.isNotEmpty && senderId == myId,
     );

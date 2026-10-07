@@ -56,11 +56,7 @@ class LiveChatSendException implements Exception {
   final String? code;
   final bool flagged;
 
-  const LiveChatSendException(
-    this.message, {
-    this.code,
-    this.flagged = false,
-  });
+  const LiveChatSendException(this.message, {this.code, this.flagged = false});
 
   @override
   String toString() => message;
@@ -70,6 +66,12 @@ class SupabaseService {
   SupabaseService._();
 
   static final SupabaseService instance = SupabaseService._();
+
+  /// Teto de espera para qualquer chamada de rede (auth, queries, RPCs, edge
+  /// functions). Evita que uma rota instável ou backend lento deixe o app
+  /// aguardando para sempre (feed "Carregando...", botão de salvar travado).
+  /// 15s é tolerante a conexões móveis lentas sem parecer infinito.
+  static const Duration networkTimeout = Duration(seconds: 15);
 
   Future<void>? _initFuture;
 
@@ -83,7 +85,8 @@ class SupabaseService {
   /// Com `KLAY_E2E=true` um teste de integração ENGLOBA rede real de propósito
   /// (credenciais de conta de teste confirmadas via backend/admin).
   static final bool _inTests = Platform.environment['FLUTTER_TEST'] == 'true';
-  static final bool _allowRealNetwork = Platform.environment['KLAY_E2E'] == 'true';
+  static final bool _allowRealNetwork =
+      Platform.environment['KLAY_E2E'] == 'true';
 
   bool get isConfigured =>
       AppConfig.isSupabaseConfigured && (!_inTests || _allowRealNetwork);
@@ -124,7 +127,9 @@ class SupabaseService {
     var user = client.auth.currentUser;
     if (user == null) {
       try {
-        final res = await client.auth.signInAnonymously();
+        final res = await client.auth.signInAnonymously().timeout(
+          networkTimeout,
+        );
         user = res.user;
       } on AuthException catch (e) {
         final msg = e.message.toLowerCase();
@@ -153,9 +158,12 @@ class SupabaseService {
       };
       final current = client.auth.currentUser?.userMetadata ?? {};
       final needsUpdate =
-          current['full_name'] != name || current['username'] != meta['username'];
+          current['full_name'] != name ||
+          current['username'] != meta['username'];
       if (needsUpdate) {
-        await client.auth.updateUser(UserAttributes(data: meta));
+        await client.auth
+            .updateUser(UserAttributes(data: meta))
+            .timeout(networkTimeout);
       }
       await client
           .from('profiles')
@@ -164,6 +172,7 @@ class SupabaseService {
             'display_name': name,
             'username': userName.replaceFirst(RegExp(r'^@'), ''),
           }, onConflict: 'id')
+          .timeout(networkTimeout)
           .then((_) {})
           .catchError((Object e) {});
     } catch (_) {
@@ -182,7 +191,9 @@ class SupabaseService {
   }) async {
     await ensureReady();
     try {
-      final res = await client.functions.invoke(name, body: body);
+      final res = await client.functions
+          .invoke(name, body: body)
+          .timeout(networkTimeout);
       final data = res.data;
       if (data is Map) {
         return Map<String, dynamic>.from(data);
@@ -198,14 +209,19 @@ class SupabaseService {
     required bool isStreamer,
     String? displayName,
     String? role,
+    String? liveId,
   }) async {
     final user = await ensureAuthenticated();
-    final res = await invoke('livekit-token', body: {
-      'roomName': roomName,
-      'isStreamer': isStreamer,
-      if (role != null && role.isNotEmpty) 'role': role,
-      'displayName': displayName ?? kAppIdentity.displayName,
-    });
+    final res = await invoke(
+      'livekit-token',
+      body: {
+        'roomName': roomName,
+        'isStreamer': isStreamer,
+        if (role != null && role.isNotEmpty) 'role': role,
+        if (liveId != null && liveId.isNotEmpty) 'live_id': liveId,
+        'displayName': displayName ?? kAppIdentity.displayName,
+      },
+    );
     final serverUrl = res['server_url'] as String? ?? '';
     final participantToken = res['participant_token'] as String? ?? '';
     if (serverUrl.isEmpty || participantToken.isEmpty || user.id.isEmpty) {
@@ -226,17 +242,24 @@ class SupabaseService {
     String? gameName,
     String? coverUrl,
     bool ageRestricted = false,
+    String liveType = 'camera',
+    bool rtmpEnabled = false,
   }) async {
-    final res = await invoke('create-live', body: {
-      'title': title,
-      'description': description,
-      'category': category,
-      'hashtags': hashtags,
-      'privacy': privacy,
-      if (gameName != null && gameName.isNotEmpty) 'game_name': gameName,
-      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
-      if (ageRestricted) 'age_restricted': true,
-    });
+    final res = await invoke(
+      'create-live',
+      body: {
+        'title': title,
+        'description': description,
+        'category': category,
+        'hashtags': hashtags,
+        'privacy': privacy,
+        if (gameName != null && gameName.isNotEmpty) 'game_name': gameName,
+        if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+        if (ageRestricted) 'age_restricted': true,
+        if (liveType != 'camera') 'live_type': liveType,
+        if (rtmpEnabled) 'rtmp_enabled': true,
+      },
+    );
     final id = res['live_id'] as String?;
     final roomName = res['room_name'] as String?;
     if (id == null || roomName == null) {
@@ -255,6 +278,8 @@ class SupabaseService {
       gameName: gameName,
       coverUrl: coverUrl,
       ageRestricted: ageRestricted,
+      liveType: liveType,
+      rtmpEnabled: rtmpEnabled,
       streamerDisplayName: kAppIdentity.displayName,
       streamerUsername: kAppIdentity.username,
     );
@@ -262,6 +287,22 @@ class SupabaseService {
 
   Future<void> endLive(String liveId) async {
     await invoke('end-live', body: {'live_id': liveId});
+    _notifyLiveEnded(liveId);
+  }
+
+  /// Notificação real de encerramento de live (evento verdadeiro do sistema).
+  Future<void> _notifyLiveEnded(String liveId) async {
+    try {
+      final me = client.auth.currentUser?.id;
+      if (me == null || me.isEmpty) return;
+      await client.from('notifications').insert({
+        'user_id': me,
+        'actor_id': me,
+        'type': 'live_end',
+        'ref_id': liveId,
+        'message': '',
+      });
+    } catch (_) {}
   }
 
   /// Consulta o status real de uma live no backend (sem depender do estado
@@ -285,11 +326,10 @@ class SupabaseService {
     String description = '',
     String category = '',
   }) async {
-    final res = await invoke('create-audio-room', body: {
-      'title': title,
-      'description': description,
-      'category': category,
-    });
+    final res = await invoke(
+      'create-audio-room',
+      body: {'title': title, 'description': description, 'category': category},
+    );
     final id = res['audio_room_id'] as String?;
     final roomName = res['room_name'] as String?;
     if (id == null || roomName == null) {
@@ -308,9 +348,14 @@ class SupabaseService {
     if (client.auth.currentUser == null) {
       await ensureAuthenticated();
     }
-    final res = await client.from('lives').select(
+    final res = await client
+        .from('lives')
+        .select(
           '*, profiles:streamer_id(display_name, username, avatar_url, is_verified)',
-        ).eq('status', 'live').order('started_at', ascending: false).limit(50);
+        )
+        .eq('status', 'live')
+        .order('started_at', ascending: false)
+        .limit(50);
     final rows = res as List;
     return rows.whereType<Map<dynamic, dynamic>>().map((row) {
       final m = Map<String, dynamic>.from(
@@ -329,7 +374,9 @@ class SupabaseService {
     final me = client.auth.currentUser?.id;
     final res = await client
         .from('live_chat')
-        .select('*, sender:user_id(display_name, username, avatar_url, is_verified)')
+        .select(
+          '*, sender:user_id(display_name, username, avatar_url, is_verified)',
+        )
         .eq('live_id', liveId)
         .order('created_at', ascending: true)
         .limit(200);
@@ -344,8 +391,9 @@ class SupabaseService {
 
   RealtimeChannel subscribeToChat(
     String liveId,
-    void Function(LiveChatMessage message) onInsert,
-  ) {
+    void Function(LiveChatMessage message) onInsert, {
+    void Function(RealtimeSubscribeStatus status, Object? error)? onStatus,
+  }) {
     final me = client.auth.currentUser?.id;
     final channel = client
         .channel('live-chat-$liveId')
@@ -367,7 +415,7 @@ class SupabaseService {
             onInsert(msg);
           },
         )
-        .subscribe();
+        .subscribe(onStatus);
     return channel;
   }
 
@@ -404,8 +452,9 @@ class SupabaseService {
 
   RealtimeChannel subscribeToLiveChanges(
     String liveId,
-    void Function(Map<String, dynamic> record) onChange,
-  ) {
+    void Function(Map<String, dynamic> record) onChange, {
+    void Function(RealtimeSubscribeStatus status, Object? error)? onStatus,
+  }) {
     return client
         .channel('live-row-$liveId')
         .onPostgresChanges(
@@ -417,17 +466,17 @@ class SupabaseService {
             column: 'id',
             value: liveId,
           ),
-          callback: (payload) => onChange(
-            Map<String, dynamic>.from(payload.newRecord),
-          ),
+          callback: (payload) =>
+              onChange(Map<String, dynamic>.from(payload.newRecord)),
         )
-        .subscribe();
+        .subscribe(onStatus);
   }
 
   RealtimeChannel subscribeToLiveEvents(
     String liveId,
-    void Function(LiveRoomEvent event) onEvent,
-  ) {
+    void Function(LiveRoomEvent event) onEvent, {
+    void Function(RealtimeSubscribeStatus status, Object? error)? onStatus,
+  }) {
     return client
         .channel('live-events-$liveId')
         .onPostgresChanges(
@@ -440,21 +489,23 @@ class SupabaseService {
             value: liveId,
           ),
           callback: (payload) => onEvent(
-            LiveRoomEvent.fromJson(Map<String, dynamic>.from(payload.newRecord)),
+            LiveRoomEvent.fromJson(
+              Map<String, dynamic>.from(payload.newRecord),
+            ),
           ),
         )
-        .subscribe();
+        .subscribe(onStatus);
   }
 
   RealtimeChannel subscribeToBroadcast(
     String liveId,
     String event,
-    void Function(Map<String, dynamic> payload) callback,
-  ) =>
-      client
-          .channel('live-broadcast-$liveId')
-          .onBroadcast(event: event, callback: callback)
-          .subscribe();
+    void Function(Map<String, dynamic> payload) callback, {
+    void Function(RealtimeSubscribeStatus status, Object? error)? onStatus,
+  }) => client
+      .channel('live-broadcast-$liveId')
+      .onBroadcast(event: event, callback: callback)
+      .subscribe(onStatus);
 
   Future<void> sendBroadcast(
     String liveId,
@@ -477,7 +528,9 @@ class SupabaseService {
   ) {
     final me = client.auth.currentUser?.id;
     if (me == null) {
-      throw StateError('Usuário não autenticado para notificações em tempo real.');
+      throw StateError(
+        'Usuário não autenticado para notificações em tempo real.',
+      );
     }
     return client
         .channel('notifications-$me')
@@ -506,21 +559,57 @@ class SupabaseService {
   }) async {
     final user = await ensureAuthenticated();
     if (user.id.isEmpty) return;
+    if (!isStreamer) {
+      await _notifyStreamerNewViewer(liveId, user.id);
+    }
     try {
-      await client.from('live_participants').upsert(
-        {
-          'live_id': liveId,
-          'user_id': user.id,
-          'is_streamer': isStreamer,
-        },
-        onConflict: 'live_id,user_id',
-        ignoreDuplicates: true,
-      ).then((_) {});
+      await client
+          .from('live_participants')
+          .upsert({
+            'live_id': liveId,
+            'user_id': user.id,
+            'is_streamer': isStreamer,
+            'left_at': null,
+            'joined_at': DateTime.now().toUtc().toIso8601String(),
+          }, onConflict: 'live_id,user_id')
+          .then((_) {});
     } catch (_) {}
     if (!isStreamer) {
-      await logEvent(liveId, 'USER_JOINED',
-          userId: user.id, username: kAppIdentity.displayName);
+      await logEvent(
+        liveId,
+        'USER_JOINED',
+        userId: user.id,
+        username: kAppIdentity.displayName,
+      );
     }
+  }
+
+  /// Notifica o dono da live apenas quando um espectador REAL entra pela
+  /// primeira vez (upsert + participantes deduplicam re-entradas).
+  Future<void> _notifyStreamerNewViewer(String liveId, String viewerId) async {
+    try {
+      final existing = await client
+          .from('live_participants')
+          .select('id')
+          .eq('live_id', liveId)
+          .eq('user_id', viewerId)
+          .maybeSingle();
+      if (existing != null) return;
+      final live = await client
+          .from('lives')
+          .select('streamer_id')
+          .eq('id', liveId)
+          .maybeSingle();
+      final streamer = live?['streamer_id'] as String?;
+      if (streamer == null || streamer.isEmpty || streamer == viewerId) return;
+      await client.from('notifications').insert({
+        'user_id': streamer,
+        'actor_id': viewerId,
+        'type': 'live_viewer',
+        'ref_id': liveId,
+        'message': '',
+      });
+    } catch (_) {}
   }
 
   Future<void> recordParticipantLeft(String liveId) async {
@@ -535,8 +624,12 @@ class SupabaseService {
           .isFilter('left_at', null)
           .then((_) {});
     } catch (_) {}
-    await logEvent(liveId, 'USER_LEFT',
-        userId: user.id, username: kAppIdentity.displayName);
+    await logEvent(
+      liveId,
+      'USER_LEFT',
+      userId: user.id,
+      username: kAppIdentity.displayName,
+    );
   }
 
   /// Envia mensagem no chat da live via RPC `live_send_chat` — o backend
@@ -548,8 +641,10 @@ class SupabaseService {
   Future<LiveChatMessage> insertChat(String liveId, String message) async {
     final user = await ensureAuthenticated();
     try {
-      final res = await client.rpc('live_send_chat',
-          params: {'p_live_id': liveId, 'p_message': message});
+      final res = await client.rpc(
+        'live_send_chat',
+        params: {'p_live_id': liveId, 'p_message': message},
+      );
       final data = res is Map ? Map<String, dynamic>.from(res) : const {};
       if (data['ok'] != true || data['id'] == null) {
         throw LiveChatSendException(
@@ -557,22 +652,16 @@ class SupabaseService {
               'Não foi possível enviar a mensagem. Tente novamente.',
         );
       }
-      return LiveChatMessage.fromJson(
-        {
-          'id': data['id'],
-          'live_id': liveId,
-          'user_id': user.id,
-          'message': message,
-          'created_at': data['created_at'],
-        },
-        myId: user.id,
-      );
+      return LiveChatMessage.fromJson({
+        'id': data['id'],
+        'live_id': liveId,
+        'user_id': user.id,
+        'message': message,
+        'created_at': data['created_at'],
+      }, myId: user.id);
     } on PostgrestException catch (e) {
       final code = e.message.trim();
-      throw LiveChatSendException(
-        code,
-        code: code,
-      );
+      throw LiveChatSendException(code, code: code);
     }
   }
 
@@ -587,8 +676,10 @@ class SupabaseService {
   /// migração/RPC ainda não estiver aplicada no backend.
   Future<bool> editChat(String messageId, String newMessage) async {
     try {
-      final res = await client
-          .rpc('live_edit_chat', params: {'p_message_id': messageId, 'p_message': newMessage});
+      final res = await client.rpc(
+        'live_edit_chat',
+        params: {'p_message_id': messageId, 'p_message': newMessage},
+      );
       final data = res is Map ? Map<String, dynamic>.from(res) : const {};
       if (data['ok'] != true || data['id'] == null) return false;
       return true;
@@ -617,24 +708,30 @@ class SupabaseService {
       await insertChat(liveId, giftMessage);
     } catch (_) {}
     try {
-      await client.from('live_gifts').insert({
-        'live_id': liveId,
-        'sender_id': user.id,
-        'receiver_id': receiverId,
+      await client
+          .from('live_gifts')
+          .insert({
+            'live_id': liveId,
+            'sender_id': user.id,
+            'receiver_id': receiverId,
+            'gift_id': gift.id,
+            'gift_name': gift.name,
+            'gift_amount': amount,
+          })
+          .then((_) {});
+    } catch (_) {}
+    await logEvent(
+      liveId,
+      'GIFT_RECEIVED',
+      userId: user.id,
+      username: kAppIdentity.displayName,
+      metadata: {
         'gift_id': gift.id,
         'gift_name': gift.name,
         'gift_amount': amount,
-      }).then((_) {});
-    } catch (_) {}
-    await logEvent(liveId, 'GIFT_RECEIVED',
-        userId: user.id,
-        username: kAppIdentity.displayName,
-        metadata: {
-          'gift_id': gift.id,
-          'gift_name': gift.name,
-          'gift_amount': amount,
-          'message': giftMessage,
-        });
+        'message': giftMessage,
+      },
+    );
   }
 
   Future<void> logEvent(
@@ -647,13 +744,16 @@ class SupabaseService {
     try {
       await ensureReady();
       final uid = userId ?? client.auth.currentUser?.id;
-      await client.from('live_events').insert({
-        'live_id': liveId,
-        'event_type': eventType,
-        'user_id': uid,
-        'username': username ?? kAppIdentity.displayName,
-        'metadata': metadata,
-      }).then((_) {});
+      await client
+          .from('live_events')
+          .insert({
+            'live_id': liveId,
+            'event_type': eventType,
+            'user_id': uid,
+            'username': username ?? kAppIdentity.displayName,
+            'metadata': metadata,
+          })
+          .then((_) {});
     } catch (_) {}
   }
 
@@ -693,7 +793,10 @@ class SupabaseService {
   /// Login com e-mail e senha (Supabase Auth real).
   Future<User> signInWithEmail(String email, String password) async {
     await ensureReady();
-    final res = await client.auth.signInWithPassword(email: email, password: password);
+    final res = await client.auth.signInWithPassword(
+      email: email,
+      password: password,
+    );
     final user = res.user;
     if (user == null) {
       throw const AuthException('Credenciais inválidas.');
@@ -778,11 +881,7 @@ class SupabaseService {
     if (inviteCode != null && inviteCode.trim().isNotEmpty) {
       data['invite_code'] = inviteCode.trim();
     }
-    return client.auth.signUp(
-      email: email,
-      password: password,
-      data: data,
-    );
+    return client.auth.signUp(email: email, password: password, data: data);
   }
 
   /// Recuperação de senha (Supabase Auth envio de e-mail).

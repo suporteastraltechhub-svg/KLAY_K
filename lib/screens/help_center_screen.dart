@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/account_service.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
@@ -19,14 +20,25 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
   bool _loading = true;
   List<SupportTicket> _tickets = [];
 
-  final _categories = <String, String>{
-    'conta': 'Minha conta',
-    'video': 'Vídeos e publicações',
-    'live': 'Lives',
-    'pagamento': 'Pagamentos e assinaturas',
-    'privacidade': 'Privacidade e segurança',
-    'outro': 'Outro assunto',
-  };
+  final _categoryIds = [
+    'conta',
+    'video',
+    'live',
+    'pagamento',
+    'privacidade',
+    'outro',
+  ];
+
+  String _categoryLabel(String id, AppLocalizations l10n) {
+    return switch (id) {
+      'conta' => l10n.ticketCategoryAccount,
+      'video' => l10n.ticketCategoryVideo,
+      'live' => l10n.ticketCategoryLive,
+      'pagamento' => l10n.ticketCategoryPayment,
+      'privacidade' => l10n.ticketCategoryPrivacy,
+      _ => l10n.ticketCategoryOther,
+    };
+  }
 
   @override
   void initState() {
@@ -48,20 +60,24 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
   }
 
   Future<void> _openNewTicket() async {
+    final l10n = AppLocalizations.of(context)!;
     final category = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: const Color(0xFF17151F),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: _categories.entries
-              .map((e) => ListTile(
-                    leading: const Icon(Icons.category_outlined,
-                        color: _kAccent),
-                    title: Text(e.value,
-                        style: const TextStyle(color: Colors.white)),
-                    onTap: () => Navigator.pop(ctx, e.key),
-                  ))
+          children: _categoryIds
+              .map(
+                (id) => ListTile(
+                  leading: const Icon(Icons.category_outlined, color: _kAccent),
+                  title: Text(
+                    _categoryLabel(id, AppLocalizations.of(ctx)!),
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () => Navigator.pop(ctx, id),
+                ),
+              )
               .toList(),
         ),
       ),
@@ -74,29 +90,33 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF17151F),
-        title: Text(_categories[category]!),
+        title: Text(_categoryLabel(category, AppLocalizations.of(ctx)!)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: subjectCtrl,
-                decoration: const InputDecoration(
-                    hintText: 'Assunto',
-                    hintStyle: TextStyle(color: Colors.white38),
-                    enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF3A3550)))),
+                decoration: InputDecoration(
+                  hintText: AppLocalizations.of(ctx)!.contactSubjectHint,
+                  hintStyle: const TextStyle(color: Colors.white38),
+                  enabledBorder: const UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF3A3550)),
+                  ),
+                ),
                 style: const TextStyle(color: Colors.white),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: msgCtrl,
                 maxLines: 4,
-                decoration: const InputDecoration(
-                    hintText: 'Descreva seu problema...',
-                    hintStyle: TextStyle(color: Colors.white38),
-                    enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF3A3550)))),
+                decoration: InputDecoration(
+                  hintText: AppLocalizations.of(ctx)!.contactMessageHint,
+                  hintStyle: const TextStyle(color: Colors.white38),
+                  enabledBorder: const UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF3A3550)),
+                  ),
+                ),
                 style: const TextStyle(color: Colors.white),
               ),
             ],
@@ -105,11 +125,16 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(
-                ctx, _TicketDraft(subjectCtrl.text.trim(), msgCtrl.text.trim())),
+              ctx,
+              _TicketDraft(subjectCtrl.text.trim(), msgCtrl.text.trim()),
+            ),
             style: FilledButton.styleFrom(backgroundColor: _kAccent),
             child: const Text('Enviar'),
           ),
@@ -119,7 +144,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
 
     if (result == null || result.subject.isEmpty || result.message.isEmpty) {
       if (result != null) {
-        _snack('Preencha o assunto e a mensagem.');
+        _snack(l10n.ticketFieldsRequired);
       }
       return;
     }
@@ -130,10 +155,10 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
         subject: result.subject,
         message: result.message,
       );
-      _snack('Chamado criado. Responderemos em breve.');
+      _snack(l10n.ticketCreated);
       _load();
     } catch (e) {
-      _snack('Erro ao criar o chamado: $e');
+      _snack(l10n.ticketCreateError(e.toString()));
     }
   }
 
@@ -142,55 +167,50 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Central de Ajuda',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.helpCenter,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewTicket,
         backgroundColor: _kAccent,
         icon: const Icon(Icons.add_comment_outlined),
-        label: const Text('Falar com suporte'),
+        label: Text(l10n.talkToSupport),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _faqItem('Como faço upload de um vídeo?',
-              'Na aba "Enviar" (botão +), escolha um vídeo da galeria, adicione '
-              'descrição e legendas, e selecione uma capa. Toque em Publicar.'),
-          _faqItem('Como funciona a verificação do perfil?',
-              'Vá em Configurações → Verificação de perfil, envie sua solicitação '
-              'com um motivo. A aprovação é manual e exclusiva da equipe.'),
-          _faqItem('Meu conteúdo não está aparecendo.',
-              'Verifique sua conexão e se a conta está em modo privado. Conteúdo '
-              'de contas privadas só aparece para seguidores aprovados.'),
-          _faqItem('Como moderar meu chat de live?',
-              'Dentro da live toque em "Moderadores" para adicionar ou remover '
-              'moderadores da transmissão.'),
-          _faqItem('Como desbloquear um usuário?',
-              'Vá em Configurações → Usuários bloqueados e desbloqueie.'),
+          _faqItem(l10n.faqUploadTitle, l10n.faqUploadBody),
+          _faqItem(l10n.faqVerificationTitle, l10n.faqVerificationBody),
+          _faqItem(l10n.faqContentTitle, l10n.faqContentBody),
+          _faqItem(l10n.faqModerationTitle, l10n.faqModerationBody),
+          _faqItem(l10n.faqUnblockTitle, l10n.faqUnblockBody),
           const SizedBox(height: 24),
-          _sectionHeader('MEUS CHAMADOS'),
+          _sectionHeader(l10n.myTicketsSection),
           if (_loading)
             const Padding(
               padding: EdgeInsets.all(24),
-              child: Center(
-                  child: CircularProgressIndicator(color: _kAccent)),
+              child: Center(child: CircularProgressIndicator(color: _kAccent)),
             )
           else if (_tickets.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
+            Padding(
+              padding: const EdgeInsets.all(24),
               child: Center(
-                child: Text('Você ainda não tem chamados.',
-                    style: TextStyle(color: Colors.white54)),
+                child: Text(
+                  l10n.noTicketsYet,
+                  style: const TextStyle(color: Colors.white54),
+                ),
               ),
             )
           else
-            ..._tickets.map((t) => _ticketCard(t)),
+            ..._tickets.map((t) => _ticketCard(t, l10n)),
           const SizedBox(height: 80),
         ],
       ),
@@ -200,38 +220,48 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
   Widget _faqItem(String q, String a) {
     return ExpansionTile(
       leading: const Icon(Icons.help_outline, color: _kAccent),
-      title: Text(q,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+      title: Text(
+        q,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       expandedCrossAxisAlignment: CrossAxisAlignment.start,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      collapsedShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
       tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       backgroundColor: const Color(0xFF1B1A26),
       collapsedBackgroundColor: const Color(0xFF1B1A26),
       children: [
         Align(
           alignment: Alignment.centerLeft,
-          child: Text(a, style: const TextStyle(color: Colors.white70, height: 1.4)),
+          child: Text(
+            a,
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
         ),
       ],
     );
   }
 
   Widget _sectionHeader(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: _kAccent,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: _kAccent,
+        fontSize: 12,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.2,
+      ),
+    ),
+  );
 
-  Widget _ticketCard(SupportTicket t) {
+  Widget _ticketCard(SupportTicket t, AppLocalizations l10n) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -245,25 +275,35 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
           Row(
             children: [
               Expanded(
-                child: Text(t.subject,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w700)),
+                child: Text(
+                  t.subject,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
-              _statusChip(t.status),
+              _statusChip(t.status, l10n),
             ],
           ),
           const SizedBox(height: 4),
-          Text(_categories[t.category] ?? t.category,
-              style: const TextStyle(color: _kAccent, fontSize: 12)),
+          Text(
+            _categoryLabel(t.category, l10n),
+            style: const TextStyle(color: _kAccent, fontSize: 12),
+          ),
           const SizedBox(height: 6),
-          Text(t.message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white60, fontSize: 13)),
+          Text(
+            t.message,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white60, fontSize: 13),
+          ),
           const SizedBox(height: 6),
-          Text('Enviado em ${_fmt(t.createdAt)}',
-              style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          Text(
+            l10n.ticketSentOn(_fmt(t.createdAt)),
+            style: const TextStyle(color: Colors.white38, fontSize: 11),
+          ),
           if (t.adminReply.isNotEmpty) ...[
             const Divider(color: Color(0xFF2A2740), height: 20),
             Row(
@@ -272,8 +312,10 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
                 const Icon(Icons.support_agent, color: _kAccent, size: 16),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(t.adminReply,
-                      style: const TextStyle(color: Colors.white70, height: 1.3)),
+                  child: Text(
+                    t.adminReply,
+                    style: const TextStyle(color: Colors.white70, height: 1.3),
+                  ),
                 ),
               ],
             ),
@@ -283,12 +325,12 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
     );
   }
 
-  Widget _statusChip(String status) {
+  Widget _statusChip(String status, AppLocalizations l10n) {
     final (label, color) = switch (status) {
-      'answered' => ('Respondido', Colors.greenAccent),
-      'in_review' => ('Em análise', Colors.orangeAccent),
-      'closed' => ('Fechado', Colors.grey),
-      _ => ('Aberto', _kAccent),
+      'answered' => (l10n.ticketStatusAnswered, Colors.greenAccent),
+      'in_review' => (l10n.statusInProgress, Colors.orangeAccent),
+      'closed' => (l10n.statusClosed, Colors.grey),
+      _ => (l10n.statusOpen, _kAccent),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -296,8 +338,14 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(label,
-          style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 

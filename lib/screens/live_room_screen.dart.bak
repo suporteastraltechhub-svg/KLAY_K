@@ -1,0 +1,1198 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:livekit_client/livekit_client.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../l10n/app_localizations.dart';
+import '../models/gift_models.dart';
+import '../models/klayk_live_models.dart';
+import '../services/account_service.dart';
+import '../services/content_service.dart';
+import '../services/experience_settings.dart';
+import '../services/gift_service.dart';
+import '../services/klay_games_launcher.dart';
+import '../services/live_game_overlay.dart';
+import '../services/live_kit_service.dart';
+import '../services/live_premium_service.dart';
+import '../services/security_service.dart';
+import '../services/social_service.dart';
+import '../services/supabase_service.dart';
+import '../design/klayk_design.dart';
+import '../widgets/verified_badge.dart';
+import '../widgets/gift_animations.dart';
+import '../widgets/klay_live_widgets.dart';
+import '../widgets/live_bot/live_bot_panel.dart';
+import '../services/live_bot_speech_queue.dart';
+import '../services/live_bot_tts.dart';
+import 'profile/user_profile_screen.dart';
+
+const Color _kAccent = Color(0xFF8B5CF6);
+const Color _kLiveRed = Color(0xFFFF2E4D);
+const Color _kBg = Color(0xFF000000);
+const Color _kSurface = Color(0xFF111111);
+const Color _kSurfaceAlt = Color(0xFF1A1A1A);
+
+enum _ModerationAction { report, block, silence, delete, banLive, muteLive, edit, copy, readOutLoud }
+
+enum LivePhase { waiting, live, ended }
+
+class _RoomAlert {
+  final String title, subtitle;
+  final IconData icon;
+  final Color color;
+  const _RoomAlert({required this.title, required this.subtitle, required this.icon, required this.color});
+}
+
+class LiveRoomScreen extends StatefulWidget {
+  final RealLive live;
+  final LiveRole role;
+  final bool isGameLive;
+  final String? gamePackage;
+
+  const LiveRoomScreen({
+    super.key,
+    required this.live,
+    this.role = LiveRole.viewer,
+    this.isGameLive = false,
+    this.gamePackage,
+  });
+
+  @override
+  State<LiveRoomScreen> createState() => _LiveRoomScreenState();
+}
+
+class _LiveRoomScreenState extends State<LiveRoomScreen> {
+  final LiveKitService _lk = LiveKitService.instance;
+  final SupabaseService _db = SupabaseService.instance;
+
+  late RealLive _live;
+  late final String _liveId;
+  late final String _roomName;
+
+  String? _myId;
+  bool _connected = false;
+  String? _error;
+  bool _camOn = false;
+  bool _micOn = false;
+  bool _shareOn = false;
+  bool _sharingTogglePending = false;
+  bool _pauseInProgress = false;
+  bool _voiceBotOn = false;
+  bool _videoListenOn = true;
+  bool _audioListenOn = true;
+  bool _liked = false;
+  bool _following = false;
+  bool _ended = false;
+  bool _isFullscreen = false;
+  bool _cameraWindowHidden = false;
+
+  LivePhase _phase = LivePhase.waiting;
+  final DateTime _joinedAt = DateTime.now();
+  int _peakViewers = 0;
+  bool _recapDismissed = false;
+
+  bool _chatOpen = true;
+  final List<LiveChatMessage> _messages = [];
+  final TextEditingController _chatController = TextEditingController();
+  final FocusNode _chatFocus = FocusNode();
+  String? _editingMessageId;
+  final Set<String> _blockedUsers = {};
+  final Set<String> _mutedUsers = {};
+  bool _isModerator = false;
+
+  final List<RealtimeChannel> _channels = [];
+  EventsListener<RoomEvent>? _roomListener;
+
+  Gift? _activeGiftAnim;
+  String _activeGiftSender = '';
+  int _activeGiftAmount = 1;
+  String? _lastGiftTxId;
+  int _wallet = 0;
+  bool _sendingGift = false;
+
+  final Map<String, Map<String, int>> _reactions = {};
+  final Set<String> _myReactions = {};
+  String? _burstEmoji;
+  Timer? _burstTimer;
+  RealtimeChannel? _reactionsChannel;
+
+  List<LiveRankRecord> _topSupporters = const [];
+  final List<_RoomAlert> _alerts = [];
+  Timer? _topRefreshPeriodic;
+  Timer? _topRefreshDebounce;
+
+  int _likePulse = 0;
+  final Set<String> _seenGuests = {};
+
+  int get _viewerCount {
+    final lk = _lk.participantsCount.value;
+    if (lk > 0) return lk + 1;
+    return _live.viewerCount;
+  }
+
+  bool _showControls = true;
+  Timer? _controlTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _live = widget.live;
+    _liveId = widget.live.id;
+    _roomName = widget.live.roomName;
+    _join();
+  }
+
+  Future<void> _join() async {
+    try {
+      final user = await _db.ensureAuthenticated();
+      if (!mounted) return;
+      _myId = user.id;
+
+      final status = await _db.fetchLiveStatus(_liveId);
+      if (!mounted) return;
+      if (status == 'ended') {
+        await _showLiveEnded();
+        return;
+      }
+
+      if (widget.role == LiveRole.viewer && _live.ageRestricted) {
+        final allowed = await SecurityService.instance.liveViewAllowed(_liveId);
+        if (!mounted) return;
+        if (!allowed) {
+          await _showAgeGate();
+          return;
+        }
+      }
+
+      try {
+        _following = await ContentService.instance.isFollowing(_live.streamerId);
+        if (mounted) setState(() {});
+      } catch (_) {}
+
+      try {
+        _wallet = await GiftService.instance.fetchWallet();
+      } catch (_) {}
+
+      await _db.recordParticipant(_liveId, isStreamer: widget.role == LiveRole.streamer);
+
+      _channels.add(_db.subscribeToChat(_liveId, _onChatInserted));
+      _channels.add(_db.subscribeToLiveEvents(_liveId, _onRoomEvent));
+      _channels.add(_db.subscribeToBroadcast(_liveId, 'gift', _onGiftBroadcast));
+      _channels.add(_db.subscribeToBroadcast(_liveId, 'chat:delete', _onChatDelete));
+      _channels.add(_db.subscribeToBroadcast(_liveId, 'chat:edit', _onChatEdit));
+      _channels.add(_db.subscribeToBroadcast(_liveId, 'chat:ban', _onChatBan));
+      _channels.add(_db.subscribeToBroadcast(_liveId, 'chat:mute', _onChatMute));
+      _channels.add(_db.subscribeToLiveChanges(_liveId, _onLiveRowChanged));
+      _subscribeReactions();
+
+      if (widget.role != LiveRole.viewer || await SocialService.instance.isLiveModerator(_liveId)) {
+        _isModerator = true;
+      }
+      final banned = await SocialService.instance.fetchLiveBannedIds(_liveId);
+      final muted = await SocialService.instance.fetchLiveMutedIds(_liveId);
+      if (mounted) {
+        setState(() {
+          _blockedUsers.addAll(banned);
+          _mutedUsers.addAll(muted);
+        });
+      }
+
+      final recent = await _db.loadRecentChat(_liveId);
+      if (!mounted) return;
+      setState(() => _messages.addAll(recent));
+      _applyChatFilters();
+
+      try {
+        final reactions = await LivePremiumService.instance.fetchRoomReactions(_liveId);
+        if (mounted) setState(() => _reactions.addAll(reactions));
+      } catch (_) {}
+
+      _refreshTopSupporters();
+      _topRefreshPeriodic ??= Timer.periodic(const Duration(seconds: 30), (_) => _refreshTopSupporters());
+
+      await _connectLiveKit();
+      if (!mounted) return;
+      _lk.participantsCount.addListener(_onParticipantsChanged);
+      _lk.reconnecting.removeListener(_onReconnectingChanged);
+      _lk.reconnecting.addListener(_onReconnectingChanged);
+      _lk.lastError.removeListener(_onLastErrorChanged);
+      _lk.lastError.addListener(_onLastErrorChanged);
+      _lk.screenShareActive.removeListener(_onScreenShareChanged);
+      _lk.screenShareActive.addListener(_onScreenShareChanged);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = _lk.lastError.value ?? '$e');
+    }
+  }
+
+  void _onLastErrorChanged() {
+    final err = _lk.lastError.value;
+    if (!mounted || _ended) return;
+    if (err != null) {
+      setState(() {
+        _error = err;
+        _connected = false;
+      });
+    }
+  }
+
+  void _onScreenShareChanged() {
+    if (!mounted) return;
+    final on = _lk.screenShareActive.value;
+    if (on == _shareOn) {
+      if (mounted) setState(() {});
+      return;
+    }
+    setState(() => _shareOn = on);
+    if (!on && !_sharingTogglePending && !_pauseInProgress && _connected && !_ended && widget.role == LiveRole.streamer) {
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n!.screenShareStoppedBySystem)));
+    }
+  }
+
+  Future<void> _toggleFullscreen() async {
+    setState(() => _isFullscreen = !_isFullscreen);
+    if (_isFullscreen) {
+      await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
+    }
+  }
+
+  Future<void> _startRtmpStream() async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    final rtmpUrl = await _showRtmpDialog(l10n.startRtmpStream);
+    if (rtmpUrl == null || rtmpUrl.isEmpty) return;
+    final streamKey = await _showRtmpDialogTitle(l10n.streamKeyLabel, l10n.streamKeyLabel);
+    if (streamKey == null || streamKey.isEmpty) return;
+    try {
+      await LiveKitService.instance.startRtmpStream(rtmpUrl: rtmpUrl, streamKey: streamKey);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.rtmpStreamingStarted), backgroundColor: _kLiveRed));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${l10n.rtmpError}: $e'), backgroundColor: _kLiveRed));
+    }
+  }
+
+  Future<void> _stopRtmpStream() async {
+    if (!mounted) return;
+    try {
+      await LiveKitService.instance.stopRtmpStream();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('RTMP stream stopped'), backgroundColor: _kLiveRed));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${AppLocalizations.of(context)!.rtmpError}: $e'), backgroundColor: _kLiveRed));
+    }
+  }
+
+  Future<String?> _showRtmpDialog(String hint) => _showRtmpDialogTitle(hint, hint);
+
+  Future<String?> _showRtmpDialogTitle(String title, String hint) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C26),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        content: TextField(controller: controller, style: const TextStyle(color: Colors.white), decoration: InputDecoration(hintText: hint, hintStyle: const TextStyle(color: Colors.white54), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF8B5CF6))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF8B5CF6))))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar', style: TextStyle(color: Colors.white54))),
+          TextButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('OK', style: TextStyle(color: Color(0xFF8B5CF6)))),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showLiveEnded() async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    await showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(backgroundColor: const Color(0xFF1C1C26), title: Text(l10n.liveTerminated, style: const TextStyle(color: Colors.white)), content: Text(l10n.liveTerminatedBody, style: const TextStyle(color: Colors.white70)), actions: [TextButton(onPressed: () { Navigator.of(ctx).pop(); Navigator.of(context).pop(true); }, child: Text(l10n.ok, style: const TextStyle(color: _kAccent)))]));
+  }
+
+  Future<void> _showAgeGate() async {
+    final l10n = AppLocalizations.of(context)!;
+    await showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(backgroundColor: const Color(0xFF1B1A26), icon: const Icon(Icons.lock_rounded, color: Colors.orange, size: 40), title: Text(l10n.adultLiveTitle, style: const TextStyle(color: Colors.white, fontSize: 18)), content: Text(l10n.adultLiveBody, style: const TextStyle(color: Colors.white70)), actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(l10n.gotIt, style: const TextStyle(color: _kAccent, fontWeight: FontWeight.w700))),]));
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _connectLiveKit() async {
+    if (widget.role == LiveRole.streamer) {
+      await _lk.startLive(roomName: _roomName);
+      if (!mounted) return;
+      final wantCamera = !widget.isGameLive;
+      if (!wantCamera) {
+        try { await _lk.stopCamera(); } catch (_) {}
+      }
+      setState(() {
+        _connected = true;
+        _camOn = wantCamera;
+        _micOn = true;
+        if (!widget.isGameLive) _phase = LivePhase.live;
+      });
+      if (widget.isGameLive) {
+        unawaited(_startGameLive());
+      }
+    } else {
+      await _lk.connectToLive(roomName: _roomName, isStreamer: false);
+      if (!mounted) return;
+      setState(() { _connected = true; _phase = LivePhase.live; });
+      _wireRoomEvents();
+    }
+  }
+
+  void _wireRoomEvents() {
+    _roomListener?.dispose();
+    _roomListener = _lk.room.createListener();
+    _roomListener!
+      ..on<TrackSubscribedEvent>((_) { if (mounted) setState(() {}); })
+      ..on<TrackUnsubscribedEvent>((_) { if (mounted) setState(() {}); });
+  }
+
+  void _onParticipantsChanged() {
+    final v = _viewerCount;
+    if (v > _peakViewers) _peakViewers = v;
+    final names = _lk.guests.map((g) => g.name.isNotEmpty ? g.name : g.identity).where((n) => n.isNotEmpty).toList();
+    final newcomers = names.where((n) => !_seenGuests.contains(n)).take(2).toList();
+    if (newcomers.isNotEmpty && _phase == LivePhase.live && mounted) {
+      final l10n = AppLocalizations.of(context)!;
+      for (final n in newcomers) {
+        _seenGuests.add(n);
+        _showRoomAlert(_RoomAlert(title: l10n.userJoinedLiveAlert(n), subtitle: '👋', icon: Icons.person_add_rounded, color: _kAccent));
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _onReconnectingChanged() { if (mounted) setState(() {}); }
+
+  void _onChatInserted(LiveChatMessage msg) {
+    if (!mounted) return;
+    if (_blockedUsers.contains(msg.userId)) return;
+    if (_mutedUsers.contains(msg.userId)) return;
+    setState(() {
+      if (!_messages.any((m) => m.id == msg.id)) _messages.add(msg);
+      if (_messages.length > 250) _messages.removeRange(0, _messages.length - 250);
+    });
+  }
+
+  void _subscribeReactions() {
+    try {
+      _reactionsChannel = _db.client.channel('live-reactions-$_liveId').onPostgresChanges(event: PostgresChangeEvent.insert, schema: 'public', table: 'live_message_reactions', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'live_id', value: _liveId), callback: (payload) => _onReactionChanged(payload.newRecord, added: true)).onPostgresChanges(event: PostgresChangeEvent.delete, schema: 'public', table: 'live_message_reactions', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'live_id', value: _liveId), callback: (payload) => _onReactionChanged(payload.oldRecord, added: false)).subscribe();
+      _channels.add(_reactionsChannel!);
+    } catch (_) {}
+  }
+
+  void _onReactionChanged(Map<dynamic, dynamic> record, {required bool added}) {
+    if (!mounted) return;
+    final mid = record['message_id']?.toString();
+    final emoji = record['emoji']?.toString();
+    if (mid == null || emoji == null || !kLiveReactionEmojis.contains(emoji)) return;
+    setState(() {
+      final m = _reactions.putIfAbsent(mid, () => {});
+      final cur = (m[emoji] ?? 0) + (added ? 1 : -1);
+      if (cur <= 0) { m.remove(emoji); if (m.isEmpty) _reactions.remove(mid); } else { m[emoji] = cur; }
+    });
+  }
+
+  Future<void> _toggleReaction(LiveChatMessage msg, String emoji) async {
+    final key = '${msg.id}:$emoji';
+    final wasMine = _myReactions.contains(key);
+    setState(() {
+      if (wasMine) _myReactions.remove(key); else _myReactions.add(key);
+      _burstEmoji = emoji;
+    });
+    _burstTimer?.cancel();
+    if (!ExperienceSettings.instance.reduceAnimations) {
+      _burstTimer = Timer(const Duration(milliseconds: 1100), () { if (mounted) setState(() => _burstEmoji = null); });
+    }
+    try {
+      final res = await LivePremiumService.instance.toggleReaction(msg.id, emoji);
+      final removed = res['removed'] == true;
+      final total = (res['total'] as num?)?.toInt();
+      if (!mounted) return;
+      setState(() {
+        if (removed) _myReactions.remove(key); else _myReactions.add(key);
+        if (total != null) { final m = _reactions.putIfAbsent(msg.id, () => {}); if (removed) { m[emoji] = total; if (m[emoji] == 0) m.remove(emoji); } else { m[emoji] = total; } }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { if (wasMine) _myReactions.add(key); else _myReactions.remove(key); _burstEmoji = null; });
+    }
+  }
+
+  void _refreshTopSupporters() async {
+    try {
+      final top = await LivePremiumService.instance.fetchTopSupporters(liveId: _liveId, limit: 5);
+      if (!mounted) return;
+      setState(() => _topSupporters = top);
+    } catch (_) {}
+  }
+
+  void _showRoomAlert(_RoomAlert alert) {
+    if (!mounted) return;
+    setState(() { if (_alerts.length > 2) _alerts.removeAt(0); _alerts.add(alert); });
+    Future<void>.delayed(const Duration(seconds: 4), () { if (!mounted) return; setState(() => _alerts.remove(alert)); });
+  }
+
+  void _onGiftBroadcast(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    final txId = payload['tx_id'] as String?;
+    if (txId != null && txId == _lastGiftTxId) return;
+    if (txId != null) _lastGiftTxId = txId;
+    _showGiftOverlay(gift: Gift.fromJson(payload), sender: payload['sender'] as String? ?? l10n.giftNameFallback, amount: payload['gift_amount'] as int? ?? 1, senderId: payload['sender_id'] as String?);
+    _topRefreshDebounce?.cancel();
+    _topRefreshDebounce = Timer(const Duration(milliseconds: 900), () { if (mounted) _refreshTopSupporters(); });
+  }
+
+  void _showGiftOverlay({required Gift gift, required String sender, required int amount, String? senderId}) {
+    if (!mounted) return;
+    setState(() { _activeGiftAnim = gift; _activeGiftSender = sender; _activeGiftAmount = amount; });
+  }
+
+  void _clearGiftOverlay() { if (!mounted) return; setState(() => _activeGiftAnim = null); }
+
+  void _onChatDelete(Map<String, dynamic> payload) {
+    final id = payload['message_id'] as String?;
+    if (id == null || !mounted) return;
+    setState(() => _messages.removeWhere((m) => m.id == id));
+  }
+
+  void _onChatEdit(Map<String, dynamic> payload) {
+    final id = payload['message_id'] as String?;
+    final text = payload['message'] as String?;
+    if (id == null || text == null || !mounted) return;
+    setState(() { for (var i = 0; i < _messages.length; i++) { if (_messages[i].id == id) { final old = _messages[i]; _messages[i] = LiveChatMessage(id: old.id, liveId: old.liveId, userId: old.userId, message: text, createdAt: old.createdAt, editedAt: DateTime.now(), senderDisplayName: old.senderDisplayName, senderUsername: old.senderUsername, senderAvatar: old.senderAvatar, mine: old.mine); } } });
+  }
+
+  void _onRoomEvent(LiveRoomEvent event) {
+    if (event.type == 'LIVE_ENDED') { _markEnded(); return; }
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    final who = event.username ?? '';
+    switch (event.type) {
+      case 'GIFT_RECEIVED': final giftName = event.metadata['gift_name']?.toString() ?? l10n.giftNameFallback; final giftAmount = event.metadata['gift_amount'] as num? ?? 0; _showRoomAlert(_RoomAlert(title: l10n.giftOnLiveAlert, subtitle: l10n.giftSentAlert(who, giftName, giftAmount), icon: Icons.card_giftcard_rounded, color: const Color(0xFFFFD700))); return;
+      case 'FOLLOW': _showRoomAlert(_RoomAlert(title: l10n.newFollowerAlert, subtitle: l10n.startedFollowingAlert(who), icon: Icons.favorite_rounded, color: _kLiveRed)); return;
+      case 'USER_JOINED': _showRoomAlert(_RoomAlert(title: l10n.joinedLiveAlert, subtitle: l10n.isWatchingAlert(who), icon: Icons.person_add_alt_1_rounded, color: const Color(0xFF8B5CF6))); return;
+      case 'SHARE': _showRoomAlert(_RoomAlert(title: l10n.sharedAlert, subtitle: l10n.sharedTheLiveAlert(who), icon: Icons.share_rounded, color: const Color(0xFF00E5FF))); return;
+      case 'LIKE': _showRoomAlert(_RoomAlert(title: l10n.newLikeAlert, subtitle: l10n.likedTheStreamAlert(who), icon: Icons.thumb_up_rounded, color: Colors.white)); return;
+      default: return;
+    }
+  }
+
+  void _onLiveRowChanged(Map<String, dynamic> record) {
+    final status = record['status'] as String?;
+    if (status == 'ended') _markEnded();
+  }
+
+  void _markEnded() {
+    if (_ended) return;
+    _ended = true;
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    setState(() => _live = _live.copyWith(ended: true));
+    showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(backgroundColor: const Color(0xFF1C1C26), title: Text(l10n.liveClosedTitle, style: const TextStyle(color: Colors.white)), content: Text(l10n.liveClosedBody, style: const TextStyle(color: Colors.white70)), actions: [TextButton(onPressed: () { Navigator.of(ctx).pop(); Navigator.of(context).pop(true); }, child: Text(l10n.ok, style: const TextStyle(color: _kAccent)))]));
+  }
+
+  void _applyChatFilters() {
+    setState(() { _messages.removeWhere((m) => _blockedUsers.contains(m.userId) || _mutedUsers.contains(m.userId)); });
+  }
+
+  void _onChatBan(Map<String, dynamic> payload) {
+    final id = payload['user_id'] as String?;
+    if (id == null || id.isEmpty || !mounted) return;
+    setState(() { _blockedUsers.add(id); _mutedUsers.remove(id); });
+    _applyChatFilters();
+  }
+
+  void _onChatMute(Map<String, dynamic> payload) {
+    final id = payload['user_id'] as String?;
+    if (id == null || id.isEmpty || !mounted) return;
+    setState(() => _mutedUsers.add(id));
+    _applyChatFilters();
+  }
+
+  Future<void> _sendChat() async {
+    final text = _chatController.text.trim();
+    if (text.isEmpty) return;
+    _chatController.clear();
+    try {
+      final msg = await _db.insertChat(_liveId, text);
+      if (mounted) setState(() { if (!_messages.any((m) => m.id == msg.id)) _messages.add(msg); });
+    } on LiveChatSendException catch (e) {
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyChatError(e, l10n))));
+    } catch (_) {
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.chatSendFail)));
+    }
+  }
+
+  String _friendlyChatError(LiveChatSendException e, AppLocalizations l10n) {
+    switch (e.code) {
+      case 'rate_limited': return l10n.chatErrorRateLimited;
+      case 'banned_from_live': return l10n.chatErrorBannedFromLive;
+      case 'muted_in_live': return l10n.chatErrorMutedInLive;
+      case 'empty_message': return l10n.chatErrorEmpty;
+      case 'message_too_long': return l10n.chatErrorTooLong;
+      case 'live_not_active': return l10n.chatErrorLiveNotActive;
+      case 'blocked_spam': case 'blocked': return l10n.chatErrorBlocked;
+      default: return e.code != null && e.code!.isNotEmpty ? e.message : l10n.chatSendFail;
+    }
+  }
+
+  Future<void> _openModeration(LiveChatMessage msg) async {
+    final l10n = AppLocalizations.of(context)!;
+    final isMine = msg.userId == _myId;
+    final canDelete = isMine || _isModerator;
+    final action = await showModalBottomSheet<_ModerationAction>(
+      context: context, backgroundColor: const Color(0xFF1C1C26), isScrollControlled: true, useSafeArea: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => ConstrainedBox(constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8), child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        _sheetTile(Icons.flag_rounded, l10n.reportMessage, _ModerationAction.report, const Color(0xFFFFA53D)),
+        _sheetTile(Icons.block_rounded, l10n.blockUser, _ModerationAction.block, Colors.white),
+        _sheetTile(Icons.volume_off_rounded, l10n.silenceUser, _ModerationAction.silence, Colors.white),
+        if (isMine) ...[_sheetTile(Icons.copy_rounded, l10n.copyMessage, _ModerationAction.copy, Colors.white), _sheetTile(Icons.edit_rounded, l10n.editMessage, _ModerationAction.edit, const Color(0xFF8B5CF6))],
+        if (canDelete && msg.userId != _myId) ...[_sheetTile(Icons.remove_circle_rounded, l10n.banFromLive, _ModerationAction.banLive, _kLiveRed), _sheetTile(Icons.hearing_disabled_rounded, l10n.silenceInLive, _ModerationAction.muteLive, _kLiveRed)],
+        if (canDelete) _sheetTile(Icons.delete_rounded, l10n.deleteMessage, _ModerationAction.delete, _kLiveRed),
+        if (_isModerator) _sheetTile(Icons.record_voice_over_rounded, l10n.readCommentOutLoudAction, _ModerationAction.readOutLoud, const Color(0xFF38BDF8)),
+        const SizedBox(height: 8),
+      ])),
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _ModerationAction.report: if (msg.userId != null) await SocialService.instance.reportItem(targetId: msg.id, targetType: 'comment', reason: 'Mensagem de chat da live', details: msg.message); if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.messageReportedThanks))); break;
+      case _ModerationAction.block: if (msg.userId != null) { await AccountService.instance.blockUser(msg.userId!); await SocialService.instance.logModerationAction(liveId: _liveId, action: 'block', reason: 'Bloqueado no chat da live'); setState(() => _blockedUsers.add(msg.userId!)); _applyChatFilters(); } if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.userBlockedInChat))); break;
+      case _ModerationAction.silence: if (msg.userId != null) { await SocialService.instance.muteUser(msg.userId!); await SocialService.instance.logModerationAction(liveId: _liveId, action: 'mute', reason: 'Silenciado no chat da live'); setState(() => _mutedUsers.add(msg.userId!)); _applyChatFilters(); } if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.userSilencedInChat))); break;
+      case _ModerationAction.banLive: if (msg.userId != null) { await SocialService.instance.liveModBan(_liveId, msg.userId!, reason: 'Banido da live'); await SocialService.instance.logModerationAction(liveId: _liveId, action: 'live_ban', reason: 'Banido da live'); await _db.sendBroadcast(_liveId, 'chat:ban', {'user_id': msg.userId}); setState(() { _blockedUsers.add(msg.userId!); _mutedUsers.remove(msg.userId!); }); _applyChatFilters(); } if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.userBannedFromLive))); break;
+      case _ModerationAction.muteLive: if (msg.userId != null) { await SocialService.instance.liveModMute(_liveId, msg.userId!, minutes: 10, reason: 'Silenciado na live'); await SocialService.instance.logModerationAction(liveId: _liveId, action: 'live_mute', reason: 'Silenciado na live por 10 min'); await _db.sendBroadcast(_liveId, 'chat:mute', {'user_id': msg.userId}); setState(() => _mutedUsers.add(msg.userId!)); _applyChatFilters(); } if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.userSilencedInLive))); break;
+      case _ModerationAction.delete: await _db.deleteChatMessage(msg.id); await _db.sendBroadcast(_liveId, 'chat:delete', {'message_id': msg.id}); if (mounted) setState(() => _messages.removeWhere((m) => m.id == msg.id)); break;
+      case _ModerationAction.copy: await _copyText(msg.message); break;
+      case _ModerationAction.edit: await _startEditingChat(msg); break;
+      case _ModerationAction.readOutLoud: await _readCommentOutLoud(msg); break;
+    }
+  }
+
+  Future<void> _readCommentOutLoud(LiveChatMessage msg) async {
+    if (!mounted || !_isModerator) return;
+    final l10n = AppLocalizations.of(context)!;
+    final tts = LiveBotTts.instance;
+    await tts.init(); await tts.applySettings(speed: 0.5, volume: 1.0);
+    LiveBotSpeechQueue.shared().selectComment(msg.senderDisplayName ?? msg.senderUsername ?? l10n.someone, msg.message);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.commentReadOutLoud)));
+  }
+
+  Future<void> _copyText(String text) async {
+    if (text.isEmpty || !mounted) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.messageCopied)));
+  }
+
+  Future<void> _startEditingChat(LiveChatMessage msg) async {
+    if (!mounted) return;
+    setState(() { _editingMessageId = msg.id; _chatController.text = msg.message; _chatController.selection = TextSelection.collapsed(offset: _chatController.text.length); });
+    _chatFocus.requestFocus();
+  }
+
+  Future<void> _cancelEditingChat() async {
+    if (!mounted) return;
+    setState(() { _editingMessageId = null; _chatController.clear(); });
+    _chatFocus.unfocus();
+  }
+
+  Future<void> _applyChatEdit() async {
+    final id = _editingMessageId;
+    if (id == null) return;
+    final text = _chatController.text.trim();
+    if (text.isEmpty) { await _cancelEditingChat(); return; }
+    final applied = await _db.editChat(id, text);
+    if (!mounted) return;
+    if (!applied) { final l10n = AppLocalizations.of(context)!; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.editUnavailable))); return; }
+    final editedAt = DateTime.now();
+    setState(() { for (var i = 0; i < _messages.length; i++) { if (_messages[i].id == id) { final old = _messages[i]; _messages[i] = LiveChatMessage(id: old.id, liveId: old.liveId, userId: old.userId, message: text, createdAt: old.createdAt, editedAt: editedAt, senderDisplayName: old.senderDisplayName, senderUsername: old.senderUsername, senderAvatar: old.senderAvatar, mine: old.mine); } } _editingMessageId = null; _chatController.clear(); });
+    await _db.sendBroadcast(_liveId, 'chat:edit', {'message_id': id, 'message': text});
+    _chatFocus.unfocus();
+  }
+
+  Widget _sheetTile(IconData icon, String label, _ModerationAction value, Color color) {
+    return InkWell(onTap: () => Navigator.of(context).pop(value), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14), child: Row(children: [Icon(icon, color: color), const SizedBox(width: 14), Expanded(child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 15)))])));
+  }
+
+  Future<void> _openGiftPicker() async {
+    final pick = await KlayGiftSheet.show(context: context, wallet: _wallet, onRefreshWallet: () async { try { final w = await GiftService.instance.fetchWallet(); if (mounted) _wallet = w; return w; } catch (_) { return _wallet; } });
+    if (pick == null || !mounted) return;
+    await _sendGift(pick.gift, pick.amount);
+  }
+
+  Future<void> _sendGift(Gift gift, int amount) async {
+    if (_sendingGift) { if (!mounted) return; final l10n = AppLocalizations.of(context)!; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.giftProcessingWait), behavior: SnackBarBehavior.floating)); return; }
+    final requestId = '${_myId ?? 'anon'}-${DateTime.now().microsecondsSinceEpoch}';
+    _sendingGift = true;
+    try {
+      final result = await _attemptSendGift(gift, amount, requestId);
+      if (result == null || !mounted) return;
+      await _applyGiftResult(gift, amount, result);
+    } finally { _sendingGift = false; }
+  }
+
+  Future<GiftSendResult?> _attemptSendGift(Gift gift, int amount, String requestId) async {
+    Future<GiftSendResult?> send() async { try { return await GiftService.instance.sendGift(gift: gift, amount: amount, liveId: _liveId, receiverId: _live.streamerId, requestId: requestId); } on GiftDuplicateInProgressException { _showGiftBusy(); return null; } }
+    try { return await send(); } on StateError catch (e) { if (e.message.contains('(4')) { _showGiftError(e); return null; } return await send(); } catch (e) { _showGiftError(e); return null; } }
+  }
+
+  Future<void> _applyGiftResult(Gift gift, int amount, GiftSendResult result) async {
+    if (result.transactionId != null) _lastGiftTxId = result.transactionId;
+    setState(() { _wallet = result.balance; _activeGiftAnim = gift; _activeGiftSender = kAppIdentity.displayName; _activeGiftAmount = amount; });
+    if (!result.duplicate) {
+      await _db.sendBroadcast(_liveId, 'gift', {'tx_id': result.transactionId ?? '', 'id': gift.id, 'name': gift.name, 'icon': gift.icon, 'glyph': gift.glyph, 'animation_key': gift.animationKey, 'effects': gift.effects, 'is_exclusive': gift.isExclusive, 'gift_amount': amount, 'sender': kAppIdentity.displayName, 'sender_id': _myId});
+      _refreshTopSupporters();
+    }
+  }
+
+  void _showGiftBusy() { if (!mounted) return; final l10n = AppLocalizations.of(context)!; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.giftProcessingRetry), behavior: SnackBarBehavior.floating)); }
+  void _showGiftError(Object error) { if (!mounted) return; final l10n = AppLocalizations.of(context)!; final msg = error.toString().toLowerCase(); String text; if (msg.contains('insufficient_credits')) text = l10n.giftErrInsufficientCredits; else if (msg.contains('gift_unavailable')) text = l10n.giftErrUnavailable; else if (msg.contains('live_not_found') || msg.contains('live_not_active')) text = l10n.giftErrLiveNotAvailable; else if (msg.contains('cannot_send_to_self')) text = l10n.giftErrCannotSendToSelf; else text = l10n.giftErrGeneric; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating)); }
+
+  Future<void> _toggleLike() async {
+    setState(() { _liked = !_liked; if (_liked) _likePulse++; });
+    await _db.logEvent(_liveId, 'LIKE');
+  }
+
+  Future<void> _toggleFollow() async {
+    final wasFollowing = _following;
+    setState(() => _following = !_following);
+    try {
+      final svc = ContentService.instance;
+      if (wasFollowing) await svc.unfollowUser(_live.streamerId); else await svc.followUser(_live.streamerId);
+      await _db.logEvent(_liveId, 'FOLLOW');
+    } catch (e) { setState(() => _following = wasFollowing); if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()))); return; }
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 1), content: Text(_following ? l10n.liveNowFollowing : l10n.liveNowUnfollowing)));
+  }
+
+  Future<void> _share() async {
+    final url = 'https://klayk.app/live/$_roomName';
+    await Share.share(url, subject: _live.title);
+    await _db.logEvent(_liveId, 'SHARE');
+  }
+
+  void _openStreamerProfile() { Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserProfileScreen(userId: _live.streamerId))); }
+
+  Future<void> _toggleCamera() async { if (_camOn) { await _lk.stopCamera(); setState(() => _camOn = false); } else { await _lk.publishCamera(); setState(() => _camOn = true); } }
+
+  Future<void> _toggleMicrophone() async { if (_micOn) { await _lk.stopMicrophone(); setState(() => _micOn = false); } else { await _lk.publishMicrophone(); setState(() => _micOn = true); } }
+
+  Future<void> _toggleScreenShare() async {
+    final next = !_shareOn;
+    _sharingTogglePending = true;
+    try {
+      if (next) { await _lk.setScreenShareEnabled(true); } else { await _lk.stopScreenShare(); }
+      if (!mounted) return;
+      setState(() => _shareOn = next);
+      final l10n = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 2), content: Text(next ? l10n.screenShareChoosingWindow : l10n.screenShareDisabled)));
+    } on ScreenCapturePermissionDeniedException { if (mounted) await _showScreenCaptureDenied(onRetry: _toggleScreenShare); } catch (_) { if (mounted) { final l10n = AppLocalizations.of(context)!; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_lk.lastErrorMessage ?? l10n.screenShareFail))); } } finally { _sharingTogglePending = false; }
+  }
+
+  Future<void> _startGameLive() async {
+    if (widget.role != LiveRole.streamer || !widget.isGameLive) return;
+    for (var attempt = 0; attempt < 3; attempt++) { if (!mounted) return; final granted = await KlayLiveGameOverlay.instance.start(); if (granted) break; final go = await _requestOverlayPermission(); if (go != true || !mounted) return; }
+    KlayLiveGameOverlay.instance.listen(_onOverlayAction);
+  }
+
+  Future<void> _toggleScreenShareOn() async {
+    final gamePkg = widget.gamePackage;
+    if (gamePkg != null && gamePkg.isNotEmpty) { final launched = await KlayGames.instance.launchPackage(gamePkg); if (!launched && mounted) { final l10n = AppLocalizations.of(context)!; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.gameLaunchFail))); } }
+    try {
+      await _lk.setScreenShareEnabled(true);
+      if (mounted) { setState(() { _shareOn = true; _phase = LivePhase.live; }); }
+    } on ScreenCapturePermissionDeniedException { if (mounted) await _showScreenCaptureDenied(onRetry: _toggleScreenShareOn); } catch (_) { if (mounted) { final l10n = AppLocalizations.of(context)!; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_lk.lastErrorMessage ?? l10n.screenCaptureFail))); } }
+  }
+
+  Future<void> _showScreenCaptureDenied({Future<void> Function()? onRetry}) async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    final retry = await showModalBottomSheet<bool>(context: context, backgroundColor: const Color(0xFF1C1C26), isScrollControlled: true, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (ctx) => SafeArea(child: Padding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 20), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const SizedBox(height: 20), const Icon(Icons.screen_share_rounded, color: _kAccent, size: 46), const SizedBox(height: 12), Text(l10n.screenCaptureDeniedTitle, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)), const SizedBox(height: 8), Text(l10n.screenCaptureDeniedBody, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4)), const SizedBox(height: 20), FilledButton.icon(onPressed: () => Navigator.of(ctx).pop(true), icon: const Icon(Icons.refresh_rounded), label: Text(l10n.screenCaptureRetry, style: const TextStyle(fontWeight: FontWeight.w700)), style: FilledButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14))), const SizedBox(height: 8), OutlinedButton.icon(onPressed: () => Navigator.of(ctx).pop(false), icon: const Icon(Icons.settings_rounded), label: Text(l10n.openSettings), style: OutlinedButton.styleFrom(foregroundColor: Colors.white70, side: const BorderSide(color: Colors.white24), padding: const EdgeInsets.symmetric(vertical: 14)))]))));
+    if (!mounted) return;
+    if (retry == true) { if (onRetry != null) await onRetry(); } else if (retry == false) { await _lk.openScreenCaptureSettings(); }
+  }
+
+  void _onOverlayAction(String action, Map<String, dynamic>? payload) {
+    switch (action) {
+      case 'micToggled': _setMicFromOverlay(payload?['enabled'] as bool? ?? !_micOn); break;
+      case 'pauseToggled': _setPausedFromOverlay(payload?['paused'] as bool? ?? false); break;
+      case 'voiceBotToggled': _voiceBotOn = payload?['enabled'] as bool? ?? !_voiceBotOn; if (mounted) setState(() {}); break;
+      case 'endRequested': _endLive(); break;
+      case 'morePressed': _openMoreSheet(); break;
+      case 'chatRequested': _openChatFromOverlay(); break;
+      case 'backToAppRequested': _bringAppToFront(); break;
+      case 'overlayVisibilityChanged': case 'panelVisibilityChanged': break;
+      case 'overlayStopped': if (!_ended && _connected && widget.role == LiveRole.streamer && mounted) { final l10n = AppLocalizations.of(context)!; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.gameOverlayClosed))); } break;
+    }
+  }
+
+  Future<void> _openChatFromOverlay() async { await _bringAppToFront(); if (!mounted) return; setState(() => _chatOpen = true); }
+  Future<void> _bringAppToFront() async { try { await const MethodChannel('klayk/live_game_overlay').invokeMethod('bringToFront'); } catch (_) {} }
+
+  Future<void> _setMicFromOverlay(bool on) async { try { if (on) { await _lk.publishMicrophone(); } else { await _lk.stopMicrophone(); } setState(() => _micOn = on); } catch (_) {} }
+
+  Future<void> _setPausedFromOverlay(bool paused) async {
+    _pauseInProgress = true;
+    try { if (paused) { await _lk.stopMicrophone(); await _lk.stopScreenShare(); if (mounted) setState(() { _micOn = false; _shareOn = false; }); } else { await _lk.publishMicrophone(); if (widget.isGameLive) await _lk.setScreenShareEnabled(true); if (mounted) setState(() { _micOn = true; _shareOn = widget.isGameLive; }); } } catch (_) {} finally { _pauseInProgress = false; }
+  }
+
+  Future<void> _showOverlayMoreOptions() async { await _openMoreSheet(); }
+
+  Future<void> _openGameSettings() async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    await showDialog<void>(context: context, builder: (ctx) => AlertDialog(backgroundColor: const Color(0xFF1C1C26), title: Text(l10n.liveSettings, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)), content: Column(mainAxisSize: MainAxisSize.min, children: [SwitchListTile(value: _voiceBotOn, onChanged: (v) { setState(() => _voiceBotOn = v); KlayLiveGameOverlay.instance.setVoiceBot(v); }, activeThumbColor: _kAccent, title: Text(l10n.voiceBotLabel, style: const TextStyle(color: Colors.white)), subtitle: Text(l10n.voiceBotSubtitle, style: const TextStyle(color: Colors.white54))), if (_isModerator) ...[const Divider(color: Color(0xFF2A2540), height: 1), ListTile(leading: const Icon(Icons.smart_toy_rounded, color: _kAccent), title: const Text('KLAY K LIVE BOT', style: TextStyle(color: Colors.white)), subtitle: Text(l10n.liveBotPanelSubtitle, style: TextStyle(color: Colors.white54)), trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54), onTap: () { Navigator.of(ctx).pop(); _openLiveBotPanel(); })]],), actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(l10n.close, style: const TextStyle(color: _kAccent, fontWeight: FontWeight.w700)))]));
+  }
+
+  Future<void> _openLiveBotPanel() async { if (!mounted) return; await LiveBotPanel.show(context: context, liveId: _liveId, canModerate: _isModerator); }
+
+  Future<bool?> _requestOverlayPermission() async {
+    if (!mounted) return false;
+    final l10n = AppLocalizations.of(context)!;
+    final go = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(backgroundColor: const Color(0xFF1C1C26), icon: const Icon(Icons.settings_suggest_rounded, color: _kAccent, size: 36), title: Text(l10n.overlayPermissionTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)), content: Text(l10n.overlayPermissionBody, style: const TextStyle(color: Colors.white70, height: 1.35)), actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(l10n.notNow, style: const TextStyle(color: Colors.white54))), FilledButton(onPressed: () => Navigator.of(ctx).pop(true), style: FilledButton.styleFrom(backgroundColor: _kAccent), child: Text(l10n.openSettings, style: const TextStyle(fontWeight: FontWeight.w700)))]));
+    if (go == true) await KlayLiveGameOverlay.instance.openOverlaySettings();
+    return go;
+  }
+
+  Future<void> _toggleViewerVideo() async {
+    final on = !_videoListenOn;
+    for (final p in _lk.guests) for (final pub in p.videoTrackPublications) { if (on && !pub.subscribed) await pub.subscribe(); else if (!on && pub.subscribed) await pub.unsubscribe(); }
+    setState(() => _videoListenOn = on);
+  }
+
+  Future<void> _toggleViewerAudio() async {
+    final on = !_audioListenOn;
+    for (final p in _lk.guests) for (final pub in p.audioTrackPublications) { if (on && !pub.subscribed) await pub.subscribe(); else if (!on && pub.subscribed) await pub.unsubscribe(); }
+    setState(() => _audioListenOn = on);
+  }
+
+  Future<void> _endLive() async {
+    if (widget.role != LiveRole.streamer) return;
+    final l10n = AppLocalizations.of(context)!;
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(backgroundColor: const Color(0xFF1C1C26), title: Text(l10n.endLiveTitle, style: const TextStyle(color: Colors.white)), content: Text(l10n.endLiveBody, style: const TextStyle(color: Colors.white70)), actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(l10n.cancel, style: const TextStyle(color: Colors.white54))), TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text(l10n.endLiveAction, style: const TextStyle(color: _kLiveRed)))]));
+    if (ok != true || !mounted) return;
+    setState(() { _ended = true; _phase = LivePhase.ended; });
+    try { await _db.endLive(_liveId); } catch (_) {}
+    if (widget.isGameLive) { try { await _lk.stopScreenShare(); } catch (_) {} await KlayLiveGameOverlay.instance.stop(); }
+    try { await _lk.disconnectFromLive(); } catch (_) {}
+    if (!mounted) return;
+    if (!widget.isGameLive) Navigator.of(context).pop(true);
+  }
+
+  @override
+  void dispose() {
+    _burstTimer?.cancel();
+    _topRefreshPeriodic?.cancel();
+    _topRefreshDebounce?.cancel();
+    _roomListener?.dispose();
+    _lk.participantsCount.removeListener(_onParticipantsChanged);
+    _lk.reconnecting.removeListener(_onReconnectingChanged);
+    _lk.lastError.removeListener(_onLastErrorChanged);
+    _lk.screenShareActive.removeListener(_onScreenShareChanged);
+    _chatController.dispose();
+    _chatFocus.dispose();
+    _controlTimer?.cancel();
+    if (_connected) { unawaited(_db.recordParticipantLeft(_liveId)); unawaited(_lk.disconnectFromLive()); }
+    if (widget.isGameLive) { KlayLiveGameOverlay.instance.stopListening(); unawaited(KlayLiveGameOverlay.instance.stop()); }
+    for (final c in _channels) _db.removeChannel(c);
+    super.dispose();
+    if (_isFullscreen) { unawaited(SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown])); unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values)); }
+  }
+
+  // =========================================================================
+  // CONTROLS AUTO-HIDE
+  // =========================================================================
+
+  void _resetControlTimer() {
+    _controlTimer?.cancel();
+    if (!mounted) return;
+    _controlTimer = Timer(const Duration(seconds: 4), () { if (mounted) setState(() => _showControls = false); });
+  }
+
+  // =========================================================================
+  // MAIN BUILD — NOVA UI LIMPA E MODERNA
+  // =========================================================================
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboard = MediaQuery.of(context).viewInsets.bottom > 0;
+    final size = MediaQuery.sizeOf(context);
+    return Scaffold(
+      backgroundColor: _kBg,
+      extendBodyBehindAppBar: true,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Vídeo
+          _buildVideoLayer(),
+          // Scrim gradiente sutil
+          _buildGradientScrim(),
+          // Borda neon
+          if (_phase == LivePhase.live) _buildNeonFrame(),
+          // Topo
+          if (!_isFullscreen) _buildTopBar(),
+          if (_isFullscreen) Positioned(top: 8, left: 8, child: KlayKIconButton(icon: Icons.fullscreen_exit_rounded, onTap: _toggleFullscreen, color: Colors.white)),
+          // Controles inferiores
+          if (!keyboard && _phase == LivePhase.live) _buildControlsBar(keyboard),
+          // Chat
+          if (_chatOpen && _phase == LivePhase.live) _buildChatPanel(),
+          // Campo de mensagem
+          if (_chatOpen && !keyboard && _phase == LivePhase.live) _buildMessageInput(),
+          // Alerts
+          if (_alerts.isNotEmpty) _buildAlertsLayer(),
+          // Efeitos
+          _buildOverlayFx(),
+          // Conectando
+          if (_buildingConnecting()) _buildConnectingOverlay(),
+          // Reconectando
+          if (_buildingReconnecting()) _buildReconnectingOverlay(),
+          // Erro
+          if (_error != null) _buildErrorOverlay(_error!),
+          // Game ready
+          if (_shouldShowWaitingReady()) _buildGameReadyOverlay(),
+          // Recap
+          if (_phase == LivePhase.ended && !_recapDismissed) _buildRecapOverlay(),
+          // Indicador de game live
+          if (widget.isGameLive && _phase == LivePhase.live) _buildGameLiveIndicator(),
+          // Face cam (Game Live)
+          if (_camOn && widget.isGameLive && _phase == LivePhase.live) _buildFaceCam(),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================================
+  // BARRA SUPERIOR
+  // =========================================================================
+
+  Widget _buildTopBar() {
+    return AnimatedOpacity(
+      opacity: _showControls ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 300),
+      child: Container(
+        padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+        decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withValues(alpha: 0.7), Colors.transparent])),
+        child: SafeArea(
+          bottom: false,
+          child: Row(
+            children: [
+              // Voltar
+              KlayKIconButton(icon: Icons.arrow_back_rounded, onTap: () => Navigator.of(context).pop(), color: Colors.white),
+              const SizedBox(width: 8),
+              // Avatar do criador
+              GestureDetector(
+                onTap: _openStreamerProfile,
+                child: Container(
+                  width: 34, height: 34,
+                  decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: _kAccent.withValues(alpha: 0.4), width: 1.2)),
+                  clipBehavior: Clip.antiAlias,
+                  child: (_live.streamerAvatar != null && _live.streamerAvatar!.isNotEmpty)
+                      ? Image.network(_live.streamerAvatar!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _avatarFallback())
+                      : _avatarFallback(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Nome + verified
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [Row(mainAxisSize: MainAxisSize.min, children: [Text(_live.streamerDisplayName ?? _live.streamerUsername ?? 'KLAY K', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)), if (_live.streamerVerified) ...[const SizedBox(width: 4), const VerifiedBadge(size: 14)],],), if (_live.streamerUsername != null) Text('@${_live.streamerUsername}', style: TextStyle(color: Colors.white54, fontSize: 11)),]),),
+              const SizedBox(width: 8),
+              // AO VIVO badge
+              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: _kLiveRed, borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: _kLiveRed.withValues(alpha: 0.25), blurRadius: 6)]), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.circle, color: Colors.white, size: 7), SizedBox(width: 4), Text('AO VIVO', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5))]),),
+              const SizedBox(width: 8),
+              // Espectadores
+              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(12)), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.group_rounded, color: Colors.white, size: 14), const SizedBox(width: 3), Text('$_viewerCount', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))]),),
+              const SizedBox(width: 6),
+              // Jogo indicator
+              if (widget.isGameLive) Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), decoration: BoxDecoration(color: _kAccent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.sports_esports_rounded, color: _kAccent, size: 14), const SizedBox(width: 3), Text('JOGO', style: TextStyle(color: _kAccent, fontSize: 10, fontWeight: FontWeight.w700))]),),
+              const SizedBox(width: 4),
+              // Mais opções
+              KlayKIconButton(icon: Icons.more_vert_rounded, onTap: _openMoreSheet, color: Colors.white),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _avatarFallback() => Container(color: _kSurfaceAlt, child: const Icon(Icons.person_rounded, color: Colors.white54, size: 20));
+
+  // =========================================================================
+  // CAMADA DE VÍDEO
+  // =========================================================================
+
+  Widget _buildVideoLayer() {
+    if (_error != null) return const SizedBox.shrink();
+    if (widget.role == LiveRole.streamer && widget.isGameLive) {
+      final screen = _lk.localScreenShareTrack;
+      final camera = _lk.localCameraTrack;
+      return Stack(fit: StackFit.expand, children: [screen != null ? VideoTrackRenderer(screen, fit: VideoViewFit.cover) : _buildPlaceholder('Você está ao vivo', Icons.screen_share_rounded), if (_camOn && screen != null && camera != null) _buildFaceCam(camera: camera, isSelf: true)],);
+    }
+    if (widget.role == LiveRole.streamer) {
+      final track = _lk.localVideoTrack;
+      return track != null ? VideoTrackRenderer(track, fit: VideoViewFit.cover) : _buildPlaceholder('Você está ao vivo', Icons.videocam_rounded, onAction: _connected && !_camOn ? _toggleCamera : null, actionLabel: _connected && !_camOn ? 'Ligar câmera' : null);
+    }
+    // Espectador
+    RemoteParticipant? primary;
+    VideoTrack? primaryTrack;
+    if (_lk.anyScreenShareSubscribed) primary = _lk.screenShareBroadcaster;
+    primary ??= _lk.primaryRemoteVideo;
+    if (primary != null) primaryTrack = _lk.videoTrackOf(primary, screenShare: true) ?? _lk.videoTrackOf(primary, screenShare: false);
+    final cameraTrack = primary != null ? _lk.videoTrackOf(primary, screenShare: false) : null;
+    final isScreenSharePrimary = primaryTrack != null && _lk.videoTrackOf(primary!, screenShare: true) != null;
+    return Stack(fit: StackFit.expand, children: [primaryTrack != null ? VideoTrackRenderer(primaryTrack, fit: VideoViewFit.cover) : _buildPlaceholder('Aguardando sinal...', Icons.tv_rounded, onAction: _connected ? _refreshVideo : null, actionLabel: _connected ? 'Atualizar' : null), if (isScreenSharePrimary && cameraTrack != null && !_cameraWindowHidden) _buildFaceCam(camera: cameraTrack, isSelf: false)],);
+  }
+
+  Widget _buildPlaceholder(String text, IconData icon, {Future<void> Function()? onAction, String? actionLabel}) {
+    final showAction = onAction != null && actionLabel != null;
+    return Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1A1226), Color(0xFF0D0D14))), child: Center(child: SingleChildScrollView(padding: EdgeInsets.symmetric(horizontal: 32, vertical: 24), child: Column(mainAxisSize: MainAxisSize.min, children: [const _LiveBadge(), SizedBox(height: 32), Container(width: 92, height: 92, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [_kAccent.withValues(alpha: 0.45), _kAccent.withValues(alpha: 0.05)]), border: Border.all(color: _kAccent.withValues(alpha: 0.7), width: 2), boxShadow: [BoxShadow(color: _kAccent.withValues(alpha: 0.5), blurRadius: 34, spreadRadius: 5)]), child: Icon(icon, color: Colors.white, size: 44)), SizedBox(height: 20), Text(text, textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w600)), if (showAction) ...[SizedBox(height: 18), FilledButton.icon(onPressed: onAction, style: FilledButton.styleFrom(backgroundColor: _kAccent, minimumSize: const Size(190, 46), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))), icon: const Icon(Icons.refresh_rounded, size: 20), label: Text(actionLabel, style: const TextStyle(fontWeight: FontWeight.w700)))]],)))));
+  }
+
+  Widget _buildGradientScrim() => const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, stops: [0, 0.18, 0.7, 1], colors: [Color(0x33000000), Colors.transparent, Colors.transparent, Color(0x59000000)])));
+
+  Widget _buildNeonFrame() {
+    return Positioned.fill(child: IgnorePointer(child: TweenAnimationBuilder<double>(tween: Tween(begin: 0, end: 1), duration: const Duration(milliseconds: 700), curve: Curves.easeOutCubic, builder: (_, alpha, __) { final opacity = alpha.clamp(0.0, 1.0); return Container(margin: const EdgeInsets.all(3), decoration: BoxDecoration(borderRadius: BorderRadius.circular(22), border: Border.all(color: _kAccent.withValues(alpha: 0.14 + opacity * 0.08), width: 1.3), boxShadow: [BoxShadow(color: _kAccent.withValues(alpha: 0.05 + opacity * 0.06), blurRadius: 22, spreadRadius: 1)])); })));
+  }
+
+  // =========================================================================
+  // CONTROLES INFERIORES (RAIL + BOTÕES)
+  // =========================================================================
+
+  Widget _buildControlsBar(bool keyboard) {
+    if (keyboard) return const SizedBox.shrink();
+    return Positioned(bottom: 16, left: 16, right: 16, child: AnimatedOpacity(opacity: _showControls ? 1.0 : 0.0, duration: const Duration(milliseconds: 300), child: Row(children: [// Esquerda: curtida + presentes
+      _buildSideButton(icon: Icons.favorite_rounded, label: 'Curtir', onTap: _toggleLike, active: _liked),
+      const SizedBox(width: 8),
+      _buildSideButton(icon: Icons.redeem_rounded, label: 'Presentes', onTap: _openGiftPicker),
+      const SizedBox(width: 8),
+      // Centro: câmera, mic, share (streamer) ou vídeo (viewer)
+      if (widget.role == LiveRole.streamer) ...[
+        _buildControlButton(icon: _camOn ? Icons.videocam_rounded : Icons.videocam_off_rounded, onTap: _toggleCamera),
+        const SizedBox(width: 8),
+        _buildControlButton(icon: _micOn ? Icons.mic_rounded : Icons.mic_off_rounded, onTap: _toggleMicrophone),
+        const SizedBox(width: 8),
+        if (widget.isGameLive) _buildControlButton(icon: _shareOn ? Icons.stop_screen_share_rounded : Icons.screen_share_rounded, onTap: _toggleScreenShare, active: _shareOn),
+        if (widget.isGameLive) const SizedBox(width: 8),
+        _buildControlButton(icon: Icons.call_end_rounded, onTap: _endLive, color: _kLiveRed),
+      ] else ...[
+        _buildControlButton(icon: Icons.flip_camera_android_rounded, onTap: _toggleViewerVideo),
+        const SizedBox(width: 8),
+        _buildControlButton(icon: _audioListenOn ? Icons.volume_up_rounded : Icons.volume_off_rounded, onTap: _toggleViewerAudio),
+      ],
+      const Spacer(),
+      // Direita: chat, compartilhar, mais
+      _buildSideButton(icon: Icons.chat_bubble_rounded, label: 'Chat', onTap: () => setState(() => _chatOpen = !_chatOpen), active: _chatOpen),
+      const SizedBox(width: 8),
+      _buildSideButton(icon: Icons.share_rounded, label: 'Compartilhar', onTap: _share),
+      const SizedBox(width: 8),
+      _buildSideButton(icon: Icons.settings_rounded, label: 'Config', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SizedBox.shrink()))),
+    ],)),
+  }
+
+  Widget _buildSideButton({required IconData icon, required String label, required VoidCallback onTap, bool active = false}) {
+    return GestureDetector(onTap: onTap, behavior: HitTestBehavior.opaque, child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 52, height: 52, decoration: BoxDecoration(shape: BoxShape.circle, color: active ? _kAccent.withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.5), border: Border.all(color: active ? _kAccent.withValues(alpha: 0.5) : Colors.white12)), child: Icon(icon, color: active ? _kAccent : Colors.white, size: 22)), const SizedBox(height: 2), Text(label, style: TextStyle(color: active ? Colors.white : Colors.white70, fontSize: 9, fontWeight: active ? FontWeight.w700 : FontWeight.w500))],));
+  }
+
+  Widget _buildControlButton({required IconData icon, required VoidCallback onTap, Color color = Colors.white, bool active = false}) {
+    return GestureDetector(onTap: onTap, behavior: HitTestBehavior.opaque, child: Container(width: 48, height: 48, decoration: BoxDecoration(shape: BoxShape.circle, color: active ? color.withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.5), border: Border.all(color: active ? color.withValues(alpha: 0.5) : Colors.white12)), child: Icon(icon, color: active ? color : Colors.white, size: 22)));
+  }
+
+  // =========================================================================
+  // PAINEL DE CHAT
+  // =========================================================================
+
+  Widget _buildChatPanel() {
+    return Positioned(left: 0, right: 0, bottom: _chatOpen ? MediaQuery.of(context).size.height * 0.42 : 0, child: Container(height: MediaQuery.of(context).size.height * 0.42, decoration: BoxDecoration(color: _kSurface.withValues(alpha: 0.85), borderRadius: const BorderRadius.vertical(top: Radius.circular(20)), border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.06)))), child: Column(children: [// Header do chat
+      Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.06)))), child: Row(children: [const Icon(Icons.chat_bubble_rounded, color: _kAccent, size: 18), const SizedBox(width: 8), Text('Chat', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)), const Spacer(), if (widget.role == LiveRole.streamer || _isModerator) KlayKIconButton(icon: Icons.flag_rounded, onTap: () {}, color: Colors.white, size: 30), KlayKIconButton(icon: Icons.close_rounded, onTap: () => setState(() => _chatOpen = false), color: Colors.white, size: 30)],),),// Mensagens
+      Expanded(child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), itemCount: _messages.length, reverse: true, itemBuilder: (context, index) {
+        final msg = _messages[_messages.length - 1 - index];
+        return _buildMessageBubble(msg);
+      })),
+    ],)),
+  }
+
+  Widget _buildMessageBubble(LiveChatMessage msg) {
+    final isMine = msg.mine;
+    final isMod = msg.senderVerified;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [if (!isMine) ...[CircleAvatar(radius: 14, backgroundColor: _kSurfaceAlt, child: Text(msg.senderDisplayName?.characters.first.toUpperCase() ?? 'K', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))), const SizedBox(width: 6)], Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), decoration: BoxDecoration(color: isMine ? _kAccent.withValues(alpha: 0.2) : _kSurfaceAlt, borderRadius: BorderRadius.circular(14)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [if (!isMine) Row(mainAxisSize: MainAxisSize.min, children: [Text(msg.senderDisplayName ?? 'Anônimo', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)), if (isMod) ...[const SizedBox(width: 3), const VerifiedBadge(size: 11)],],), const SizedBox(height: 2), Text(msg.message, style: const TextStyle(color: Colors.white, fontSize: 13)),],)), const SizedBox(width: 8),],),
+    );
+  }
+
+  // =========================================================================
+  // CAMPO DE MENSAGEM
+  // =========================================================================
+
+  Widget _buildMessageInput() {
+    return Positioned(bottom: 0, left: 0, right: 0, child: Container(padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 16, right: 16, top: 8), decoration: BoxDecoration(color: _kSurface, borderRadius: const BorderRadius.vertical(top: Radius.circular(20)), border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.06)))), child: Row(children: [Expanded(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), decoration: BoxDecoration(color: _kSurfaceAlt, borderRadius: BorderRadius.circular(18), border: Border.all(color: Colors.white.withValues(alpha: 0.08))), child: TextField(controller: _chatController, focusNode: _chatFocus, style: const TextStyle(color: Colors.white, fontSize: 14), decoration: InputDecoration(hintText: 'Mensagem...', hintStyle: const TextStyle(color: Colors.white54), border: InputBorder.none)),), const SizedBox(width: 8), Container(width: 44, height: 44, decoration: BoxDecoration(shape: BoxShape.circle, color: _kAccent), child: IconButton(icon: const Icon(Icons.send_rounded, color: Colors.white, size: 20), onPressed: _sendChat)),],)),
+  }
+
+  // =========================================================================
+  // ALERTAS
+  // =========================================================================
+
+  Widget _buildAlertsLayer() {
+    final topInset = MediaQuery.of(context).padding.top;
+    return Positioned(top: topInset + 100, left: 12, right: 12, child: Column(mainAxisSize: MainAxisSize.min, children: _alerts.reversed.map((a) { return TweenAnimationBuilder<double>(key: ValueKey(a.title + a.subtitle), tween: Tween(begin: 0, end: 1), duration: const Duration(milliseconds: 420), curve: Curves.easeOutCubic, builder: (_, t, child) { return Opacity(opacity: t, child: Transform.translate(offset: Offset(0, -18 * (1 - t)), child: child)); }, child: Container(margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xDD191926), Color(0x99303040)]), borderRadius: BorderRadius.circular(14), border: Border.all(color: a.color.withValues(alpha: 0.5)), boxShadow: [BoxShadow(color: a.color.withValues(alpha: 0.28), blurRadius: 14, spreadRadius: 1)]), child: Row(children: [Icon(a.icon, color: a.color, size: 20), const SizedBox(width: 8), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(a.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)), Text(a.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 12))],)],)],)); })).toList(),);
+  }
+
+  // =========================================================================
+  // EFEITOS (PRESENTES, REAÇÕES)
+  // =========================================================================
+
+  Widget _buildOverlayFx() {
+    final reduce = ExperienceSettings.instance.reduceAnimations;
+    return Stack(fit: StackFit.expand, children: [if (_activeGiftAnim != null) GiftAnimationOverlay(gift: _activeGiftAnim!, senderName: _activeGiftSender, amount: _activeGiftAmount, onComplete: _clearGiftOverlay), if (_burstEmoji != null && !reduce) IgnorePointer(child: _ReactionBurstOverlay(emoji: _burstEmoji!)),]);
+  }
+
+  // =========================================================================
+  // INDICADOR DE GAME LIVE
+  // =========================================================================
+
+  Widget _buildGameLiveIndicator() {
+    return Positioned(top: MediaQuery.of(context).padding.top + 8, left: 8, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(color: _kAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12), border: Border.all(color: _kAccent.withValues(alpha: 0.4))), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.sports_esports_rounded, color: _kAccent, size: 16), const SizedBox(width: 6), Text('GAME LIVE', style: TextStyle(color: _kAccent, fontSize: 11, fontWeight: FontWeight.w800))],));
+  }
+
+  // =========================================================================
+  // FACE CAM / JANELINHA DA CÂMERA
+  // =========================================================================
+
+  Widget _buildFaceCam({VideoTrack? camera, bool isSelf = false}) {
+    final size = MediaQuery.sizeOf(context);
+    final w = (size.width * 0.27).clamp(78.0, 118.0).toDouble();
+    final h = w * 1.4;
+    final top = MediaQuery.of(context).padding.top + (_isFullscreen ? 12.0 : 96.0);
+    if (top + h > size.height - 44) return const SizedBox.shrink();
+    return Positioned(top: top, right: 12, child: Container(width: w, height: h, clipBehavior: Clip.antiAlias, decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(14), border: Border.all(color: _kAccent.withValues(alpha: 0.7), width: 1.4), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 14), BoxShadow(color: _kAccent.withValues(alpha: 0.18), blurRadius: 10)]), child: Stack(fit: StackFit.expand, children: [if (camera != null) VideoTrackRenderer(camera, fit: VideoViewFit.cover), Positioned(left: 6, top: 6, child: Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(8)), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.videocam_rounded, color: Colors.white, size: 11), SizedBox(width: 4), Text('Câmera', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700))]),)), Positioned(top: 6, right: 6, child: GestureDetector(onTap: isSelf ? _toggleCamera : () async { final pub = _lk.remoteCameraPublication(isSelf ? _lk.localParticipant! : _lk.guests.first); if (pub != null) { try { await pub.unsubscribe(); } catch (_) {} } if (mounted) setState(() => _cameraWindowHidden = true); }, behavior: HitTestBehavior.opaque, child: Container(width: 24, height: 24, decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), shape: BoxShape.circle, border: Border.all(color: Colors.white24, width: 1)), child: const Icon(Icons.close_rounded, color: Colors.white, size: 14))),)]));
+  }
+
+  // =========================================================================
+  // OVERLAYS DE ESTADO
+  // =========================================================================
+
+  bool _buildingConnecting() {
+    if (_error != null) return false;
+    if (_ended || _phase == LivePhase.ended) return false;
+    return widget.role == LiveRole.viewer && !_connected;
+  }
+
+  Widget _buildConnectingOverlay() {
+    final l10n = AppLocalizations.of(context)!;
+    return Positioned.fill(child: Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF0B0710), Color(0xFF050308)])), child: SafeArea(child: Center(child: SingleChildScrollView(padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24), child: Column(mainAxisSize: MainAxisSize.min, children: [const _LiveBadge(), const SizedBox(height: 44), SizedBox(width: 64, height: 64, child: Stack(alignment: Alignment.center, children: [TweenAnimationBuilder<double>(tween: Tween(begin: 0, end: 1), duration: const Duration(milliseconds: 1500), curve: Curves.easeOut, builder: (_, t, __) => Container(width: 44 + 20 * t, height: 44 + 20 * t, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: _kAccent.withValues(alpha: (1 - t) * 0.45), width: 2))), const SizedBox(width: 52, height: 52, child: CircularProgressIndicator(color: _kAccent, strokeWidth: 3.2)),]), const SizedBox(height: 26), Text(l10n.connectingToLive, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)), const SizedBox(height: 6), Text(_live.title, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 12))],)))))));
+  }
+
+  bool _buildingReconnecting() {
+    if (_error != null) return false;
+    if (_ended || _phase == LivePhase.ended) return false;
+    return _lk.reconnecting.value;
+  }
+
+  Widget _buildReconnectingOverlay() {
+    final l10n = AppLocalizations.of(context)!;
+    return Positioned.fill(child: Container(color: Colors.black.withValues(alpha: 0.72), child: SafeArea(child: Center(child: SingleChildScrollView(padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24), child: Column(mainAxisSize: MainAxisSize.min, children: [SizedBox(width: 52, height: 52, child: Stack(alignment: Alignment.center, children: [SizedBox(width: 46, height: 46, child: CircularProgressIndicator(color: _kAccent, strokeWidth: 3)), const Icon(Icons.wifi_tethering_rounded, color: Colors.white, size: 20)],)), const SizedBox(height: 20), Text(l10n.reconnecting, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)), const SizedBox(height: 6), Text(l10n.liveReconnectingBody, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 12))],))))));
+  }
+
+  Widget _buildErrorOverlay(String error) {
+    return Positioned.fill(child: Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF0B0710), Color(0xFF050308)])), child: SafeArea(child: Center(child: SingleChildScrollView(padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.error_rounded, color: _kLiveRed, size: 48), const SizedBox(height: 16), Text('Algo deu errado', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)), const SizedBox(height: 8), Text(error, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 13)), const SizedBox(height: 24), FilledButton(onPressed: () { if (mounted) setState(() { _error = null; _connected = false; _join(); }, child: Text('Tentar novamente', style: TextStyle(fontWeight: FontWeight.w800)),), style: FilledButton.styleFrom(backgroundColor: _kAccent, minimumSize: const Size(200, 48), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),),],)))))));
+  }
+
+  bool _shouldShowWaitingReady() => widget.isGameLive && widget.role == LiveRole.streamer && _phase == LivePhase.waiting && _connected;
+
+  Widget _buildGameReadyOverlay() {
+    final l10n = AppLocalizations.of(context)!;
+    return Positioned.fill(child: Container(color: Colors.black.withValues(alpha: 0.6), alignment: Alignment.center, child: SingleChildScrollView(padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24), child: Column(mainAxisSize: MainAxisSize.min, children: [Stack(alignment: Alignment.center, children: [TweenAnimationBuilder<double>(tween: Tween(begin: 0, end: 1), duration: const Duration(milliseconds: 1200), curve: Curves.easeOut, builder: (_, t, __) => Container(width: 76 + 56 * t, height: 76 + 56 * t, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: _kAccent.withValues(alpha: (1 - t) * 0.55), width: 2))), Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: _kAccent.withValues(alpha: 0.22), shape: BoxShape.circle, border: Border.all(color: _kAccent.withValues(alpha: 0.8), width: 2), boxShadow: [BoxShadow(color: _kAccent.withValues(alpha: 0.55), blurRadius: 38, spreadRadius: 3)]), child: const Icon(Icons.screen_share_rounded, color: _kAccent, size: 46)),]), const SizedBox(height: 22), Text(l10n.gameLiveTitle, style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, shadows: [Shadow(color: _kAccent.withValues(alpha: 0.6), blurRadius: 18)])), const SizedBox(height: 8), Text(l10n.gameLiveScreenNotice, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, height: 1.4)), const SizedBox(height: 8), Text('🎮 ${_live.gameName ?? _live.title}', textAlign: TextAlign.center, style: const TextStyle(color: _kAccent, fontWeight: FontWeight.w700)), const SizedBox(height: 26), FilledButton.icon(onPressed: _toggleScreenShareOn, style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE11D48), minimumSize: const Size(230, 54), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)), elevation: 8, shadowColor: _kLiveRed.withValues(alpha: 0.7)), icon: const Icon(Icons.play_arrow_rounded), label: Text(l10n.startTransmissionButton, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))), const SizedBox(height: 12), TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(l10n.leaveWithoutTransmitting, style: const TextStyle(color: Colors.white54)))])));
+  }
+
+  Widget _buildRecapOverlay() {
+    final l10n = AppLocalizations.of(context)!;
+    final duration = DateTime.now().difference(_joinedAt);
+    final minutes = duration.inMinutes;
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    final timeLabel = h > 0 ? l10n.recapDurationHM(h, m.toString().padLeft(2, '0')) : l10n.recapDurationM(m);
+    return Positioned.fill(child: Container(color: Colors.black.withValues(alpha: 0.82), alignment: Alignment.center, child: SingleChildScrollView(padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(color: _kAccent.withValues(alpha: 0.2), shape: BoxShape.circle), child: const Icon(Icons.check_circle_rounded, color: Color(0xFF22C55E), size: 44)), const SizedBox(height: 18), Text(l10n.liveEnded, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)), const SizedBox(height: 6), Text(_live.title, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70)), const SizedBox(height: 20), _recapStat(l10n.recapDurationLabel, timeLabel), const SizedBox(height: 10), _recapStat(l10n.recapPeakLabel, '$_peakViewers'), if (widget.isGameLive) ...[const SizedBox(height: 10), _recapStat(l10n.recapGameLabel, _live.gameName ?? '—')], const SizedBox(height: 24), FilledButton(onPressed: () { setState(() => _recapDismissed = true); Navigator.of(context).pop(true); }, style: FilledButton.styleFrom(backgroundColor: _kAccent, minimumSize: const Size(220, 50), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))), child: Text(l10n.recapFinishLabel, style: const TextStyle(fontWeight: FontWeight.w800)))])));
+  }
+
+  Widget _recapStat(String label, String value) {
+    return Container(width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(12)), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label, style: const TextStyle(color: Colors.white54)), Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16))]));
+  }
+
+  // =========================================================================
+  // MAIS OPÇÕES MENU
+  // =========================================================================
+
+  void _openMoreSheet() {
+    final isStreamer = widget.role == LiveRole.streamer;
+    final items = [
+      if (!isStreamer) ...[
+        KlayMoreItem(label: 'Denunciar', icon: Icons.flag_rounded, color: const Color(0xFFFFA53D), onTap: () { Navigator.of(context).pop(); }),
+        KlayMoreItem(label: 'Bloquear', icon: Icons.block_rounded, color: Colors.white, onTap: () { Navigator.of(context).pop(); }),
+      ],
+      if (isStreamer) ...[
+        KlayMoreItem(label: 'Configurações', icon: Icons.settings_rounded, color: Colors.white, onTap: () { Navigator.of(context).pop(); _openGameSettings(); }),
+        KlayMoreItem(label: 'Moderadores', icon: Icons.shield_rounded, color: Colors.white, onTap: () { Navigator.of(context).pop(); }),
+      ],
+      KlayMoreItem(label: 'Informações', icon: Icons.info_rounded, color: Colors.white, onTap: () { Navigator.of(context).pop(); }),
+      KlayMoreItem(label: 'Ocultar chat', icon: Icons.chat_bubble_outline_rounded, color: Colors.white, onTap: () { Navigator.of(context).pop(); setState(() => _chatOpen = false); }),
+    ];
+    if (widget.isGameLive && isStreamer) {
+      items.add(KlayMoreItem(label: 'RTMP', icon: Icons.live_tv_rounded, color: Colors.white, onTap: () { Navigator.of(context).pop(); _startRtmpStream(); }));
+    }
+    KlayMoreSheet.show(context, items: items, toggles: [
+      KlayMoreToggle(label: 'Efeitos de reação', value: !ExperienceSettings.instance.reduceAnimations, onChanged: (v) {}),
+    ]);
+  }
+
+  // =========================================================================
+  // BADGE AO VIVO
+  // =========================================================================
+
+  class _LiveBadge extends StatelessWidget {
+    const _LiveBadge();
+    @override
+    Widget build(BuildContext context) {
+      return Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: _kLiveRed, borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: _kLiveRed.withValues(alpha: 0.25), blurRadius: 6)]), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.circle, color: Colors.white, size: 8), SizedBox(width: 4), Text('AO VIVO', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.5))]));
+    }
+  }
+}
+
+// =========================================================================
+  final String label;
+  final IconData? icon;
+  final Color color;
+  final VoidCallback? onTap;
+  const KlayMoreItem({required this.label, this.icon, this.color = Colors.white, this.onTap});
+}
+
+class KlayMoreToggle {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const KlayMoreToggle({required this.label, required this.value, required this.onChanged});
+}
+
+class KlayMoreSheet {
+  KlayMoreSheet._();
+  static Future<void> show(BuildContext showContext, {required List<KlayMoreItem> items, List<KlayMoreToggle> toggles = const []}) {
+    return showModalBottomSheet<void>(context: showContext, backgroundColor: const Color(0xFF141420), isScrollControlled: true, useSafeArea: true, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))), builder: (ctx) => StatefulBuilder(builder: (ctx, setSheetState) { return ConstrainedBox(constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.86), child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(8, 10, 8, 14), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const SizedBox(height: 8), for (final item in items) _row(showContext, item), if (toggles.isNotEmpty) ...[const Divider(color: Color(0x14FFFFFF), height: 1), for (var i = 0; i < toggles.length; i++) SwitchListTile(dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 16), activeThumbColor: const Color(0xFF8B5CF6), activeTrackColor: const Color(0xFF8B5CF6).withValues(alpha: 0.35), title: Text(toggles[i].label, style: const TextStyle(color: Colors.white, fontSize: 15)), value: toggles[i].value, onChanged: (v) { setSheetState(() => toggles[i].value = v); toggles[i].onChanged(v); })]],))); }));
+  }
+
+  static Widget _row(BuildContext ctx, KlayMoreItem item) {
+    return InkWell(onTap: () { Navigator.of(ctx).pop(); item.onTap?.call(); }, borderRadius: BorderRadius.circular(14), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14), child: Row(children: [if (item.icon != null) ...[Container(width: 36, height: 36, decoration: BoxDecoration(shape: BoxShape.circle, color: item.color.withValues(alpha: 0.14)), child: Icon(item.icon, color: item.color, size: 20)), const SizedBox(width: 14)], Expanded(child: Text(item.label, style: TextStyle(color: item.color, fontSize: 15, fontWeight: FontWeight.w600))), const Icon(Icons.chevron_right_rounded, color: Colors.white30, size: 20)],)]));
+  }
+}

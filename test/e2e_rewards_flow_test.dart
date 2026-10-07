@@ -98,290 +98,406 @@ void main() {
     test('(setup) inicializa Supabase na zona real', () async {
       SharedPreferences.setMockInitialValues(const {});
       await SupabaseService.instance.ensureReady();
-      expect(SupabaseService.instance.isConfigured, isTrue,
-          reason: 'E2E exige Supabase configurado (rede real habilitada).');
-    }, skip: skipUnlessE2E());
-
-    test('convites: validate_invite_code resolve o convidante PRÉ-cadastro',
-        () async {
-      final db = SupabaseService.instance;
-
-      await db.signInWithEmail(_adminEmail, _password);
-      final adminId = db.currentUser!.id;
-      final code = (await db.client.rpc('invite_summary'))
-          ['code']
-          .toString()
-          .toUpperCase();
-      await db.signOut();
-
-      // Sem sessão (como um visitante antes de se cadastrar).
-      final v = await db.client.rpc('validate_invite_code', params: {
-        'p_code': code,
-      });
-      expect(v, isNotNull, reason: 'código válido resolve o convidante');
-      final m = Map<String, dynamic>.from(v as Map);
-      expect(m['code'].toString().toUpperCase(), code);
-      expect(m['inviter_id'].toString(), adminId,
-          reason: 'validate_invite_code devolve o id REAL do dono do código');
-      expect(m['display_name'], isNotEmpty);
-
-      // Código inexistente → null (não vaza nenhum dado).
-      final bad = await db.client.rpc('validate_invite_code', params: {
-        'p_code': 'ZZZZZZ',
-      });
-      expect(bad, isNull);
-    }, skip: skipUnlessE2E());
-
-    test('convites: redeem idempotente + claim paga 5 cristais no ledger',
-        () async {
-      final db = SupabaseService.instance;
-
-      await db.signInWithEmail(_adminEmail, _password);
-      final code = (await db.client.rpc('invite_summary'))
-          ['code']
-          .toString()
-          .toUpperCase();
-      final wBefore = await wallet(db);
-      await db.signOut();
-
-      // "Convidado": identidade REAL nova (sessão anônima do Supabase).
-      final anon = await db.ensureAnonymous();
-      final anonId = anon.id;
-      final redeem = await db.client.rpc('redeem_invite', params: {'p_code': code});
-      expect(redeem, isNotNull,
-          reason: 'redeem_invite respondeu o resumo do convidado');
-      // Idempotente: um segundo redeem NÃO duplica a linha.
-      await db.client.rpc('redeem_invite', params: {'p_code': code});
-      await db.signOut();
-
-      // De volta como admin (dono do convite): a linha existe e está validated.
-      await db.signInWithEmail(_adminEmail, _password);
-      final invites = await db.client
-          .from('invites')
-          .select('id,status,invited_user_id')
-          .eq('invite_code', code)
-          .eq('invited_user_id', anonId);
-      final rows = (invites as List).whereType<Map>().toList();
-      expect(rows.length, 1, reason: 'redeem idempotente criou UMA linha');
-      final inviteRow = Map<String, dynamic>.from(rows.first);
-      final inviteId = inviteRow['id'].toString();
-      expect(inviteRow['status'], 'validated',
-          reason: 'convidado real já nasce validated (pronto para claim)');
-
-      // Claim: o backend decide o quanto paga (5 cristais/convidado).
-      final claim = Map<String, dynamic>.from(
-        await db.client.rpc('claim_invite_rewards') as Map,
+      expect(
+        SupabaseService.instance.isConfigured,
+        isTrue,
+        reason: 'E2E exige Supabase configurado (rede real habilitada).',
       );
-      expect((claim['claimed'] as num).toInt(), greaterThanOrEqualTo(1),
-          reason: 'o convite novo está entre os reivindicados');
-      final paid = (claim['crystals'] as num).toInt();
-
-      // Saldo: subiu EXATAMENTE o que o backend reportou.
-      final wAfter = await wallet(db);
-      expect(crystalsOf(wAfter), crystalsOf(wBefore) + paid,
-          reason: 'my_wallet refletiu o crédito do claim');
-
-      // Ledger: transação daquele convite, com saldo de verdade.
-      final tx = await ledger(db);
-      Map<String, dynamic>? inviteTx;
-      for (final t in tx) {
-        if (t['ref_type'] == 'invite' && t['ref_id'] == inviteId) {
-          inviteTx = t;
-        }
-      }
-      expect(inviteTx, isNotNull,
-          reason: 'ledger registrou a transação daquele convite');
-      expect((inviteTx!['delta'] as num).toInt(), 5,
-          reason: 'convite vale 5 cristais (delta do ledger)');
-      expect(inviteTx['currency'], 'crystals');
-      expect(inviteTx['kind'], 'reward');
-      expect((inviteTx['balance_after'] as num).toInt(), crystalsOf(wAfter),
-          reason: 'balance_after do ledger fecha com o saldo real');
-
-      // A linha do convite foi travada: validated -> rewarded.
-      final after = await db.client
-          .from('invites')
-          .select('status')
-          .eq('invite_code', code)
-          .eq('invited_user_id', anonId);
-      expect((after as List).first['status'], 'rewarded',
-          reason: 'claim marca o convite como rewarded');
-
-      // Idempotência do claim: nada a pagar de novo (0 cristais).
-      final wIdem = await wallet(db);
-      final claim2 = Map<String, dynamic>.from(
-        await db.client.rpc('claim_invite_rewards') as Map,
-      );
-      expect((claim2['claimed'] as num).toInt(), 0,
-          reason: 'claim repetido não reinvidica nada');
-      expect(crystalsOf(await wallet(db)), crystalsOf(wIdem),
-          reason: 'claim repetido não credita de novo');
-
-      await db.signOut();
     }, skip: skipUnlessE2E());
 
-    test('jogos: sessão real, melhoria paga patamar, piora/empate não paga',
-        () async {
-      final db = SupabaseService.instance;
+    test(
+      'convites: validate_invite_code resolve o convidante PRÉ-cadastro',
+      () async {
+        final db = SupabaseService.instance;
 
-      await db.ensureAnonymous(); // jogador REAL novo, sem recordes
-      final baseline = crystalsOf(await wallet(db));
+        await db.signInWithEmail(_adminEmail, _password);
+        final adminId = db.currentUser!.id;
+        final code = (await db.client.rpc(
+          'invite_summary',
+        ))['code'].toString().toUpperCase();
+        await db.signOut();
 
-      final velha = Map<String, dynamic>.from(await db.client
-          .from('games')
-          .select('id,status,rules,max_score')
-          .eq('id', 'velha')
-          .single() as Map);
-      expect(velha['status'], 'active');
-      final maxScore = (velha['max_score'] as num).toInt();
-      final tiers = ((velha['rules'] as Map? ?? {})['rewards'] as List?) ?? [];
-      final expected10 = _tierReward(tiers, 10);
-      expect(expected10, 3,
-          reason: 'seed da velha: patamar 10 → 3 cristais');
+        // Sem sessão (como um visitante antes de se cadastrar).
+        final v = await db.client.rpc(
+          'validate_invite_code',
+          params: {'p_code': code},
+        );
+        expect(v, isNotNull, reason: 'código válido resolve o convidante');
+        final m = Map<String, dynamic>.from(v as Map);
+        expect(m['code'].toString().toUpperCase(), code);
+        expect(
+          m['inviter_id'].toString(),
+          adminId,
+          reason: 'validate_invite_code devolve o id REAL do dono do código',
+        );
+        expect(m['display_name'], isNotEmpty);
 
-      // 1) MELHOROU (sem recorde antes): paga o patamar.
-      final s1 = (await db.client
-              .rpc('game_start_session', params: {'p_game_id': 'velha'}))
-          .toString();
-      final r1 = Map<String, dynamic>.from(await db.client.rpc(
-              'game_submit_score',
-              params: {
-                'p_session_id': s1,
-                'p_score': 10,
-                'p_duration_seconds': 5,
-              })
-          as Map);
-      expect(r1['improved'], isTrue);
-      expect((r1['best_score'] as num).toInt(), 10);
-      expect((r1['reward'] as num).toInt(), expected10,
-          reason: 'primeira vitória credita 3 cristais');
-      expect(crystalsOf(await wallet(db)), baseline + expected10,
-          reason: 'my_wallet subiu com a recompensa do jogo');
+        // Código inexistente → null (não vaza nenhum dado).
+        final bad = await db.client.rpc(
+          'validate_invite_code',
+          params: {'p_code': 'ZZZZZZ'},
+        );
+        expect(bad, isNull);
+      },
+      skip: skipUnlessE2E(),
+    );
 
-      Map<String, dynamic>? gameTx;
-      for (final t in await ledger(db)) {
-        if (t['ref_type'] == 'game:velha' && t['ref_id'] == s1) {
-          gameTx = t;
+    test(
+      'convites: redeem idempotente + claim paga 5 cristais no ledger',
+      () async {
+        final db = SupabaseService.instance;
+
+        await db.signInWithEmail(_adminEmail, _password);
+        final code = (await db.client.rpc(
+          'invite_summary',
+        ))['code'].toString().toUpperCase();
+        final wBefore = await wallet(db);
+        await db.signOut();
+
+        // "Convidado": identidade REAL nova (sessão anônima do Supabase).
+        final anon = await db.ensureAnonymous();
+        final anonId = anon.id;
+        final redeem = await db.client.rpc(
+          'redeem_invite',
+          params: {'p_code': code},
+        );
+        expect(
+          redeem,
+          isNotNull,
+          reason: 'redeem_invite respondeu o resumo do convidado',
+        );
+        // Idempotente: um segundo redeem NÃO duplica a linha.
+        await db.client.rpc('redeem_invite', params: {'p_code': code});
+        await db.signOut();
+
+        // De volta como admin (dono do convite): a linha existe e está validated.
+        await db.signInWithEmail(_adminEmail, _password);
+        final invites = await db.client
+            .from('invites')
+            .select('id,status,invited_user_id')
+            .eq('invite_code', code)
+            .eq('invited_user_id', anonId);
+        final rows = (invites as List).whereType<Map>().toList();
+        expect(rows.length, 1, reason: 'redeem idempotente criou UMA linha');
+        final inviteRow = Map<String, dynamic>.from(rows.first);
+        final inviteId = inviteRow['id'].toString();
+        expect(
+          inviteRow['status'],
+          'validated',
+          reason: 'convidado real já nasce validated (pronto para claim)',
+        );
+
+        // Claim: o backend decide o quanto paga (5 cristais/convidado).
+        final claim = Map<String, dynamic>.from(
+          await db.client.rpc('claim_invite_rewards') as Map,
+        );
+        expect(
+          (claim['claimed'] as num).toInt(),
+          greaterThanOrEqualTo(1),
+          reason: 'o convite novo está entre os reivindicados',
+        );
+        final paid = (claim['crystals'] as num).toInt();
+
+        // Saldo: subiu EXATAMENTE o que o backend reportou.
+        final wAfter = await wallet(db);
+        expect(
+          crystalsOf(wAfter),
+          crystalsOf(wBefore) + paid,
+          reason: 'my_wallet refletiu o crédito do claim',
+        );
+
+        // Ledger: transação daquele convite, com saldo de verdade.
+        final tx = await ledger(db);
+        Map<String, dynamic>? inviteTx;
+        for (final t in tx) {
+          if (t['ref_type'] == 'invite' && t['ref_id'] == inviteId) {
+            inviteTx = t;
+          }
         }
-      }
-      expect(gameTx, isNotNull, reason: 'ledger tem a recompensa da sessão');
-      expect((gameTx!['delta'] as num).toInt(), expected10);
-      expect(gameTx['currency'], 'crystals');
-      expect(gameTx['kind'], 'reward');
-      expect((gameTx['balance_after'] as num).toInt(), baseline + expected10);
+        expect(
+          inviteTx,
+          isNotNull,
+          reason: 'ledger registrou a transação daquele convite',
+        );
+        expect(
+          (inviteTx!['delta'] as num).toInt(),
+          5,
+          reason: 'convite vale 5 cristais (delta do ledger)',
+        );
+        expect(inviteTx['currency'], 'crystals');
+        expect(inviteTx['kind'], 'reward');
+        expect(
+          (inviteTx['balance_after'] as num).toInt(),
+          crystalsOf(wAfter),
+          reason: 'balance_after do ledger fecha com o saldo real',
+        );
 
-      // 2) PIOROU (abaixo do recorde): não melhora → não paga.
-      final s2 = (await db.client
-              .rpc('game_start_session', params: {'p_game_id': 'velha'}))
-          .toString();
-      final r2 = Map<String, dynamic>.from(await db.client.rpc(
-              'game_submit_score',
-              params: {
-                'p_session_id': s2,
-                'p_score': 5,
-                'p_duration_seconds': 3,
-              })
-          as Map);
-      expect(r2['improved'], isFalse,
-          reason: 'score menor que o recorde não melhora');
-      expect((r2['reward'] as num).toInt(), 0);
-      expect((r2['best_score'] as num).toInt(), 10,
-          reason: 'recorde permanece 10');
-      expect(crystalsOf(await wallet(db)), baseline + expected10,
-          reason: 'não paga nada quando o usuário não melhora');
+        // A linha do convite foi travada: validated -> rewarded.
+        final after = await db.client
+            .from('invites')
+            .select('status')
+            .eq('invite_code', code)
+            .eq('invited_user_id', anonId);
+        expect(
+          (after as List).first['status'],
+          'rewarded',
+          reason: 'claim marca o convite como rewarded',
+        );
 
-      // 3) EMPATE (score == recorde): também não melhora → não paga.
-      final s3 = (await db.client
-              .rpc('game_start_session', params: {'p_game_id': 'velha'}))
-          .toString();
-      final r3 = Map<String, dynamic>.from(await db.client.rpc(
-              'game_submit_score',
-              params: {
-                'p_session_id': s3,
-                'p_score': 10,
-                'p_duration_seconds': 4,
-              })
-          as Map);
-      expect(r3['improved'], isFalse,
-          reason: 'empatar o recorde não é melhoria (exige >)');
-      expect((r3['reward'] as num).toInt(), 0);
-      expect(crystalsOf(await wallet(db)), baseline + expected10,
-          reason: 'empate não paga');
+        // Idempotência do claim: nada a pagar de novo (0 cristais).
+        final wIdem = await wallet(db);
+        final claim2 = Map<String, dynamic>.from(
+          await db.client.rpc('claim_invite_rewards') as Map,
+        );
+        expect(
+          (claim2['claimed'] as num).toInt(),
+          0,
+          reason: 'claim repetido não reinvidica nada',
+        );
+        expect(
+          crystalsOf(await wallet(db)),
+          crystalsOf(wIdem),
+          reason: 'claim repetido não credita de novo',
+        );
 
-      // 6) O RECORDE guardado em game_scores jamais piora: após uma jogada
-      //    pior e um empate, a linha do usuário continua com o topo (10).
-      final me = db.currentUser!.id;
-      final stored = Map<String, dynamic>.from(await db.client
-          .from('game_scores')
-          .select('score')
-          .eq('user_id', me)
-          .eq('game_id', 'velha')
-          .single() as Map);
-      expect((stored['score'] as num).toInt(), 10,
-          reason: 'game_scores guarda o RECORDE (score pior não apaga o topo)');
+        await db.signOut();
+      },
+      skip: skipUnlessE2E(),
+    );
 
-      // 4) Re-submit da mesma sessão → backend nega.
-      final resub = await _rpcLabel(() => db.client.rpc(
+    test(
+      'jogos: sessão real, melhoria paga patamar, piora/empate não paga',
+      () async {
+        final db = SupabaseService.instance;
+
+        await db.ensureAnonymous(); // jogador REAL novo, sem recordes
+        final baseline = crystalsOf(await wallet(db));
+
+        final velha = Map<String, dynamic>.from(
+          await db.client
+                  .from('games')
+                  .select('id,status,rules,max_score')
+                  .eq('id', 'velha')
+                  .single()
+              as Map,
+        );
+        expect(velha['status'], 'active');
+        final maxScore = (velha['max_score'] as num).toInt();
+        final tiers =
+            ((velha['rules'] as Map? ?? {})['rewards'] as List?) ?? [];
+        final expected10 = _tierReward(tiers, 10);
+        expect(expected10, 3, reason: 'seed da velha: patamar 10 → 3 cristais');
+
+        // 1) MELHOROU (sem recorde antes): paga o patamar.
+        final s1 = (await db.client.rpc(
+          'game_start_session',
+          params: {'p_game_id': 'velha'},
+        )).toString();
+        final r1 = Map<String, dynamic>.from(
+          await db.client.rpc(
+                'game_submit_score',
+                params: {
+                  'p_session_id': s1,
+                  'p_score': 10,
+                  'p_duration_seconds': 5,
+                },
+              )
+              as Map,
+        );
+        expect(r1['improved'], isTrue);
+        expect((r1['best_score'] as num).toInt(), 10);
+        expect(
+          (r1['reward'] as num).toInt(),
+          expected10,
+          reason: 'primeira vitória credita 3 cristais',
+        );
+        expect(
+          crystalsOf(await wallet(db)),
+          baseline + expected10,
+          reason: 'my_wallet subiu com a recompensa do jogo',
+        );
+
+        Map<String, dynamic>? gameTx;
+        for (final t in await ledger(db)) {
+          if (t['ref_type'] == 'game:velha' && t['ref_id'] == s1) {
+            gameTx = t;
+          }
+        }
+        expect(gameTx, isNotNull, reason: 'ledger tem a recompensa da sessão');
+        expect((gameTx!['delta'] as num).toInt(), expected10);
+        expect(gameTx['currency'], 'crystals');
+        expect(gameTx['kind'], 'reward');
+        expect((gameTx['balance_after'] as num).toInt(), baseline + expected10);
+
+        // 2) PIOROU (abaixo do recorde): não melhora → não paga.
+        final s2 = (await db.client.rpc(
+          'game_start_session',
+          params: {'p_game_id': 'velha'},
+        )).toString();
+        final r2 = Map<String, dynamic>.from(
+          await db.client.rpc(
+                'game_submit_score',
+                params: {
+                  'p_session_id': s2,
+                  'p_score': 5,
+                  'p_duration_seconds': 3,
+                },
+              )
+              as Map,
+        );
+        expect(
+          r2['improved'],
+          isFalse,
+          reason: 'score menor que o recorde não melhora',
+        );
+        expect((r2['reward'] as num).toInt(), 0);
+        expect(
+          (r2['best_score'] as num).toInt(),
+          10,
+          reason: 'recorde permanece 10',
+        );
+        expect(
+          crystalsOf(await wallet(db)),
+          baseline + expected10,
+          reason: 'não paga nada quando o usuário não melhora',
+        );
+
+        // 3) EMPATE (score == recorde): também não melhora → não paga.
+        final s3 = (await db.client.rpc(
+          'game_start_session',
+          params: {'p_game_id': 'velha'},
+        )).toString();
+        final r3 = Map<String, dynamic>.from(
+          await db.client.rpc(
+                'game_submit_score',
+                params: {
+                  'p_session_id': s3,
+                  'p_score': 10,
+                  'p_duration_seconds': 4,
+                },
+              )
+              as Map,
+        );
+        expect(
+          r3['improved'],
+          isFalse,
+          reason: 'empatar o recorde não é melhoria (exige >)',
+        );
+        expect((r3['reward'] as num).toInt(), 0);
+        expect(
+          crystalsOf(await wallet(db)),
+          baseline + expected10,
+          reason: 'empate não paga',
+        );
+
+        // 6) O RECORDE guardado em game_scores jamais piora: após uma jogada
+        //    pior e um empate, a linha do usuário continua com o topo (10).
+        final me = db.currentUser!.id;
+        final stored = Map<String, dynamic>.from(
+          await db.client
+                  .from('game_scores')
+                  .select('score')
+                  .eq('user_id', me)
+                  .eq('game_id', 'velha')
+                  .single()
+              as Map,
+        );
+        expect(
+          (stored['score'] as num).toInt(),
+          10,
+          reason: 'game_scores guarda o RECORDE (score pior não apaga o topo)',
+        );
+
+        // 4) Re-submit da mesma sessão → backend nega.
+        final resub = await _rpcLabel(
+          () => db.client.rpc(
+            'game_submit_score',
+            params: {'p_session_id': s3, 'p_score': 10},
+          ),
+        );
+        expect(
+          resub,
+          contains('session_already_submitted'),
+          reason: 'uma sessão só aceita UMA submissão',
+        );
+
+        // 5) Score acima do max_score → backend nega (anti-speedhack).
+        final overflow = await _rpcLabel(() async {
+          final s = (await db.client.rpc(
+            'game_start_session',
+            params: {'p_game_id': 'velha'},
+          )).toString();
+          await db.client.rpc(
             'game_submit_score',
             params: {
-              'p_session_id': s3,
-              'p_score': 10,
+              'p_session_id': s,
+              'p_score': maxScore + 1,
+              'p_duration_seconds': 5,
             },
-          ));
-      expect(resub, contains('session_already_submitted'),
-          reason: 'uma sessão só aceita UMA submissão');
-
-      // 5) Score acima do max_score → backend nega (anti-speedhack).
-      final overflow = await _rpcLabel(() async {
-        final s = (await db.client
-                .rpc('game_start_session', params: {'p_game_id': 'velha'}))
-            .toString();
-        await db.client.rpc('game_submit_score', params: {
-          'p_session_id': s,
-          'p_score': maxScore + 1,
-          'p_duration_seconds': 5,
+          );
         });
-      });
-      expect(overflow, contains('invalid_score'),
-          reason: 'score > max_score (${maxScore + 1}) é negado');
+        expect(
+          overflow,
+          contains('invalid_score'),
+          reason: 'score > max_score (${maxScore + 1}) é negado',
+        );
 
-      await db.signOut();
-    }, skip: skipUnlessE2E());
+        await db.signOut();
+      },
+      skip: skipUnlessE2E(),
+    );
 
-    test('jogos: quiz no topo do patamar (detector de divergência do algoritmo)',
-        () async {
-      final db = SupabaseService.instance;
+    test(
+      'jogos: quiz no topo do patamar (detector de divergência do algoritmo)',
+      () async {
+        final db = SupabaseService.instance;
 
-      await db.ensureAnonymous();
-      final quiz = Map<String, dynamic>.from(await db.client
-          .from('games')
-          .select('id,rules,max_score')
-          .eq('id', 'quiz')
-          .single() as Map);
-      final tiers = ((quiz['rules'] as Map? ?? {})['rewards'] as List?) ?? [];
-      expect(tiers.length, greaterThanOrEqualTo(2),
-          reason: 'seed do quiz tem 2 patamares (6→3 e 4→2)');
+        await db.ensureAnonymous();
+        final quiz = Map<String, dynamic>.from(
+          await db.client
+                  .from('games')
+                  .select('id,rules,max_score')
+                  .eq('id', 'quiz')
+                  .single()
+              as Map,
+        );
+        final tiers = ((quiz['rules'] as Map? ?? {})['rewards'] as List?) ?? [];
+        expect(
+          tiers.length,
+          greaterThanOrEqualTo(2),
+          reason: 'seed do quiz tem 2 patamares (6→3 e 4→2)',
+        );
 
-      final intended = _tierReward(tiers, 6);
-      final sq = (await db.client
-              .rpc('game_start_session', params: {'p_game_id': 'quiz'}))
-          .toString();
-      final rq = Map<String, dynamic>.from(await db.client.rpc(
-              'game_submit_score',
-              params: {
-                'p_session_id': sq,
-                'p_score': 6,
-                'p_duration_seconds': 8,
-              })
-          as Map);
-      expect(rq['improved'], isTrue);
-      expect((rq['best_score'] as num).toInt(), 6);
-      expect((rq['reward'] as num).toInt(), intended,
-          reason: 'patamar libera o TOPO satisfeito (6/6 deve pagar o de maior '
+        final intended = _tierReward(tiers, 6);
+        final sq = (await db.client.rpc(
+          'game_start_session',
+          params: {'p_game_id': 'quiz'},
+        )).toString();
+        final rq = Map<String, dynamic>.from(
+          await db.client.rpc(
+                'game_submit_score',
+                params: {
+                  'p_session_id': sq,
+                  'p_score': 6,
+                  'p_duration_seconds': 8,
+                },
+              )
+              as Map,
+        );
+        expect(rq['improved'], isTrue);
+        expect((rq['best_score'] as num).toInt(), 6);
+        expect(
+          (rq['reward'] as num).toInt(),
+          intended,
+          reason:
+              'patamar libera o TOPO satisfeito (6/6 deve pagar o de maior '
               'min_score; se vier o de baixo, o backend ainda itera o array '
-              'decrescente e a migration do repo está divergente do aplicado)');
+              'decrescente e a migration do repo está divergente do aplicado)',
+        );
 
-      await db.signOut();
-    }, skip: skipUnlessE2E());
+        await db.signOut();
+      },
+      skip: skipUnlessE2E(),
+    );
   });
 }

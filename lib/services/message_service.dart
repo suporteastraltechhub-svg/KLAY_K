@@ -44,7 +44,8 @@ class MessageService {
     final out = <Conversation>[];
     for (final row in rows) {
       final m = Map<String, dynamic>.from(
-          row.map((k, v) => MapEntry(k.toString(), v)));
+        row.map((k, v) => MapEntry(k.toString(), v)),
+      );
       final a = m['user_a_id'] as String? ?? '';
       final b = m['user_b_id'] as String? ?? '';
       final peerId = a == me ? b : a;
@@ -54,8 +55,12 @@ class MessageService {
     return out;
   }
 
-  Conversation _toConversation(Map<String, dynamic> m, String me,
-      String peerId, Map<String, dynamic>? peer) {
+  Conversation _toConversation(
+    Map<String, dynamic> m,
+    String me,
+    String peerId,
+    Map<String, dynamic>? peer,
+  ) {
     final unread = _countUnreadSync(m['unread'] as num?);
     return Conversation(
       id: m['id'] as String? ?? '',
@@ -72,8 +77,8 @@ class MessageService {
       peerAvatar: peer?['avatar_url'] as String?,
       peerVerified: peer?['is_verified'] as bool? ?? false,
       unread: unread,
-      createdAt: DateTime.tryParse(m['created_at'] as String? ?? '')
-              ?.toLocal() ??
+      createdAt:
+          DateTime.tryParse(m['created_at'] as String? ?? '')?.toLocal() ??
           DateTime.now(),
     );
   }
@@ -110,8 +115,12 @@ class MessageService {
       }
     }
     final peer = await _db.profileFor(partnerId).catchError((_) => null);
-    return _toConversation(Map<String, dynamic>.from(res as Map), me, partnerId,
-        peer);
+    return _toConversation(
+      Map<String, dynamic>.from(res as Map),
+      me,
+      partnerId,
+      peer,
+    );
   }
 
   Future<List<DirectMessage>> fetchMessages(String conversationId) async {
@@ -125,7 +134,8 @@ class MessageService {
         .limit(500);
     return (res as List).whereType<Map<dynamic, dynamic>>().map((row) {
       final m = Map<String, dynamic>.from(
-          row.map((k, v) => MapEntry(k.toString(), v)));
+        row.map((k, v) => MapEntry(k.toString(), v)),
+      );
       return DirectMessage.fromJson(m, myId: me);
     }).toList();
   }
@@ -135,18 +145,57 @@ class MessageService {
     final me = await _me();
     final res = await _client
         .from('messages')
-        .insert({'conversation_id': conversationId, 'sender_id': me, 'text': text})
+        .insert({
+          'conversation_id': conversationId,
+          'sender_id': me,
+          'text': text,
+        })
         .select()
         .single();
+    _notifyMessageReceived(conversationId, me, text);
     return DirectMessage.fromJson(
-        Map<String, dynamic>.from(res as Map), myId: me);
+      Map<String, dynamic>.from(res as Map),
+      myId: me,
+    );
+  }
+
+  /// Notificação real de nova mensagem para o outro participante da conversa
+  /// (evento verdadeiro do sistema de DMs, nunca dado falso).
+  Future<void> _notifyMessageReceived(
+    String conversationId,
+    String me,
+    String text,
+  ) async {
+    try {
+      final conv = await _client
+          .from('conversations')
+          .select('user_a_id,user_b_id')
+          .eq('id', conversationId)
+          .maybeSingle();
+      if (conv == null) return;
+      final a = conv['user_a_id'] as String? ?? '';
+      final b = conv['user_b_id'] as String? ?? '';
+      final peer = a == me ? b : a;
+      if (peer.isEmpty || peer == me) return;
+      final preview = text.length > 140 ? '${text.substring(0, 140)}…' : text;
+      await _client.from('notifications').insert({
+        'user_id': peer,
+        'actor_id': me,
+        'type': 'message',
+        'ref_id': conversationId,
+        'message': preview,
+      });
+    } catch (_) {}
   }
 
   /// Marca como lidas as mensagens da conversa (RPC security definer validada).
   Future<void> markRead(String conversationId) async {
     if (!_ready) return;
     try {
-      await _client.rpc('mark_messages_read', params: {'conv_id': conversationId});
+      await _client.rpc(
+        'mark_messages_read',
+        params: {'conv_id': conversationId},
+      );
     } catch (_) {}
   }
 
@@ -209,7 +258,10 @@ class MessageService {
       AccountService.instance.unblockUser(userId);
 
   Future<void> reportConversation(
-      String conversationId, String reason, String details) {
+    String conversationId,
+    String reason,
+    String details,
+  ) {
     return SocialService.instance.reportItem(
       targetId: conversationId,
       targetType: 'conversation',

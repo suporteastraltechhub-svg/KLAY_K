@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/security_models.dart';
 import '../../services/security_service.dart';
 
@@ -47,15 +48,28 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   void _setWorking(bool v) {
     if (mounted) setState(() => _saving = v);
   }
 
+  Widget _sectionHeader(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8, left: 4),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: Colors.white54,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.1,
+      ),
+    ),
+  );
+
   Future<void> _pickBirthDate() async {
+    final l10n = AppLocalizations.of(context)!;
     final now = DateTime.now();
     final initial = _profile.birthDate;
     final picked = await showDatePicker(
@@ -63,7 +77,7 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
       initialDate: initial ?? DateTime(now.year - 16, now.month, now.day),
       firstDate: DateTime(1900),
       lastDate: now,
-      helpText: 'Data de nascimento',
+      helpText: l10n.youthShieldBirthDateHelp,
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: const ColorScheme.dark(
@@ -79,7 +93,7 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
     try {
       await _svc.setBirthDate(picked);
       await _load();
-      _snack('Data de nascimento salva.');
+      _snack(l10n.youthShieldBirthDateSaved);
     } catch (e) {
       _snack(e.toString());
     } finally {
@@ -88,11 +102,12 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
   }
 
   Future<void> _clearBirthDate() async {
+    final l10n = AppLocalizations.of(context)!;
     _setWorking(true);
     try {
       await _svc.setBirthDate(null);
       await _load();
-      _snack('Data de nascimento removida.');
+      _snack(l10n.youthShieldBirthDateRemoved);
     } catch (e) {
       _snack(e.toString());
     } finally {
@@ -115,19 +130,14 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
 
   Future<void> _setAdultContentOk(bool on) async {
     if (_saving) return;
+    final l10n = AppLocalizations.of(context)!;
     if (on && _profile.isProvenMinor) {
-      _snack('Menor de idade com data provada: o backend recusa conteúdo '
-          'adulto mesmo com este consentimento.');
+      _snack(l10n.youthShieldMinorBlocked);
       return;
     }
     final ok = await _confirmDialog(
-      on
-          ? 'Permitir conteúdo adulto?'
-          : 'Desativar conteúdo adulto?',
-      on
-          ? 'Se você for maior de idade, o backend permitirá conteúdo adulto. '
-              'Você pode desativar a qualquer momento.'
-          : 'Conteúdo adulto ficará oculto.',
+      on ? l10n.youthShieldAdultOnTitle : l10n.youthShieldAdultOffTitle,
+      on ? l10n.youthShieldAdultOnBody : l10n.youthShieldAdultOffBody,
     );
     if (!ok) return;
     _setWorking(true);
@@ -142,22 +152,33 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
   }
 
   Future<bool> _confirmDialog(String title, String body) async {
+    final l10n = AppLocalizations.of(context)!;
     final res = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1B1A26),
-        title: Text(title,
-            style: const TextStyle(color: Colors.white, fontSize: 18)),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontSize: 18),
+        ),
         content: Text(body, style: const TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirmar',
-                style: TextStyle(color: _kAccent, fontWeight: FontWeight.w700)),
+            child: Text(
+              l10n.confirm,
+              style: const TextStyle(
+                color: _kAccent,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ],
       ),
@@ -167,12 +188,15 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Modo Jovem e segurança',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.youthShieldTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
       ),
       body: _loading
@@ -180,53 +204,38 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _statusBanner(),
+                _statusBanner(l10n),
                 const SizedBox(height: 24),
-                _sectionHeader('DATA DE NASCIMENTO'),
-                _birthCard(),
+                _sectionHeader(l10n.youthShieldBirthHeader),
+                _birthCard(l10n),
                 const SizedBox(height: 24),
-                _sectionHeader('PREFERÊNCIAS'),
-                _prefsCard(),
+                _sectionHeader(l10n.youthShieldPrefsHeader),
+                _prefsCard(l10n),
                 const SizedBox(height: 16),
-                const Text(
-                  'As restrições são aplicadas no backend: lives para maiores '
-                  'exigem idade provada de 18+ e o Modo Jovem restringe '
-                  'interações para menor de idade mesmo com consentimento.',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                Text(
+                  l10n.youthShieldRestrictionsNote,
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
               ],
             ),
     );
   }
 
-  Widget _sectionHeader(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8, left: 4),
-        child: Text(text,
-            style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.1)),
-      );
-
-  Widget _statusBanner() {
+  Widget _statusBanner(AppLocalizations l10n) {
     final String title;
     final String body;
     final Color color;
     if (_profile.isProvenMinor) {
-      title = 'Conta identificada como menor de 18 anos';
-      body = 'Conteúdo e lives para maiores são bloqueados no backend. '
-          'O consentimento abaixo não altera esse bloqueio.';
+      title = l10n.youthShieldMinorTitle;
+      body = l10n.youthShieldMinorBody;
       color = Colors.orange;
     } else if (_profile.hasProvenAge) {
-      title = 'Idade provada: ${_profile.age} anos';
-      body = 'Os gates de conteúdo usam essa idade de forma honesta.';
+      title = l10n.youthShieldAgeProven(_profile.age!);
+      body = l10n.youthShieldAgeProvenBody;
       color = _kSafe;
     } else {
-      title = 'Idade ainda não informada';
-      body = 'Devido a algum consentimento, conteúdo adulto pode ser '
-          'liberado, mas lives para maiores ficam bloqueadas até '
-          'informar a data de nascimento.';
+      title = l10n.youthShieldNoAgeTitle;
+      body = l10n.youthShieldNoAgeBody;
       color = _kAccent;
     }
     return Container(
@@ -241,31 +250,41 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
         children: [
           Row(
             children: [
-              Icon(_profile.isProvenMinor ? Icons.warning_amber_rounded
-                  : Icons.shield_rounded, color: color),
+              Icon(
+                _profile.isProvenMinor
+                    ? Icons.warning_amber_rounded
+                    : Icons.shield_rounded,
+                color: color,
+              ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(title,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15)),
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          Text(body,
-              style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(
+            body,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
         ],
       ),
     );
   }
 
-  Widget _birthCard() {
+  Widget _birthCard(AppLocalizations l10n) {
     final bd = _profile.birthDate;
-    final formatted =
-        bd == null ? '—' : '${bd.day.toString().padLeft(2, '0')}/'
-            '${bd.month.toString().padLeft(2, '0')}/${bd.year}';
+    final formatted = bd == null
+        ? '—'
+        : '${bd.day.toString().padLeft(2, '0')}/'
+              '${bd.month.toString().padLeft(2, '0')}/${bd.year}';
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -280,13 +299,19 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
               const Icon(Icons.cake_rounded, color: _kAccent),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(formatted,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w600)),
+                child: Text(
+                  formatted,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
               if (_profile.age != null)
-                Text('${_profile.age} anos',
-                    style: const TextStyle(color: Colors.white38)),
+                Text(
+                  l10n.youthShieldAgeYears(_profile.age!),
+                  style: const TextStyle(color: Colors.white38),
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -296,7 +321,7 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
                 child: OutlinedButton.icon(
                   onPressed: _saving ? null : _pickBirthDate,
                   icon: const Icon(Icons.edit_calendar_rounded, size: 18),
-                  label: const Text('Informar data'),
+                  label: Text(l10n.youthShieldSetDate),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _kAccent,
                     side: const BorderSide(color: _kAccent),
@@ -311,7 +336,7 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
                     foregroundColor: Colors.white54,
                     side: const BorderSide(color: Colors.white24),
                   ),
-                  child: const Text('Remover'),
+                  child: Text(l10n.youthShieldRemove),
                 ),
               ],
             ],
@@ -321,7 +346,7 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
     );
   }
 
-  Widget _prefsCard() {
+  Widget _prefsCard(AppLocalizations l10n) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF16151F),
@@ -333,11 +358,13 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
             value: _profile.youthMode,
             onChanged: _saving ? null : _setYouthMode,
             activeThumbColor: _kSafe,
-            title: const Text('Modo Jovem',
-                style: TextStyle(color: Colors.white, fontSize: 15)),
-            subtitle: const Text(
-              'Restringe interações e conteúdo sensível.',
-              style: TextStyle(color: Colors.white38, fontSize: 12),
+            title: Text(
+              l10n.youthShieldYouthMode,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
+            subtitle: Text(
+              l10n.youthShieldYouthModeSub,
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
           ),
           const Divider(height: 1, color: Colors.white12),
@@ -345,12 +372,14 @@ class _YouthShieldScreenState extends State<YouthShieldScreen> {
             value: _profile.adultContentOk,
             onChanged: _saving ? null : _setAdultContentOk,
             activeThumbColor: _kAccent,
-            title: const Text('Permitir conteúdo adulto',
-                style: TextStyle(color: Colors.white, fontSize: 15)),
+            title: Text(
+              l10n.youthShieldAdultContent,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
             subtitle: Text(
               _profile.isProvenMinor
-                  ? 'Bloqueado para menor de idade (idade provada).'
-                  : 'Libera conteúdo adulto. Sujeito a verificação de idade.',
+                  ? l10n.youthShieldAdultBlockedSub
+                  : l10n.youthShieldAdultAllowedSub,
               style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
           ),

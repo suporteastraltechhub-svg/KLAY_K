@@ -43,13 +43,16 @@ class Community {
       coverUrl: json['cover_url']?.toString(),
       category: json['category']?.toString() ?? '',
       createdBy: createdBy is List
-          ? (createdBy.isNotEmpty ? (createdBy.first as Map)['id']?.toString() : null)
+          ? (createdBy.isNotEmpty
+                ? (createdBy.first as Map)['id']?.toString()
+                : null)
           : createdBy?.toString(),
       memberCount: (json['member_count'] as num?)?.toInt() ?? 0,
       postCount: (json['post_count'] as num?)?.toInt() ?? 0,
       isPublic: json['is_public'] as bool? ?? true,
       rules: json['rules']?.toString() ?? '',
-      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
     );
   }
@@ -89,7 +92,8 @@ class CommunityMembership {
         communityId: json['community_id']?.toString() ?? '',
         userId: json['user_id']?.toString() ?? '',
         role: json['role']?.toString() ?? 'member',
-        joinedAt: DateTime.tryParse(json['joined_at']?.toString() ?? '')?.toLocal() ??
+        joinedAt:
+            DateTime.tryParse(json['joined_at']?.toString() ?? '')?.toLocal() ??
             DateTime.now(),
       );
 }
@@ -129,8 +133,9 @@ class CommunityPost {
     this.authorVerified = false,
   });
 
-  String get authorDisplay =>
-      authorName.isNotEmpty ? authorName : (authorUsername.isNotEmpty ? authorUsername : 'Membro');
+  String get authorDisplay => authorName.isNotEmpty
+      ? authorName
+      : (authorUsername.isNotEmpty ? authorUsername : 'Membro');
 
   factory CommunityPost.fromJson(Map<String, dynamic> json) {
     final author = json['profiles'];
@@ -152,7 +157,8 @@ class CommunityPost {
       likesCount: (json['likes_count'] as num?)?.toInt() ?? 0,
       commentsCount: (json['comments_count'] as num?)?.toInt() ?? 0,
       pinned: json['pinned'] == true,
-      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
       authorName: aName,
       authorUsername: aUser,
@@ -184,8 +190,9 @@ class CommunityComment {
     this.authorAvatar,
   });
 
-  String get authorDisplay =>
-      authorName.isNotEmpty ? authorName : (authorUsername.isNotEmpty ? authorUsername : 'Membro');
+  String get authorDisplay => authorName.isNotEmpty
+      ? authorName
+      : (authorUsername.isNotEmpty ? authorUsername : 'Membro');
 
   factory CommunityComment.fromJson(Map<String, dynamic> json) {
     final author = json['profiles'];
@@ -200,7 +207,8 @@ class CommunityComment {
       postId: json['post_id']?.toString() ?? '',
       userId: json['user_id']?.toString() ?? '',
       content: json['content']?.toString() ?? '',
-      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
       authorName: aName,
       authorUsername: aUser,

@@ -35,11 +35,13 @@ class CommunityService {
       final res = req.order('member_count', ascending: false).limit(limit);
       return (res as List)
           .whereType<Map>()
-          .map((r) => Community.fromJson(
-                Map<String, dynamic>.from(
-                  r.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-              ))
+          .map(
+            (r) => Community.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -53,10 +55,12 @@ class CommunityService {
       final res = await _db.rpc('community_categories', params: {});
       return (res as List)
           .whereType<Map>()
-          .map((r) => CommunityCategory(
-                name: r['category']?.toString() ?? '',
-                count: (r['cnt'] as num?)?.toInt() ?? 0,
-              ))
+          .map(
+            (r) => CommunityCategory(
+              name: r['category']?.toString() ?? '',
+              count: (r['cnt'] as num?)?.toInt() ?? 0,
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -84,11 +88,13 @@ class CommunityService {
           .order('member_count', ascending: false);
       return (communities as List)
           .whereType<Map>()
-          .map((r) => Community.fromJson(
-                Map<String, dynamic>.from(
-                  r.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-              ))
+          .map(
+            (r) => Community.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -145,14 +151,17 @@ class CommunityService {
     String? category,
     String? rules,
   }) async {
-    await _db.from('communities').update({
-      if (name != null) 'name': name,
-      if (description != null) 'description': description,
-      if (icon != null) 'icon': icon,
-      if (category != null) 'category': category,
-      if (rules != null) 'rules': rules,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', id);
+    await _db
+        .from('communities')
+        .update({
+          if (name != null) 'name': name,
+          if (description != null) 'description': description,
+          if (icon != null) 'icon': icon,
+          if (category != null) 'category': category,
+          if (rules != null) 'rules': rules,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', id);
   }
 
   Future<void> deleteCommunity(String id) async {
@@ -174,7 +183,9 @@ class CommunityService {
           .eq('user_id', user.id)
           .maybeSingle();
       if (res == null) return null;
-      return CommunityMembership.fromJson(Map<String, dynamic>.from(res as Map));
+      return CommunityMembership.fromJson(
+        Map<String, dynamic>.from(res as Map),
+      );
     } catch (_) {
       return null;
     }
@@ -183,11 +194,14 @@ class CommunityService {
   Future<void> joinCommunity(String communityId) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('community_members').insert({
-        'community_id': communityId,
-        'user_id': user.id,
-        'role': 'member',
-      }).then((_) {});
+      await _db
+          .from('community_members')
+          .insert({
+            'community_id': communityId,
+            'user_id': user.id,
+            'role': 'member',
+          })
+          .then((_) {});
     } on PostgrestException catch (e) {
       if (e.code != '23505') rethrow;
     }
@@ -210,15 +224,19 @@ class CommunityService {
     try {
       final res = await _db
           .from('community_members')
-          .select('user_id, role, joined_at, profiles:user_id(display_name, username, avatar_url)')
+          .select(
+            'user_id, role, joined_at, profiles:user_id(display_name, username, avatar_url)',
+          )
           .eq('community_id', communityId)
           .order('joined_at', ascending: true)
           .limit(limit);
       return (res as List)
           .whereType<Map>()
-          .map((r) => Map<String, dynamic>.from(
-                r.map((k, v) => MapEntry(k.toString(), v)),
-              ))
+          .map(
+            (r) => Map<String, dynamic>.from(
+              r.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -246,11 +264,16 @@ class CommunityService {
   // Posts
   // ---------------------------------------------------------------------------
 
-  Future<List<CommunityPost>> fetchPosts(String communityId, {int limit = 50}) async {
+  Future<List<CommunityPost>> fetchPosts(
+    String communityId, {
+    int limit = 50,
+  }) async {
     try {
       final res = await _db
           .from('community_posts')
-          .select('*, profiles:user_id(display_name, username, avatar_url, is_verified)')
+          .select(
+            '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+          )
           .eq('community_id', communityId)
           .eq('status', 'published')
           .order('pinned', ascending: false)
@@ -258,11 +281,13 @@ class CommunityService {
           .limit(limit);
       return (res as List)
           .whereType<Map>()
-          .map((r) => CommunityPost.fromJson(
-                Map<String, dynamic>.from(
-                  r.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-              ))
+          .map(
+            (r) => CommunityPost.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -285,7 +310,9 @@ class CommunityService {
           'media_url': mediaUrl.isEmpty ? null : mediaUrl,
           'media_type': mediaType,
         })
-        .select('*, profiles:user_id(display_name, username, avatar_url, is_verified)')
+        .select(
+          '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+        )
         .single();
     return CommunityPost.fromJson(Map<String, dynamic>.from(res as Map));
   }
@@ -338,14 +365,17 @@ class CommunityService {
           .eq('user_id', user.id)
           .maybeSingle();
       if (existing != null) {
-        await _db.from('community_post_likes').delete().eq('id', existing['id']);
+        await _db
+            .from('community_post_likes')
+            .delete()
+            .eq('id', existing['id']);
         await _adjustPostCount(postId, 'likes', -1);
         return false;
       }
-      await _db.from('community_post_likes').insert({
-        'post_id': postId,
-        'user_id': user.id,
-      }).then((_) {});
+      await _db
+          .from('community_post_likes')
+          .insert({'post_id': postId, 'user_id': user.id})
+          .then((_) {});
       await _adjustPostCount(postId, 'likes', 1);
       return true;
     } on PostgrestException {
@@ -353,7 +383,10 @@ class CommunityService {
     }
   }
 
-  Future<List<CommunityComment>> fetchComments(String postId, {int limit = 100}) async {
+  Future<List<CommunityComment>> fetchComments(
+    String postId, {
+    int limit = 100,
+  }) async {
     try {
       final res = await _db
           .from('community_post_comments')
@@ -363,11 +396,13 @@ class CommunityService {
           .limit(limit);
       return (res as List)
           .whereType<Map>()
-          .map((r) => CommunityComment.fromJson(
-                Map<String, dynamic>.from(
-                  r.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-              ))
+          .map(
+            (r) => CommunityComment.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];

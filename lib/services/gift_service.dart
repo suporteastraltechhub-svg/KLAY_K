@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/gift_models.dart';
@@ -51,8 +52,10 @@ class GiftService {
         .order('order');
     final list = (res as List)
         .whereType<Map<dynamic, dynamic>>()
-        .map((r) => GiftCategory.fromJson(
-            r.map((k, v) => MapEntry(k.toString(), v))))
+        .map(
+          (r) =>
+              GiftCategory.fromJson(r.map((k, v) => MapEntry(k.toString(), v))),
+        )
         .toList();
     _categoryCache.clear();
     _categoryCache['default'] = list;
@@ -73,8 +76,10 @@ class GiftService {
         .order('order');
     final list = (res as List)
         .whereType<Map<dynamic, dynamic>>()
-        .map((r) => GiftRarity.fromJson(
-            r.map((k, v) => MapEntry(k.toString(), v))))
+        .map(
+          (r) =>
+              GiftRarity.fromJson(r.map((k, v) => MapEntry(k.toString(), v))),
+        )
         .toList();
     _rarityCache.clear();
     _rarityCache['default'] = list;
@@ -113,15 +118,9 @@ class GiftService {
     return _parseGiftRows(res);
   }
 
-  Future<int> fetchGiftCount({
-    String? categoryId,
-    String? rarityId,
-  }) async {
+  Future<int> fetchGiftCount({String? categoryId, String? rarityId}) async {
     if (!_ready) return 0;
-    var q = _client
-        .from('gifts')
-        .select('id')
-        .eq('status', 'active');
+    var q = _client.from('gifts').select('id').eq('status', 'active');
     if (categoryId != null && categoryId.isNotEmpty) {
       q = q.eq('category_id', categoryId);
     }
@@ -270,11 +269,12 @@ class GiftService {
   // ---------------------------------------------------------------------
   Future<int> fetchWallet() async {
     if (!_ready) throw StateError('Backend não configurado.');
-    await _db.ensureAuthenticated();
+    final user = await _db.ensureAuthenticated();
+    if (user.id.isEmpty) throw StateError('Não autenticado.');
     final res = await _client
         .from('user_wallets')
         .select('credits')
-        .eq('user_id', _client.auth.currentUser!.id)
+        .eq('user_id', user.id)
         .maybeSingle();
     if (res == null) return 0;
     return (res['credits'] as num?)?.toInt() ?? 0;
@@ -319,19 +319,16 @@ class GiftService {
     await _db.ensureAuthenticated();
     final me = _client.auth.currentUser!.id;
     final q = direction == GiftHistoryDirection.sent
-        ? _client
-            .from('gift_transactions')
-            .select('*')
-            .eq('user_id', me)
-        : _client
-            .from('gift_transactions')
-            .select('*')
-            .eq('receiver_id', me);
+        ? _client.from('gift_transactions').select('*').eq('user_id', me)
+        : _client.from('gift_transactions').select('*').eq('receiver_id', me);
     final res = await q.order('created_at', ascending: false).limit(limit);
     return (res as List)
         .whereType<Map<dynamic, dynamic>>()
-        .map((r) => GiftTransaction.fromJson(
-            r.map((k, v) => MapEntry(k.toString(), v))))
+        .map(
+          (r) => GiftTransaction.fromJson(
+            r.map((k, v) => MapEntry(k.toString(), v)),
+          ),
+        )
         .toList();
   }
 
@@ -353,17 +350,35 @@ class GiftService {
     String? requestId,
   }) async {
     if (!_ready) throw StateError('Backend não configurado.');
-    await _db.ensureAuthenticated();
+    if (amount < 1 || amount > 999) throw StateError('amount_invalid');
+    final user = await _db.ensureAuthenticated();
+    if (user.id.isEmpty) throw StateError('Não autenticado.');
+    if (liveId != null) {
+      if (receiverId == null || receiverId.isEmpty) {
+        throw StateError('receiver_id_required');
+      }
+      if (receiverId == user.id) throw StateError('cannot_send_to_self');
+    }
+    if (kDebugMode) {
+      debugPrint(
+        '[KLayK][Gift] envio gift=${gift.id} amount=$amount live=$liveId',
+      );
+    }
     Map<String, dynamic> res = const {};
     try {
-      res = await _db.invoke('send-gift', body: {
-        'gift_id': gift.id,
-        'amount': amount,
-        if (liveId != null) 'live_id': liveId,
-        if (receiverId != null) 'receiver_id': receiverId,
-        if (requestId != null && requestId.length >= 8) 'request_id': requestId,
-      });
+      res = await _db.invoke(
+        'send-gift',
+        body: {
+          'gift_id': gift.id,
+          'amount': amount,
+          if (liveId != null) 'live_id': liveId,
+          if (receiverId != null) 'receiver_id': receiverId,
+          if (requestId != null && requestId.length >= 8)
+            'request_id': requestId,
+        },
+      );
     } on StateError catch (e) {
+      if (kDebugMode) debugPrint('[KLayK][Gift] invoke falhou: ${e.message}');
       if (e.message.contains('409') &&
           e.message.toLowerCase().contains('duplicate_in_progress')) {
         throw GiftDuplicateInProgressException(
@@ -372,11 +387,21 @@ class GiftService {
         );
       }
       rethrow;
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('[KLayK][Gift] invoke falhou: ${error.runtimeType}');
+      }
+      rethrow;
     }
     if (res['ok'] != true) {
       throw StateError(res['error']?.toString() ?? 'Falha ao enviar presente.');
     }
     final duplicate = res['duplicate'] == true;
+    if (kDebugMode) {
+      debugPrint(
+        '[KLayK][Gift] resposta duplicate=$duplicate tx=${res["transaction_id"]}',
+      );
+    }
     return GiftSendResult(
       transactionId: res['transaction_id'] as String?,
       gift: gift,

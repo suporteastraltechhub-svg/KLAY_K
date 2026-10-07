@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// Abertura cinematográfica do KLAY K (~4s), 100% nativa (animação Flutter,
 /// sem vídeo). Sequência: partículas/brilho roxo → logo → ícones do universo →
 /// frase institucional → rodapé.
@@ -27,7 +29,10 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: _kTotalMs));
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: _kTotalMs),
+    );
 
     _bg = CurvedAnimation(parent: _controller, curve: const Interval(0.0, 1.0));
     _logo = CurvedAnimation(
@@ -59,6 +64,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF08070D),
       body: SafeArea(
@@ -79,7 +85,8 @@ class _SplashScreenState extends State<SplashScreen>
                         physics: const AlwaysScrollableScrollPhysics(),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
-                              minHeight: constraints.maxHeight),
+                            minHeight: constraints.maxHeight,
+                          ),
                           child: IntrinsicHeight(
                             child: Column(
                               children: [
@@ -88,14 +95,19 @@ class _SplashScreenState extends State<SplashScreen>
                                     child: FadeTransition(
                                       opacity: _logo,
                                       child: ScaleTransition(
-                                        scale: Tween<double>(begin: 0.6, end: 1.0).animate(_logo),
-                                        child: const _KlayLogo(),
+                                        scale: Tween<double>(
+                                          begin: 0.6,
+                                          end: 1.0,
+                                        ).animate(_logo),
+                                        child: _KlayLogo(l10n: l10n),
                                       ),
                                     ),
                                   ),
                                 ),
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                  ),
                                   child: FadeTransition(
                                     opacity: _chips,
                                     child: SlideTransition(
@@ -103,31 +115,41 @@ class _SplashScreenState extends State<SplashScreen>
                                         begin: const Offset(0, 0.25),
                                         end: Offset.zero,
                                       ).animate(_chips),
-                                      child: const _KlayUniverseChips(),
+                                      child: _KlayUniverseChips(
+                                        labels: [
+                                          l10n.splashChipVideos,
+                                          l10n.splashChipLive,
+                                          l10n.splashChipGames,
+                                          l10n.splashChipConnections,
+                                          l10n.splashChipGifts,
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                                 const SizedBox(height: 28),
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 28,
+                                  ),
                                   child: FadeTransition(
                                     opacity: _tagline,
-                                    child: const Column(
+                                    child: Column(
                                       children: [
                                         Text(
-                                          '🇧🇷 A plataforma brasileira de vídeos curtos, LIVE e criatividade.',
+                                          l10n.splashTagline,
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 14,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                        SizedBox(height: 8),
+                                        const SizedBox(height: 8),
                                         Text(
-                                          'Feita no Brasil para conectar criadores, vídeos, games e pessoas. 💜🇧🇷',
+                                          l10n.splashTaglineSub,
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             color: Color(0xFFB7A3E8),
                                             fontSize: 12,
                                             height: 1.4,
@@ -140,16 +162,19 @@ class _SplashScreenState extends State<SplashScreen>
                                 const SizedBox(height: 32),
                                 FadeTransition(
                                   opacity: _footer,
-                                  child: const Column(
+                                  child: Column(
                                     children: [
                                       Text(
-                                        '© 2026 Astral Tech. Todos os direitos reservados.',
-                                        style: TextStyle(color: Colors.white38, fontSize: 11),
+                                        l10n.splashCopyright,
+                                        style: const TextStyle(
+                                          color: Colors.white38,
+                                          fontSize: 11,
+                                        ),
                                       ),
-                                      SizedBox(height: 4),
+                                      const SizedBox(height: 4),
                                       Text(
-                                        'KLAY K® — Conecte. Crie. Brilhe. 💜',
-                                        style: TextStyle(
+                                        l10n.splashBrandTagline,
+                                        style: const TextStyle(
                                           color: Color(0xFF8B5CF6),
                                           fontSize: 12,
                                           fontWeight: FontWeight.w700,
@@ -177,7 +202,9 @@ class _SplashScreenState extends State<SplashScreen>
 }
 
 class _KlayLogo extends StatelessWidget {
-  const _KlayLogo();
+  final AppLocalizations l10n;
+
+  const _KlayLogo({required this.l10n});
 
   @override
   Widget build(BuildContext context) {
@@ -189,7 +216,10 @@ class _KlayLogo extends StatelessWidget {
           height: 92,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.55), width: 2),
+            border: Border.all(
+              color: const Color(0xFF8B5CF6).withValues(alpha: 0.55),
+              width: 2,
+            ),
             boxShadow: [
               BoxShadow(
                 color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
@@ -210,9 +240,10 @@ class _KlayLogo extends StatelessWidget {
                 child: const Text(
                   'k',
                   style: TextStyle(
-                      fontSize: 46,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900),
+                    fontSize: 46,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
             ),
@@ -233,9 +264,9 @@ class _KlayLogo extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        const Text(
-          'Conecte. Crie. Brilhe. 💜',
-          style: TextStyle(
+        Text(
+          l10n.splashLogoTagline,
+          style: const TextStyle(
             color: Color(0xFFB7A3E8),
             fontSize: 15,
             fontWeight: FontWeight.w600,
@@ -248,15 +279,11 @@ class _KlayLogo extends StatelessWidget {
 }
 
 class _KlayUniverseChips extends StatelessWidget {
-  const _KlayUniverseChips();
+  final List<String> labels;
 
-  static const List<({String emoji, String label})> kItems = [
-    (emoji: '📹', label: 'Vídeos'),
-    (emoji: '📺', label: 'LIVE'),
-    (emoji: '🎮', label: 'Games'),
-    (emoji: '💬', label: 'Conexões'),
-    (emoji: '🎁', label: 'Presentes'),
-  ];
+  const _KlayUniverseChips({required this.labels});
+
+  static const List<String> kEmojis = ['📹', '📺', '🎮', '💬', '🎁'];
 
   @override
   Widget build(BuildContext context) {
@@ -265,17 +292,23 @@ class _KlayUniverseChips extends StatelessWidget {
       spacing: 10,
       runSpacing: 10,
       children: [
-        for (final item in kItems)
+        for (var i = 0; i < labels.length; i++)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: const Color(0xFF1C1C2E).withValues(alpha: 0.8),
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.45)),
+              border: Border.all(
+                color: const Color(0xFF8B5CF6).withValues(alpha: 0.45),
+              ),
             ),
             child: Text(
-              '${item.emoji} ${item.label}',
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              '${kEmojis[i]} ${labels[i]}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
       ],

@@ -71,18 +71,23 @@ class ProfileService {
   Future<List<UserProfile>> fetchFollowing(String userId) =>
       _fetchRelationList('profile_following', userId);
 
-  Future<List<UserProfile>> _fetchRelationList(String rpc, String userId) async {
+  Future<List<UserProfile>> _fetchRelationList(
+    String rpc,
+    String userId,
+  ) async {
     if (!_configured || userId.isEmpty) return const [];
     try {
       final res = await _db.rpc(rpc, params: {'p_user_id': userId});
       final rows = res as List? ?? const [];
       return rows
           .whereType<Map>()
-          .map((r) => UserProfile.fromJson(
-                Map<String, dynamic>.from(
-                  r.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-              ))
+          .map(
+            (r) => UserProfile.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -95,7 +100,10 @@ class ProfileService {
     final uid = myId;
     if (!_configured || uid == null || uid.isEmpty) return const [];
     try {
-      final res = await _db.rpc('friend_suggestions', params: {'p_user_id': uid});
+      final res = await _db.rpc(
+        'friend_suggestions',
+        params: {'p_user_id': uid},
+      );
       return _toUserProfiles(res);
     } catch (_) {
       return const [];
@@ -138,11 +146,13 @@ class ProfileService {
     final rows = res is List ? res : const <Object>[];
     return rows
         .whereType<Map>()
-        .map((r) => UserProfile.fromJson(
-              Map<String, dynamic>.from(
-                r.map((k, v) => MapEntry(k.toString(), v)),
-              ),
-            ))
+        .map(
+          (r) => UserProfile.fromJson(
+            Map<String, dynamic>.from(
+              r.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          ),
+        )
         .toList();
   }
 
@@ -150,17 +160,18 @@ class ProfileService {
   Future<List<UserProfile>> searchUsers(String query, {int limit = 20}) async {
     if (query.trim().isEmpty) return const [];
     try {
-      final results =
-          await SocialService.instance.search(query, scope: 'user');
+      final results = await SocialService.instance.search(query, scope: 'user');
       return results
           .where((r) => r.type == 'user')
           .take(limit)
-          .map((r) => UserProfile(
-                id: r.id,
-                username: r.subtitle.isNotEmpty ? r.subtitle : r.title,
-                displayName: r.title,
-                avatarUrl: r.avatarUrl,
-              ))
+          .map(
+            (r) => UserProfile(
+              id: r.id,
+              username: r.subtitle.isNotEmpty ? r.subtitle : r.title,
+              displayName: r.title,
+              avatarUrl: r.avatarUrl,
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -252,8 +263,11 @@ class ProfileService {
   Future<String> uploadBanner(File file, {String? mime}) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     final ext = _ext(file.path);
-    final path = '${user.id}/banner-${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _db.storage.from('covers').upload(
+    final path =
+        '${user.id}/banner-${DateTime.now().millisecondsSinceEpoch}.$ext';
+    await _db.storage
+        .from('covers')
+        .upload(
           path,
           file,
           fileOptions: FileOptions(

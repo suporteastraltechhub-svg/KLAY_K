@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 const Color _accent = Color(0xFF8B5CF6);
 const Color _danger = Color(0xFFFF4D6A);
 const Color _panel = Color(0xFF1C1C26);
@@ -28,6 +30,7 @@ class ContentOverflowMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!isOwner) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
     return PopupMenuButton<String>(
       color: _panel,
       icon: Icon(Icons.more_vert_rounded, color: iconColor),
@@ -43,29 +46,41 @@ class ContentOverflowMenu extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'edit',
           height: 48,
           child: Row(
             children: [
-              Icon(Icons.edit_rounded, color: Colors.white, size: 22),
-              SizedBox(width: 12),
-              Text('Editar',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600)),
+              const Icon(Icons.edit_rounded, color: Colors.white, size: 22),
+              const SizedBox(width: 12),
+              Text(
+                l10n.edit,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'delete',
           height: 48,
           child: Row(
             children: [
-              Icon(Icons.delete_outline_rounded, color: _danger, size: 22),
-              SizedBox(width: 12),
-              Text('Apagar',
-                  style: TextStyle(
-                      color: _danger, fontWeight: FontWeight.w600)),
+              const Icon(
+                Icons.delete_outline_rounded,
+                color: _danger,
+                size: 22,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                l10n.deleteLabel,
+                style: const TextStyle(
+                  color: _danger,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
@@ -79,25 +94,33 @@ Future<bool> confirmDeleteDialog(
   BuildContext context, {
   required String title,
   required String message,
-  String confirmLabel = 'Apagar',
+  String confirmLabel = '',
 }) async {
+  final l10n = AppLocalizations.of(context)!;
   final go = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: _panel,
       icon: const Icon(Icons.warning_amber_rounded, color: _danger, size: 34),
       title: Text(title, style: const TextStyle(color: Colors.white)),
-      content: Text(message,
-          style: const TextStyle(color: Colors.white70, height: 1.35)),
+      content: Text(
+        message,
+        style: const TextStyle(color: Colors.white70, height: 1.35),
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),
-          child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+          child: Text(
+            l10n.cancel,
+            style: const TextStyle(color: Colors.white54),
+          ),
         ),
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(true),
-          child: Text(confirmLabel,
-              style: const TextStyle(color: _danger, fontWeight: FontWeight.w700)),
+          child: Text(
+            confirmLabel.isNotEmpty ? confirmLabel : l10n.deleteLabel,
+            style: const TextStyle(color: _danger, fontWeight: FontWeight.w700),
+          ),
         ),
       ],
     ),
@@ -118,13 +141,17 @@ Future<PostEditResult?> editPostDialog(
   required String description,
   List<String> hashtags = const [],
 }) async {
+  final l10n = AppLocalizations.of(context)!;
   final descCtrl = TextEditingController(text: description);
   final tagsCtrl = TextEditingController(text: hashtags.join(' '));
   final result = await showDialog<PostEditResult>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: _panel,
-      title: const Text('Editar vídeo', style: TextStyle(color: Colors.white)),
+      title: Text(
+        l10n.editVideoTitle,
+        style: const TextStyle(color: Colors.white),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -133,26 +160,30 @@ Future<PostEditResult?> editPostDialog(
             maxLines: 4,
             maxLength: 2200,
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              labelText: 'Descrição',
-              labelStyle: TextStyle(color: Colors.white70),
-              enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white24)),
-              focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: _accent)),
+            decoration: InputDecoration(
+              labelText: l10n.descriptionLabel,
+              labelStyle: const TextStyle(color: Colors.white70),
+              enabledBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.white24),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: _accent),
+              ),
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: tagsCtrl,
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              labelText: 'Hashtags (separadas por espaço)',
-              labelStyle: TextStyle(color: Colors.white70),
-              enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white24)),
-              focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: _accent)),
+            decoration: InputDecoration(
+              labelText: l10n.hashtagsSeparatedHint,
+              labelStyle: const TextStyle(color: Colors.white70),
+              enabledBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.white24),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: _accent),
+              ),
             ),
           ),
         ],
@@ -160,7 +191,10 @@ Future<PostEditResult?> editPostDialog(
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
-          child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+          child: Text(
+            l10n.cancel,
+            style: const TextStyle(color: Colors.white54),
+          ),
         ),
         FilledButton(
           onPressed: () {
@@ -169,13 +203,15 @@ Future<PostEditResult?> editPostDialog(
                 .where((t) => t.trim().isNotEmpty)
                 .map((t) => t.trim())
                 .toList();
-            Navigator.of(ctx).pop(PostEditResult(
-              description: descCtrl.text.trim(),
-              hashtags: tags,
-            ));
+            Navigator.of(ctx).pop(
+              PostEditResult(description: descCtrl.text.trim(), hashtags: tags),
+            );
           },
           style: FilledButton.styleFrom(backgroundColor: _accent),
-          child: const Text('Salvar', style: TextStyle(fontWeight: FontWeight.w700)),
+          child: Text(
+            l10n.save,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
         ),
       ],
     ),
@@ -205,6 +241,7 @@ Future<LiveEditResult?> editLiveDialog(
   String category = '',
   String privacy = 'public',
 }) async {
+  final l10n = AppLocalizations.of(context)!;
   final titleCtrl = TextEditingController(text: title);
   final descCtrl = TextEditingController(text: description);
   final catCtrl = TextEditingController(text: category);
@@ -214,8 +251,10 @@ Future<LiveEditResult?> editLiveDialog(
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setState) => AlertDialog(
         backgroundColor: _panel,
-        title:
-            const Text('Editar live', style: TextStyle(color: Colors.white)),
+        title: Text(
+          l10n.editLiveTitle,
+          style: const TextStyle(color: Colors.white),
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -224,13 +263,15 @@ Future<LiveEditResult?> editLiveDialog(
                 controller: titleCtrl,
                 maxLength: 200,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Título',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24)),
-                  focusedBorder:
-                      OutlineInputBorder(borderSide: BorderSide(color: _accent)),
+                decoration: InputDecoration(
+                  labelText: l10n.titleLabel,
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  enabledBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: _accent),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -238,35 +279,42 @@ Future<LiveEditResult?> editLiveDialog(
                 controller: descCtrl,
                 maxLines: 4,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Descrição',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24)),
-                  focusedBorder:
-                      OutlineInputBorder(borderSide: BorderSide(color: _accent)),
+                decoration: InputDecoration(
+                  labelText: l10n.descriptionLabel,
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  enabledBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: _accent),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: catCtrl,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Categoria',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24)),
-                  focusedBorder:
-                      OutlineInputBorder(borderSide: BorderSide(color: _accent)),
+                decoration: InputDecoration(
+                  labelText: l10n.categoryLabel,
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  enabledBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: _accent),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text('Privacidade',
-                    style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.8),
-                        fontWeight: FontWeight.w600)),
+                child: Text(
+                  l10n.privacyLabel,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
               DropdownButtonFormField<String>(
                 initialValue: selPrivacy,
@@ -274,17 +322,27 @@ Future<LiveEditResult?> editLiveDialog(
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
                   enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24)),
-                  focusedBorder:
-                      OutlineInputBorder(borderSide: BorderSide(color: _accent)),
+                    borderSide: BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: _accent),
+                  ),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'public', child: Text('Pública')),
-                  DropdownMenuItem(value: 'followers', child: Text('Seguidores')),
-                  DropdownMenuItem(value: 'private', child: Text('Privada')),
+                items: [
+                  DropdownMenuItem(
+                    value: 'public',
+                    child: Text(l10n.privacyPublic),
+                  ),
+                  DropdownMenuItem(
+                    value: 'followers',
+                    child: Text(l10n.followers),
+                  ),
+                  DropdownMenuItem(
+                    value: 'private',
+                    child: Text(l10n.privacyPrivate),
+                  ),
                 ],
-                onChanged: (v) =>
-                    setState(() => selPrivacy = v ?? 'public'),
+                onChanged: (v) => setState(() => selPrivacy = v ?? 'public'),
               ),
             ],
           ),
@@ -292,21 +350,27 @@ Future<LiveEditResult?> editLiveDialog(
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar',
-                style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () {
-              Navigator.of(ctx).pop(LiveEditResult(
-                title: titleCtrl.text.trim(),
-                description: descCtrl.text.trim(),
-                category: catCtrl.text.trim(),
-                privacy: selPrivacy,
-              ));
+              Navigator.of(ctx).pop(
+                LiveEditResult(
+                  title: titleCtrl.text.trim(),
+                  description: descCtrl.text.trim(),
+                  category: catCtrl.text.trim(),
+                  privacy: selPrivacy,
+                ),
+              );
             },
             style: FilledButton.styleFrom(backgroundColor: _accent),
-            child: const Text('Salvar',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+            child: Text(
+              l10n.save,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),

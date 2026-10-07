@@ -15,15 +15,6 @@ String formatPrice(num value) {
   return 'R\$ $buf,$dec';
 }
 
-/// Lista de status exibível para pedidos.
-const Map<String, String> kStoreOrderStatusLabel = {
-  'pendente': 'Pendente',
-  'pago': 'Pago',
-  'enviado': 'Enviado',
-  'concluido': 'Concluído',
-  'cancelado': 'Cancelado',
-};
-
 /// Categoria de produto.
 class StoreCategory {
   final String id;
@@ -41,12 +32,12 @@ class StoreCategory {
   });
 
   factory StoreCategory.fromJson(Map<String, dynamic> json) => StoreCategory(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        icon: json['icon'] as String? ?? '📦',
-        slug: json['slug'] as String? ?? '',
-        sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    icon: json['icon'] as String? ?? '📦',
+    slug: json['slug'] as String? ?? '',
+    sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// Produto anunciado por um vendedor.
@@ -80,31 +71,32 @@ class StoreProduct {
   bool get outOfStock => stock <= 0;
 
   factory StoreProduct.fromJson(Map<String, dynamic> json) => StoreProduct(
-        id: json['id'] as String? ?? '',
-        sellerId: json['seller_id'] as String? ?? '',
-        title: json['title'] as String? ?? '',
-        description: json['description'] as String? ?? '',
-        price: (json['price'] as num?)?.toDouble() ?? 0,
-        imageUrl: json['image_url'] as String? ?? '',
-        categoryId: json['category_id'] as String?,
-        stock: (json['stock'] as num?)?.toInt() ?? 0,
-        featured: json['featured'] == true,
-        isActive: json['is_active'] != false,
-        createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ??
-            DateTime.now(),
-      );
+    id: json['id'] as String? ?? '',
+    sellerId: json['seller_id'] as String? ?? '',
+    title: json['title'] as String? ?? '',
+    description: json['description'] as String? ?? '',
+    price: (json['price'] as num?)?.toDouble() ?? 0,
+    imageUrl: json['image_url'] as String? ?? '',
+    categoryId: json['category_id'] as String?,
+    stock: (json['stock'] as num?)?.toInt() ?? 0,
+    featured: json['featured'] == true,
+    isActive: json['is_active'] != false,
+    createdAt:
+        DateTime.tryParse(json['created_at'] as String? ?? '') ??
+        DateTime.now(),
+  );
 
   Map<String, dynamic> toJson() => {
-        'seller_id': sellerId,
-        'title': title,
-        'description': description,
-        'price': price,
-        'image_url': imageUrl,
-        if (categoryId != null) 'category_id': categoryId,
-        'stock': stock,
-        'featured': featured,
-        'is_active': isActive,
-      };
+    'seller_id': sellerId,
+    'title': title,
+    'description': description,
+    'price': price,
+    'image_url': imageUrl,
+    if (categoryId != null) 'category_id': categoryId,
+    'stock': stock,
+    'featured': featured,
+    'is_active': isActive,
+  };
 }
 
 /// Item do carrinho com o produto embutido.
@@ -121,15 +113,14 @@ class CartItem {
     this.product,
   });
 
-  double get subtotal =>
-      (product?.price ?? 0) * quantity;
+  double get subtotal => (product?.price ?? 0) * quantity;
 
   factory CartItem.fromJson(Map<String, dynamic> json) {
-    final productJson =
-        json['product'] != null && json['product'] is Map
-            ? Map<String, dynamic>.from(
-                (json['product'] as Map).map((k, v) => MapEntry(k.toString(), v)))
-            : null;
+    final productJson = json['product'] != null && json['product'] is Map
+        ? Map<String, dynamic>.from(
+            (json['product'] as Map).map((k, v) => MapEntry(k.toString(), v)),
+          )
+        : null;
     return CartItem(
       id: json['id'] as String? ?? '',
       productId: json['product_id'] as String? ?? '',
@@ -174,21 +165,22 @@ class StoreOrder {
   bool get cancellable => status == 'pendente';
 
   factory StoreOrder.fromJson(Map<String, dynamic> json) => StoreOrder(
-        id: json['id'] as String? ?? '',
-        userId: json['user_id'] as String? ?? '',
-        sellerId: json['seller_id'] as String? ?? '',
-        total: (json['total'] as num?)?.toDouble() ?? 0,
-        status: json['status'] as String? ?? 'pendente',
-        shippingName: json['shipping_name'] as String? ?? '',
-        shippingPhone: json['shipping_phone'] as String? ?? '',
-        shippingAddress: json['shipping_address'] as String? ?? '',
-        createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ??
-            DateTime.now(),
-        sellerUsername: json['seller_username'] as String? ?? '',
-        sellerDisplayName: json['seller_display_name'] as String? ?? '',
-        buyerUsername: json['buyer_username'] as String? ?? '',
-        buyerDisplayName: json['buyer_display_name'] as String? ?? '',
-      );
+    id: json['id'] as String? ?? '',
+    userId: json['user_id'] as String? ?? '',
+    sellerId: json['seller_id'] as String? ?? '',
+    total: (json['total'] as num?)?.toDouble() ?? 0,
+    status: json['status'] as String? ?? 'pendente',
+    shippingName: json['shipping_name'] as String? ?? '',
+    shippingPhone: json['shipping_phone'] as String? ?? '',
+    shippingAddress: json['shipping_address'] as String? ?? '',
+    createdAt:
+        DateTime.tryParse(json['created_at'] as String? ?? '') ??
+        DateTime.now(),
+    sellerUsername: json['seller_username'] as String? ?? '',
+    sellerDisplayName: json['seller_display_name'] as String? ?? '',
+    buyerUsername: json['buyer_username'] as String? ?? '',
+    buyerDisplayName: json['buyer_display_name'] as String? ?? '',
+  );
 }
 
 /// Item de um pedido (snapshot do produto no momento da compra).
@@ -211,14 +203,13 @@ class StoreOrderItem {
     this.quantity = 1,
   });
 
-  factory StoreOrderItem.fromJson(Map<String, dynamic> json) =>
-      StoreOrderItem(
-        id: json['id'] as String? ?? '',
-        orderId: json['order_id'] as String? ?? '',
-        productId: json['product_id'] as String?,
-        title: json['title'] as String? ?? '',
-        imageUrl: json['image_url'] as String? ?? '',
-        unitPrice: (json['unit_price'] as num?)?.toDouble() ?? 0,
-        quantity: (json['quantity'] as num?)?.toInt() ?? 1,
-      );
+  factory StoreOrderItem.fromJson(Map<String, dynamic> json) => StoreOrderItem(
+    id: json['id'] as String? ?? '',
+    orderId: json['order_id'] as String? ?? '',
+    productId: json['product_id'] as String?,
+    title: json['title'] as String? ?? '',
+    imageUrl: json['image_url'] as String? ?? '',
+    unitPrice: (json['unit_price'] as num?)?.toDouble() ?? 0,
+    quantity: (json['quantity'] as num?)?.toInt() ?? 1,
+  );
 }

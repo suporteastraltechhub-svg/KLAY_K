@@ -113,9 +113,10 @@ class SecurityService {
     await _uid();
     final refresh = _db.auth.currentSession?.refreshToken ?? '';
     try {
-      await _db.rpc('auth_revoke_other_sessions', params: {
-        'p_refresh_token': refresh,
-      });
+      await _db.rpc(
+        'auth_revoke_other_sessions',
+        params: {'p_refresh_token': refresh},
+      );
     } on Exception catch (e) {
       throw _exception(e, 'Não foi possível encerrar as outras sessões.');
     }
@@ -140,17 +141,22 @@ class SecurityService {
     await _uid();
     final refresh = _db.auth.currentSession?.refreshToken ?? '';
     try {
-      final res = await _db.functions.invoke('account-guard', body: {
-        'action': 'change_password',
-        'current_password': currentPassword,
-        'new_password': newPassword,
-        'refresh_token': refresh,
-      });
+      final res = await _db.functions.invoke(
+        'account-guard',
+        body: {
+          'action': 'change_password',
+          'current_password': currentPassword,
+          'new_password': newPassword,
+          'refresh_token': refresh,
+        },
+      );
       final data = res.data;
       if (data is Map && data['ok'] != true) {
         final code = data['error']?.toString() ?? 'update_failed';
-        throw SecurityException(_friendly(code, 'Falha ao trocar a senha.'),
-            code: code);
+        throw SecurityException(
+          _friendly(code, 'Falha ao trocar a senha.'),
+          code: code,
+        );
       }
     } on FunctionException catch (e) {
       throw SecurityException(
@@ -165,7 +171,8 @@ class SecurityService {
   String _functionCode(FunctionException e) {
     try {
       final data = Map<String, dynamic>.from(
-          Map.from(jsonDecode(e.details) as Map));
+        Map.from(jsonDecode(e.details) as Map),
+      );
       return data['error']?.toString() ?? 'update_failed';
     } catch (_) {
       return e.status.toString();
@@ -186,8 +193,8 @@ class SecurityService {
     try {
       final iso = date != null
           ? '${date.year.toString().padLeft(4, '0')}-'
-              '${date.month.toString().padLeft(2, '0')}-'
-              '${date.day.toString().padLeft(2, '0')}'
+                '${date.month.toString().padLeft(2, '0')}-'
+                '${date.day.toString().padLeft(2, '0')}'
           : null;
       await _db.rpc('set_birth_date', params: {'p_date': iso});
     } on Exception catch (e) {
@@ -221,14 +228,20 @@ class SecurityService {
         res is Map ? Map<String, dynamic>.from(res) : const {},
       );
     } on Exception catch (e) {
-      throw _exception(e, 'Não foi possível consultar seu perfil de segurança.');
+      throw _exception(
+        e,
+        'Não foi possível consultar seu perfil de segurança.',
+      );
     }
   }
 
   Future<bool> liveViewAllowed(String liveId) async {
     await _uid();
     try {
-      return await _db.rpc('live_view_allowed', params: {'p_live_id': liveId}) ==
+      return await _db.rpc(
+            'live_view_allowed',
+            params: {'p_live_id': liveId},
+          ) ==
           true;
     } on Exception catch (_) {
       return true;
@@ -238,10 +251,10 @@ class SecurityService {
   Future<void> setLiveAgeRestricted(String liveId, bool on) async {
     await _uid();
     try {
-      await _db.rpc('set_live_age_restricted', params: {
-        'p_live_id': liveId,
-        'p_on': on,
-      });
+      await _db.rpc(
+        'set_live_age_restricted',
+        params: {'p_live_id': liveId, 'p_on': on},
+      );
     } on Exception catch (e) {
       throw _exception(e, 'Não foi possível atualizar a faixa etária da live.');
     }
@@ -259,12 +272,15 @@ class SecurityService {
   }) async {
     await _uid();
     try {
-      await _db.rpc('file_report', params: {
-        'p_target_type': targetType,
-        'p_target_id': targetId,
-        'p_reason': reason,
-        'p_details': details,
-      });
+      await _db.rpc(
+        'file_report',
+        params: {
+          'p_target_type': targetType,
+          'p_target_id': targetId,
+          'p_reason': reason,
+          'p_details': details,
+        },
+      );
     } on Exception catch (e) {
       throw _exception(e, 'Não foi possível enviar a denúncia.');
     }
@@ -288,11 +304,16 @@ class SecurityService {
   // SCAN SPAM — pré-visualização SEM escrever (comentário, chat ou tudo)
   // ---------------------------------------------------------------------------
 
-  Future<SpamScanResult> scanSpam(String text, {String scope = 'comment'}) async {
+  Future<SpamScanResult> scanSpam(
+    String text, {
+    String scope = 'comment',
+  }) async {
     await _uid();
     try {
-      final res =
-          await _db.rpc('scan_spam', params: {'p_text': text, 'p_scope': scope});
+      final res = await _db.rpc(
+        'scan_spam',
+        params: {'p_text': text, 'p_scope': scope},
+      );
       if (res is Map) {
         return SpamScanResult.fromJson(Map<String, dynamic>.from(res));
       }
@@ -312,12 +333,15 @@ class SecurityService {
   // MODERAÇÃO SECURITY MAX (has_perm('moderation') no backend)
   // ---------------------------------------------------------------------------
 
-  Future<List<SuspectProfile>> adminSuspectProfiles({int recencyDays = 3}) async {
+  Future<List<SuspectProfile>> adminSuspectProfiles({
+    int recencyDays = 3,
+  }) async {
     await _uid();
     try {
-      final res = await _db.rpc('admin_suspect_profiles', params: {
-        'p_recency_days': recencyDays,
-      });
+      final res = await _db.rpc(
+        'admin_suspect_profiles',
+        params: {'p_recency_days': recencyDays},
+      );
       if (res is! List) return const [];
       return res
           .whereType<Map>()
@@ -331,9 +355,10 @@ class SecurityService {
   Future<List<ProfileFlagEntry>> adminListProfileFlags({String? status}) async {
     await _uid();
     try {
-      final res = await _db.rpc('admin_list_profile_flags', params: {
-        'p_status': status,
-      });
+      final res = await _db.rpc(
+        'admin_list_profile_flags',
+        params: {'p_status': status},
+      );
       if (res is! List) return const [];
       return res
           .whereType<Map>()
@@ -347,10 +372,10 @@ class SecurityService {
   Future<void> adminFlagProfile(String userId, String reason) async {
     await _uid();
     try {
-      await _db.rpc('admin_flag_profile', params: {
-        'p_user_id': userId,
-        'p_reason': reason,
-      });
+      await _db.rpc(
+        'admin_flag_profile',
+        params: {'p_user_id': userId, 'p_reason': reason},
+      );
     } on Exception catch (e) {
       throw _exception(e, 'Não foi possível sinalizar o perfil.');
     }
@@ -363,24 +388,30 @@ class SecurityService {
   }) async {
     await _uid();
     try {
-      await _db.rpc('admin_resolve_profile_flag', params: {
-        'p_flag_id': flagId,
-        'p_decision': decision,
-        'p_note': note,
-      });
+      await _db.rpc(
+        'admin_resolve_profile_flag',
+        params: {'p_flag_id': flagId, 'p_decision': decision, 'p_note': note},
+      );
     } on Exception catch (e) {
       throw _exception(e, 'Não foi possível resolver a sinalização.');
     }
   }
 
-  Future<void> adminCommentHide(String commentId, {required bool hidden, String reason = ''}) async {
+  Future<void> adminCommentHide(
+    String commentId, {
+    required bool hidden,
+    String reason = '',
+  }) async {
     await _uid();
     try {
-      await _db.rpc('admin_comment_hide', params: {
-        'p_comment_id': commentId,
-        'p_hidden': hidden,
-        'p_reason': reason,
-      });
+      await _db.rpc(
+        'admin_comment_hide',
+        params: {
+          'p_comment_id': commentId,
+          'p_hidden': hidden,
+          'p_reason': reason,
+        },
+      );
     } on Exception catch (e) {
       throw _exception(e, 'Não foi possível ocultar o comentário.');
     }

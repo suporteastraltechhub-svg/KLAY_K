@@ -33,8 +33,9 @@ class _LivePremiumBubbleState extends State<LivePremiumBubble> {
 
   LiveBubblePrefs _prefs = const LiveBubblePrefs();
   bool _loading = true;
-  final BubbleDismissal _dismissal =
-      BubbleDismissal('live_premium_bubble_hidden_until');
+  final BubbleDismissal _dismissal = BubbleDismissal(
+    'live_premium_bubble_hidden_until',
+  );
 
   @override
   void initState() {
@@ -91,10 +92,12 @@ class _LivePremiumBubbleState extends State<LivePremiumBubble> {
                     behavior: HitTestBehavior.opaque,
                     onTap: _openPanel,
                     onPanUpdate: (d) {
-                      setState(() => _prefs = _prefs.copyWith(
-                            positionX: pos.dx + d.delta.dx,
-                            positionY: pos.dy + d.delta.dy,
-                          ));
+                      setState(
+                        () => _prefs = _prefs.copyWith(
+                          positionX: pos.dx + d.delta.dx,
+                          positionY: pos.dy + d.delta.dy,
+                        ),
+                      );
                     },
                     onPanEnd: (_) => _persist(),
                     child: _bubbleWidget(),
@@ -104,11 +107,7 @@ class _LivePremiumBubbleState extends State<LivePremiumBubble> {
                     onTap: _dismissBubble,
                     child: const Padding(
                       padding: EdgeInsets.only(top: 3),
-                      child: Icon(
-                        Icons.close,
-                        size: 14,
-                        color: Colors.white38,
-                      ),
+                      child: Icon(Icons.close, size: 14, color: Colors.white38),
                     ),
                   ),
                 ],
@@ -129,13 +128,13 @@ class _LivePremiumBubbleState extends State<LivePremiumBubble> {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF170F26), Color(0xFF6D28D9)],
+          colors: [Color(0xFF171717), Color(0xFF1D1D1D)],
         ),
         border: Border.all(color: _kAccent, width: 2),
         boxShadow: [
           BoxShadow(
-            color: _kAccent.withValues(alpha: 0.6),
-            blurRadius: 18,
+            color: _kAccent.withValues(alpha: 0.25),
+            blurRadius: 10,
             spreadRadius: 1,
           ),
         ],
@@ -158,7 +157,8 @@ class _LivePremiumBubbleState extends State<LivePremiumBubble> {
       tween: Tween(begin: 0.9, end: 1.0),
       duration: const Duration(milliseconds: 1200),
       curve: Curves.easeInOut,
-      builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+      builder: (context, scale, child) =>
+          Transform.scale(scale: scale, child: child),
       child: bubble,
     );
   }
@@ -183,9 +183,7 @@ class _LivePremiumBubbleState extends State<LivePremiumBubble> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (ctx) => _PremiumPanel(
-        onConfigChanged: _load,
-      ),
+      builder: (ctx) => _PremiumPanel(onConfigChanged: _load),
     );
     _load();
   }
@@ -232,11 +230,14 @@ class _PremiumPanelState extends State<_PremiumPanel>
           ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 10),
-            child: Text('Painel Premium',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16)),
+            child: Text(
+              'Painel Premium',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+              ),
+            ),
           ),
           const _QuickWalletBar(),
           TabBar(
@@ -247,7 +248,9 @@ class _PremiumPanelState extends State<_PremiumPanel>
             unselectedLabelColor: Colors.white54,
             indicatorColor: _kAccent,
             labelStyle: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w700),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
             tabs: const [
               Tab(text: 'Presentes'),
               Tab(text: 'Ranking'),
@@ -329,10 +332,10 @@ class _QuickWalletBarState extends State<_QuickWalletBar> {
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF170F26), Color(0xFF5B21B6)],
+            colors: [Color(0xFF111111), Color(0xFF1D1D1D)],
           ),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _kAccent.withValues(alpha: 0.5)),
+          border: Border.all(color: _kAccent.withValues(alpha: 0.4)),
         ),
         child: _loading
             ? const SizedBox(
@@ -342,15 +345,20 @@ class _QuickWalletBarState extends State<_QuickWalletBar> {
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Color(0xFFFFD700)),
+                      strokeWidth: 2,
+                      color: Color(0xFFFFD700),
+                    ),
                   ),
                 ),
               )
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.account_balance_wallet_rounded,
-                      color: Color(0xFFFFD700), size: 20),
+                  const Icon(
+                    Icons.account_balance_wallet_rounded,
+                    color: Color(0xFFFFD700),
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Flexible(
                     child: Wrap(
@@ -364,8 +372,11 @@ class _QuickWalletBarState extends State<_QuickWalletBar> {
                     ),
                   ),
                   const Spacer(),
-                  const Icon(Icons.chevron_right_rounded,
-                      color: Colors.white54, size: 18),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white54,
+                    size: 18,
+                  ),
                 ],
               ),
       ),
@@ -380,11 +391,14 @@ class _QuickWalletBarState extends State<_QuickWalletBar> {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white12),
       ),
-      child: Text(text,
-          style: const TextStyle(
-              color: Color(0xFFFFD700),
-              fontSize: 11,
-              fontWeight: FontWeight.w700)),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFFFFD700),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 
@@ -392,7 +406,9 @@ class _QuickWalletBarState extends State<_QuickWalletBar> {
     final n = (v is num ? v : 0).toDouble();
     if (n >= 1e6) return '${(n / 1e6).toStringAsFixed(1)}M';
     if (n >= 1e3) return '${(n / 1e3).toStringAsFixed(1)}k';
-    return n == n.truncateToDouble() ? n.toInt().toString() : n.toStringAsFixed(1);
+    return n == n.truncateToDouble()
+        ? n.toInt().toString()
+        : n.toStringAsFixed(1);
   }
 }
 
@@ -429,8 +445,10 @@ class _GiftsTabState extends State<_GiftsTab> {
 
   Future<void> _load() async {
     try {
-      final gifts = await GiftService.instance
-          .fetchGifts(page: 0, pageSize: 24);
+      final gifts = await GiftService.instance.fetchGifts(
+        page: 0,
+        pageSize: 24,
+      );
       final wallet = await GiftService.instance.fetchWalletCurrencies();
       if (!mounted) return;
       setState(() {
@@ -447,8 +465,7 @@ class _GiftsTabState extends State<_GiftsTab> {
     }
   }
 
-  int _balance(String currency) =>
-      (_wallet[currency] as num?)?.toInt() ?? 0;
+  int _balance(String currency) => (_wallet[currency] as num?)?.toInt() ?? 0;
 
   Future<void> _send(Gift gift, int amount) async {
     final requestId =
@@ -467,13 +484,17 @@ class _GiftsTabState extends State<_GiftsTab> {
       if (result.balance > 0) _wallet['credits'] = result.balance;
     });
     final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(SnackBar(
-      content: Text(result.duplicate
-          ? 'Presente já enviado anteriormente (nada foi debitado de novo).'
-          : result.unlimited
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          result.duplicate
+              ? 'Presente já enviado anteriormente (nada foi debitado de novo).'
+              : result.unlimited
               ? '${gift.icon} ${gift.name} x$amount enviado! (fundador ilimitado — grátis)'
-              : '${gift.icon} ${gift.name} x$amount enviado! ${-result.creditsSpent} créditos'),
-    ));
+              : '${gift.icon} ${gift.name} x$amount enviado! ${-result.creditsSpent} créditos',
+        ),
+      ),
+    );
   }
 
   Future<void> _pickAmount(Gift gift) async {
@@ -490,27 +511,34 @@ class _GiftsTabState extends State<_GiftsTab> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('${gift.icon} ${gift.name}',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16)),
+              Text(
+                '${gift.icon} ${gift.name}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
               const SizedBox(height: 4),
-              Text('${gift.credits} créditos cada',
-                  style: const TextStyle(
-                      color: Color(0xFFFFD700), fontSize: 12)),
+              Text(
+                '${gift.credits} créditos cada',
+                style: const TextStyle(color: Color(0xFFFFD700), fontSize: 12),
+              ),
               const SizedBox(height: 4),
-              Text('Saldo: $balance',
-                  style: const TextStyle(
-                      color: Colors.white54, fontSize: 12)),
+              Text(
+                'Saldo: $balance',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 10,
                 children: [1, 5, 10, 66, 99].map((n) {
                   final ok = n * gift.credits <= balance;
                   return ChoiceChip(
-                    label: Text('x$n',
-                        style: const TextStyle(color: Colors.white)),
+                    label: Text(
+                      'x$n',
+                      style: const TextStyle(color: Colors.white),
+                    ),
                     selected: false,
                     backgroundColor: const Color(0xFF2A2A35),
                     selectedColor: _kAccent,
@@ -528,8 +556,9 @@ class _GiftsTabState extends State<_GiftsTab> {
       await _send(gift, amount);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
@@ -542,9 +571,11 @@ class _GiftsTabState extends State<_GiftsTab> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text('Não foi possível carregar os presentes.\n$_error',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white54)),
+          child: Text(
+            'Não foi possível carregar os presentes.\n$_error',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white54),
+          ),
         ),
       );
     }
@@ -556,8 +587,10 @@ class _GiftsTabState extends State<_GiftsTab> {
         if (_gifts.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24),
-            child: Text('Nenhum presente ativo no catálogo.',
-                style: TextStyle(color: Colors.white54)),
+            child: Text(
+              'Nenhum presente ativo no catálogo.',
+              style: TextStyle(color: Colors.white54),
+            ),
           )
         else
           GridView.builder(
@@ -581,8 +614,7 @@ class _GiftsTabState extends State<_GiftsTab> {
                     color: const Color(0xFF23232E),
                     borderRadius: BorderRadius.circular(12),
                     border: g.isExclusive
-                        ? Border.all(
-                            color: const Color(0xFF00E5FF), width: 1)
+                        ? Border.all(color: const Color(0xFF00E5FF), width: 1)
                         : null,
                   ),
                   child: Column(
@@ -590,19 +622,26 @@ class _GiftsTabState extends State<_GiftsTab> {
                     children: [
                       Text(g.icon, style: const TextStyle(fontSize: 28)),
                       const SizedBox(height: 4),
-                      Text(g.name,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 10),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
+                      Text(
+                        g.name,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       const SizedBox(height: 2),
-                      Text('${g.credits}',
-                          style: TextStyle(
-                              color: afford
-                                  ? const Color(0xFFFFD700)
-                                  : const Color(0xFFFF5252),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700)),
+                      Text(
+                        '${g.credits}',
+                        style: TextStyle(
+                          color: afford
+                              ? const Color(0xFFFFD700)
+                              : const Color(0xFFFF5252),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -626,9 +665,10 @@ class _GiftsTabState extends State<_GiftsTab> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.white12),
           ),
-          child: Text('$label: ${_balance(code)}',
-              style:
-                  const TextStyle(color: Colors.white70, fontSize: 11)),
+          child: Text(
+            '$label: ${_balance(code)}',
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
+          ),
         );
       }).toList(),
     );
@@ -656,8 +696,10 @@ class _RankingTabState extends State<_RankingTab>
     ('emeralds', '🟢'),
   ];
 
-  late final TabController _tabs =
-      TabController(length: _currencies.length, vsync: this);
+  late final TabController _tabs = TabController(
+    length: _currencies.length,
+    vsync: this,
+  );
   int _currencyIndex = 0;
   List<LiveRankRecord> _top = const [];
   bool _loading = true;
@@ -717,104 +759,127 @@ class _RankingTabState extends State<_RankingTab>
           indicatorColor: _kAccent,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
-          labelStyle:
-              const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          labelStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
           tabs: _currencies.map((c) => Tab(text: c.$2)).toList(),
         ),
         const SizedBox(height: 4),
-        const Text('Rankings reais por moeda (carteiras validadas no backend).',
-            style: TextStyle(color: Colors.white38, fontSize: 11)),
+        const Text(
+          'Rankings reais por moeda (carteiras validadas no backend).',
+          style: TextStyle(color: Colors.white38, fontSize: 11),
+        ),
         Expanded(
-          child: Builder(builder: (context) {
-            if (_loading) {
-              return const Center(child: CircularProgressIndicator(color: _kAccent));
-            }
-            if (_error != null) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Text('Não foi possível carregar o ranking.\n$_error',
+          child: Builder(
+            builder: (context) {
+              if (_loading) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _kAccent),
+                );
+              }
+              if (_error != null) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      'Não foi possível carregar o ranking.\n$_error',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white54)),
-                ),
-              );
-            }
-            if (_top.isEmpty) {
-              return const Center(
-                child: Text(
-                    'Ainda não há apoiadores com saldo nesta moeda.',
-                    style: TextStyle(color: Colors.white54)),
-              );
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _top.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 4),
-              itemBuilder: (context, index) {
-                final r = _top[index];
-                final color = index == 0
-                    ? const Color(0xFFFFD700)
-                    : index == 1
-                        ? const Color(0xFFC0C0C0)
-                        : index == 2
-                            ? const Color(0xFFCD7F32)
-                            : Colors.white54;
-                return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A1724),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white10),
-                  ),
-                  child: Row(
-                    children: [
-                      Text('#${r.rank}',
-                          style: TextStyle(
-                              color: color,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 14)),
-                      const SizedBox(width: 10),
-                      CircleAvatar(
-                        radius: 14,
-                        backgroundColor: _kAccent.withValues(alpha: 0.35),
-                        backgroundImage: r.avatarUrl != null
-                            ? NetworkImage(r.avatarUrl!)
-                            : null,
-                        child: const Icon(Icons.person,
-                            color: Colors.white70, size: 13),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                r.displayName ?? r.username,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 13),
-                              ),
-                            ),
-                            if (r.isVerified) ...[
-                              const SizedBox(width: 4),
-                              const VerifiedBadge(size: 14),
-                            ],
-                          ],
-                        ),
-                      ),
-                      Text(
-                        '${r.value.toStringAsFixed(0)} ${_currencies[_currencyIndex].$2}',
-                        style: TextStyle(
-                            color: color, fontWeight: FontWeight.w700),
-                      ),
-                    ],
+                      style: const TextStyle(color: Colors.white54),
+                    ),
                   ),
                 );
-              },
-            );
-          }),
+              }
+              if (_top.isEmpty) {
+                return const Center(
+                  child: Text(
+                    'Ainda não há apoiadores com saldo nesta moeda.',
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                );
+              }
+              return ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _top.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 4),
+                itemBuilder: (context, index) {
+                  final r = _top[index];
+                  final color = index == 0
+                      ? const Color(0xFFFFD700)
+                      : index == 1
+                      ? const Color(0xFFC0C0C0)
+                      : index == 2
+                      ? const Color(0xFFCD7F32)
+                      : Colors.white54;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A1724),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '#${r.rank}',
+                          style: TextStyle(
+                            color: color,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        CircleAvatar(
+                          radius: 14,
+                          backgroundColor: _kAccent.withValues(alpha: 0.35),
+                          backgroundImage: r.avatarUrl != null
+                              ? NetworkImage(r.avatarUrl!)
+                              : null,
+                          child: const Icon(
+                            Icons.person,
+                            color: Colors.white70,
+                            size: 13,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  r.displayName ?? r.username,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              if (r.isVerified) ...[
+                                const SizedBox(width: 4),
+                                const VerifiedBadge(size: 14),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '${r.value.toStringAsFixed(0)} ${_currencies[_currencyIndex].$2}',
+                          style: TextStyle(
+                            color: color,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ],
     );
@@ -836,19 +901,22 @@ class _MissionsTab extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('🎯',
-                style: TextStyle(fontSize: 40)),
+            const Text('🎯', style: TextStyle(fontSize: 40)),
             const SizedBox(height: 12),
-            const Text('Missões e níveis do KLAY K',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15)),
+            const Text(
+              'Missões e níveis do KLAY K',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
+            ),
             const SizedBox(height: 6),
             const Text(
-                'Complete missões para subir de nível, ganhar XP e desbloquear conquistas reais.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54, fontSize: 13)),
+              'Complete missões para subir de nível, ganhar XP e desbloquear conquistas reais.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: () => MissionsScreen.show(context),
@@ -907,8 +975,10 @@ class _AlertsTabState extends State<_AlertsTab> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Text('Nenhum alerta no momento.',
-              style: TextStyle(color: Colors.white54)),
+          child: Text(
+            'Nenhum alerta no momento.',
+            style: TextStyle(color: Colors.white54),
+          ),
         ),
       );
     }
@@ -925,15 +995,15 @@ class _AlertsTabState extends State<_AlertsTab> {
             color: const Color(0xFF1A1724),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: a.read
-                  ? Colors.white10
-                  : _kAccent.withValues(alpha: 0.5),
+              color: a.read ? Colors.white10 : _kAccent.withValues(alpha: 0.5),
             ),
           ),
           child: Row(
             children: [
               Icon(
-                isGift ? Icons.card_giftcard_rounded : Icons.notifications_rounded,
+                isGift
+                    ? Icons.card_giftcard_rounded
+                    : Icons.notifications_rounded,
                 color: isGift ? const Color(0xFFFFD700) : _kAccent,
                 size: 20,
               ),
@@ -1031,20 +1101,30 @@ class _VoiceBotTabState extends State<_VoiceBotTab> {
         SwitchListTile(
           value: _config.enabled,
           onChanged: (v) async {
-            setState(() => _config =
-                VoiceBotConfig(enabled: v, provider: _config.provider, voice: _config.voice));
+            setState(
+              () => _config = VoiceBotConfig(
+                enabled: v,
+                provider: _config.provider,
+                voice: _config.voice,
+              ),
+            );
             await _save();
           },
-          title: const Text('Bot de voz',
-              style: TextStyle(color: Colors.white)),
+          title: const Text(
+            'Bot de voz',
+            style: TextStyle(color: Colors.white),
+          ),
           subtitle: const Text(
-              'Participa da live comentando falado (requer provedor real).',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
+            'Participa da live comentando falado (requer provedor real).',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
           activeTrackColor: _kAccent,
         ),
         const SizedBox(height: 10),
-        const Text('Provedor de voz',
-            style: TextStyle(color: Colors.white70, fontSize: 13)),
+        const Text(
+          'Provedor de voz',
+          style: TextStyle(color: Colors.white70, fontSize: 13),
+        ),
         const SizedBox(height: 6),
         TextField(
           controller: _provider,
@@ -1062,8 +1142,10 @@ class _VoiceBotTabState extends State<_VoiceBotTab> {
           ),
         ),
         const SizedBox(height: 12),
-        const Text('Voz',
-            style: TextStyle(color: Colors.white70, fontSize: 13)),
+        const Text(
+          'Voz',
+          style: TextStyle(color: Colors.white70, fontSize: 13),
+        ),
         const SizedBox(height: 6),
         TextField(
           controller: _voice,
@@ -1086,8 +1168,9 @@ class _VoiceBotTabState extends State<_VoiceBotTab> {
           decoration: BoxDecoration(
             color: const Color(0xFF2A2012),
             borderRadius: BorderRadius.circular(12),
-            border:
-                Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
+            border: Border.all(
+              color: const Color(0xFFF59E0B).withValues(alpha: 0.4),
+            ),
           ),
           child: const Text(
             'Transparência: o bot de voz só produz áudio quando a equipe do '
@@ -1152,8 +1235,7 @@ class _ConfigTabState extends State<_ConfigTab> {
             setState(() => _prefs = _prefs.copyWith(enabled: v));
             // Desligar esconde a bolinha por um COOLDOWN (não para sempre):
             // depois de algumas horas ela volta a aparecer sozinha.
-            final d = BubbleDismissal(
-                'live_premium_bubble_hidden_until');
+            final d = BubbleDismissal('live_premium_bubble_hidden_until');
             if (v) {
               d.reenable();
             } else {
@@ -1161,12 +1243,15 @@ class _ConfigTabState extends State<_ConfigTab> {
             }
             _save();
           },
-          title: const Text('Bolinha premium',
-              style: TextStyle(color: Colors.white)),
+          title: const Text(
+            'Bolinha premium',
+            style: TextStyle(color: Colors.white),
+          ),
           subtitle: const Text(
-              'Atalho flutuante com presentes, ranking e alertas. '
-              'Ao desligar, fica oculta por algumas horas e volta depois.',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
+            'Atalho flutuante com presentes, ranking e alertas. '
+            'Ao desligar, fica oculta por algumas horas e volta depois.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
           activeTrackColor: _kAccent,
         ),
         SwitchListTile(
@@ -1175,11 +1260,14 @@ class _ConfigTabState extends State<_ConfigTab> {
             setState(() => _prefs = _prefs.copyWith(minimized: v));
             _save();
           },
-          title: const Text('Minimizada',
-              style: TextStyle(color: Colors.white)),
+          title: const Text(
+            'Minimizada',
+            style: TextStyle(color: Colors.white),
+          ),
           subtitle: const Text(
-              'Abre fechada, sem expandir automaticamente o painel.',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
+            'Abre fechada, sem expandir automaticamente o painel.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
           activeTrackColor: _kAccent,
         ),
       ],

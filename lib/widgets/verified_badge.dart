@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// Selo de verificado usando o asset PNG oficial `assets/ic_verificado.png`,
 /// com fallback para ícone Material caso o asset não carregue. Tamanho
 /// responsivo (padrão 16) para não quebrar o layout em linhas de nome.
@@ -34,10 +36,11 @@ class FounderBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     if (compact) {
-      return const Tooltip(
-        message: 'Fundador Oficial do KLAY K',
-        child: Text('👑', style: TextStyle(fontSize: 16)),
+      return Tooltip(
+        message: l10n.founderOfficialBadge,
+        child: const Text('👑', style: TextStyle(fontSize: 16)),
       );
     }
     return Container(
@@ -57,14 +60,14 @@ class FounderBadge extends StatelessWidget {
           ),
         ],
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('👑', style: TextStyle(fontSize: 13)),
-          SizedBox(width: 5),
+          const Text('👑', style: TextStyle(fontSize: 13)),
+          const SizedBox(width: 5),
           Text(
-            'FUNDADOR OFICIAL',
-            style: TextStyle(
+            l10n.founderOfficialLabel,
+            style: const TextStyle(
               color: Color(0xFF1B1A26),
               fontSize: 10,
               fontWeight: FontWeight.w900,
@@ -83,20 +86,21 @@ class AdminBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: const Color(0xFF8B5CF6).withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('🛡️', style: TextStyle(fontSize: 13)),
-          SizedBox(width: 5),
+          const Text('🛡️', style: TextStyle(fontSize: 13)),
+          const SizedBox(width: 5),
           Text(
-            'ADMINISTRADOR MASTER',
-            style: TextStyle(
+            l10n.adminMasterLabel,
+            style: const TextStyle(
               color: Color(0xFFC4B5FD),
               fontSize: 10,
               fontWeight: FontWeight.w900,

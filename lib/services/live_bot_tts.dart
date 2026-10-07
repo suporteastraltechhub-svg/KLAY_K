@@ -48,7 +48,8 @@ class LiveBotTts {
         final n = (v['name']?.toString() ?? '').toLowerCase();
         final localMatch = l.contains(lang) || n.contains(lang);
         final g = gender;
-        final genderMatch = g == 'auto' ||
+        final genderMatch =
+            g == 'auto' ||
             n.contains(g) ||
             (v['gender']?.toString() ?? '').toLowerCase() == g;
         return localMatch && genderMatch;
@@ -64,8 +65,8 @@ class LiveBotTts {
       final wanted = type == 'female'
           ? 'female'
           : type == 'male'
-              ? 'male'
-              : 'auto';
+          ? 'male'
+          : 'auto';
 
       Map<String, dynamic>? chosen;
       // 1) pt-BR do tipo desejado.
@@ -127,6 +128,5 @@ class LiveBotTts {
     } catch (_) {}
   }
 
-  static const String kPreviewText =
-      'Olá! Bem-vindos à live do KLAY K!';
+  static const String kPreviewText = 'Olá! Bem-vindos à live do KLAY K!';
 }

@@ -65,14 +65,14 @@ class KlaykExperience {
   }
 
   Map<String, dynamic> toSettings() => {
-        'reduce_animations': reduceAnimations,
-        'reduce_effects': reduceEffects,
-        'auto_play': autoPlay,
-        'wifi_only': wifiOnly,
-        'save_data': saveData,
-        'video_quality': videoQuality,
-        'show_reactions': showReactions,
-      };
+    'reduce_animations': reduceAnimations,
+    'reduce_effects': reduceEffects,
+    'auto_play': autoPlay,
+    'wifi_only': wifiOnly,
+    'save_data': saveData,
+    'video_quality': videoQuality,
+    'show_reactions': showReactions,
+  };
 }
 
 class ExperienceSettings {
@@ -80,8 +80,9 @@ class ExperienceSettings {
 
   static final ExperienceSettings instance = ExperienceSettings._();
 
-  final ValueNotifier<KlaykExperience> prefs =
-      ValueNotifier(const KlaykExperience());
+  final ValueNotifier<KlaykExperience> prefs = ValueNotifier(
+    const KlaykExperience(),
+  );
 
   bool _dirty = false;
 
@@ -103,7 +104,8 @@ class ExperienceSettings {
       final res = await SupabaseService.instance.client
           .from('user_settings')
           .select(
-              'reduce_animations,reduce_effects,auto_play,wifi_only,save_data,video_quality,show_reactions')
+            'reduce_animations,reduce_effects,auto_play,wifi_only,save_data,video_quality,show_reactions',
+          )
           .eq('user_id', uid)
           .maybeSingle();
       prefs.value = KlaykExperience.fromSettings(res);
@@ -135,13 +137,11 @@ class ExperienceSettings {
         final s = prefs.value.toSettings();
         final uid = SupabaseService.instance.client.auth.currentUser?.id;
         if (uid == null) return;
-        await SupabaseService.instance.client
-            .from('user_settings')
-            .upsert({
-              'user_id': uid,
-              ...s,
-              'updated_at': DateTime.now().toUtc().toIso8601String(),
-            }, onConflict: 'user_id');
+        await SupabaseService.instance.client.from('user_settings').upsert({
+          'user_id': uid,
+          ...s,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        }, onConflict: 'user_id');
       } catch (_) {}
     });
   }

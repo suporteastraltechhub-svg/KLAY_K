@@ -51,9 +51,9 @@ void main() {
     // app_links no startup; sem mock o MissingPluginException marca o teste.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('com.llfbandit.app_links/events'),
-      (call) async => null,
-    );
+          const MethodChannel('com.llfbandit.app_links/events'),
+          (call) async => null,
+        );
   });
 
   Future<void> resetView(WidgetTester tester) async {
@@ -67,9 +67,9 @@ void main() {
   void mockAppLinks() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('com.llfbandit.app_links/events'),
-      (call) async => null,
-    );
+          const MethodChannel('com.llfbandit.app_links/events'),
+          (call) async => null,
+        );
   }
 
   // Avança rede real (runAsync) + relógio fake (pump) até `cond` ser true.
@@ -118,11 +118,16 @@ void main() {
     test('(setup) inicializa Supabase na zona real', () async {
       SharedPreferences.setMockInitialValues(const {});
       await SupabaseService.instance.ensureReady();
-      expect(SupabaseService.instance.isConfigured, isTrue,
-          reason: 'E2E exige Supabase configurado (rede real habilitada).');
+      expect(
+        SupabaseService.instance.isConfigured,
+        isTrue,
+        reason: 'E2E exige Supabase configurado (rede real habilitada).',
+      );
     }, skip: skipUnlessE2E());
 
-    testWidgets('admin: splash→login REAL pela UI→sessão→logout', (tester) async {
+    testWidgets('admin: splash→login REAL pela UI→sessão→logout', (
+      tester,
+    ) async {
       await resetView(tester);
       mockAppLinks();
       SharedPreferences.setMockInitialValues(const {});
@@ -130,31 +135,54 @@ void main() {
 
       // Splash → Login (sem sessão armazenada).
       await pumpAppPastSplash(tester);
-      await loopUntil(tester, () => find.byType(AuthScreen).evaluate().isNotEmpty,
-          what: 'AuthScreen');
+      await loopUntil(
+        tester,
+        () => find.byType(AuthScreen).evaluate().isNotEmpty,
+        what: 'AuthScreen',
+      );
       expect(find.byType(AuthScreen), findsOneWidget);
 
       // Autenticação REAL pela UI (e-mail/senha digitados → backend).
       await tester.enterText(
-          find.byKey(const ValueKey('auth_email')), _adminEmail);
+        find.byKey(const ValueKey('auth_email')),
+        _adminEmail,
+      );
       await tester.enterText(
-          find.widgetWithText(TextField, 'Senha'), _password);
+        find.widgetWithText(TextField, 'Senha'),
+        _password,
+      );
       await tester.tap(find.widgetWithText(FilledButton, 'Entrar'));
-      await loopUntil(tester, () => db.hasSession, what: 'sessão real do admin');
-      expect(db.currentUser?.email, _adminEmail,
-          reason: 'usuário da sessão real = conta de teste do admin');
+      await loopUntil(
+        tester,
+        () => db.hasSession,
+        what: 'sessão real do admin',
+      );
+      expect(
+        db.currentUser?.email,
+        _adminEmail,
+        reason: 'usuário da sessão real = conta de teste do admin',
+      );
 
       // A MainScreen chega quando o AppGate entrega a sessão.
-      await loopUntil(tester, () => find.byType(MainScreen).evaluate().isNotEmpty,
-          what: 'MainScreen');
+      await loopUntil(
+        tester,
+        () => find.byType(MainScreen).evaluate().isNotEmpty,
+        what: 'MainScreen',
+      );
       await tester.pump(const Duration(seconds: 2));
-      expect(find.byType(AuthScreen), findsNothing,
-          reason: 'após login real o login sai da tela (AppGate)');
+      expect(
+        find.byType(AuthScreen),
+        findsNothing,
+        reason: 'após login real o login sai da tela (AppGate)',
+      );
 
       // Logout real: sessão derrubada no backend e snapshot do storage limpo.
       await runReal(tester, db.signOut);
-      expect(db.hasSession, isFalse,
-          reason: 'signOut encerra a sessão real do Supabase');
+      expect(
+        db.hasSession,
+        isFalse,
+        reason: 'signOut encerra a sessão real do Supabase',
+      );
 
       // Remove os canais Realtime da MainScreen (keepalive 10s) para não
       // deixar timers fake pendentes no teardown.
@@ -162,146 +190,195 @@ void main() {
       await settle(tester);
     }, skip: skipUnlessE2E());
 
-    testWidgets('fundador: painel com dados reais, só rola para admin',
-        (tester) async {
-      await resetView(tester);
-      mockAppLinks();
-      SharedPreferences.setMockInitialValues(const {});
-      final db = SupabaseService.instance;
+    testWidgets(
+      'fundador: painel com dados reais, só rola para admin',
+      (tester) async {
+        await resetView(tester);
+        mockAppLinks();
+        SharedPreferences.setMockInitialValues(const {});
+        final db = SupabaseService.instance;
 
-      await runReal(tester, () => db.signInWithEmail(_adminEmail, _password));
-      expect(db.hasSession, isTrue);
-      expect(await runReal(tester, FounderService.instance.isAdmin), isTrue,
-          reason: 'role admin concedida no banco é refletida no backend');
+        await runReal(tester, () => db.signInWithEmail(_adminEmail, _password));
+        expect(db.hasSession, isTrue);
+        expect(
+          await runReal(tester, FounderService.instance.isAdmin),
+          isTrue,
+          reason: 'role admin concedida no banco é refletida no backend',
+        );
 
-      // O Painel do Fundador (mesmo widget da rota real) monta com dados reais
-      // via RPC security definer.
-      await tester.pumpWidget(MaterialApp(
-        theme: KlaykTheme.dark(), home: const FounderPanelScreen()));
-      // O painel dispara isAdmin+myRole+myCaps e depois ~18 RPCs admin; o
-      // HTTP do sandbox é serializado (~250ms/request), então o E2E aguenta
-      // mais iterações do que o default antes de renderizar título e métricas.
-      await loopUntil(
-          tester, () => find.text('👑 Painel do Fundador').evaluate().isNotEmpty,
+        // O Painel do Fundador (mesmo widget da rota real) monta com dados reais
+        // via RPC security definer.
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: KlaykTheme.dark(),
+            home: const FounderPanelScreen(),
+          ),
+        );
+        // O painel dispara isAdmin+myRole+myCaps e depois ~18 RPCs admin; o
+        // HTTP do sandbox é serializado (~250ms/request), então o E2E aguenta
+        // mais iterações do que o default antes de renderizar título e métricas.
+        await loopUntil(
+          tester,
+          () => find.text('👑 Painel do Fundador').evaluate().isNotEmpty,
           what: 'Painel do Fundador',
-          max: 240);
-      await loopUntil(
-          tester, () => find.text('Usuários').evaluate().isNotEmpty,
+          max: 240,
+        );
+        await loopUntil(
+          tester,
+          () => find.text('Usuários').evaluate().isNotEmpty,
           what: 'métrica "Usuários" renderizada com dados do backend',
-          max: 240);
-      expect(find.text('Acesso restrito'), findsNothing,
-          reason: 'admin vê o painel (não a view restrita)');
+          max: 240,
+        );
+        expect(
+          find.text('Acesso restrito'),
+          findsNothing,
+          reason: 'admin vê o painel (não a view restrita)',
+        );
 
-      final realStats = await runReal(tester, FounderService.instance.stats);
-      expect(realStats?['users'], isA<num>(),
-          reason: 'admin_stats retornou contador real do Supabase');
-      expect(realStats?['reports_pending'], isA<num>(),
-          reason: 'admin_stats trouxe módulos de dados reais');
+        final realStats = await runReal(tester, FounderService.instance.stats);
+        expect(
+          realStats?['users'],
+          isA<num>(),
+          reason: 'admin_stats retornou contador real do Supabase',
+        );
+        expect(
+          realStats?['reports_pending'],
+          isA<num>(),
+          reason: 'admin_stats trouxe módulos de dados reais',
+        );
 
-      await runReal(tester, db.signOut);
-      expect(db.hasSession, isFalse);
-      await runReal(tester, db.client.removeAllChannels);
-      await settle(tester);
-    }, skip: skipUnlessE2E());
+        await runReal(tester, db.signOut);
+        expect(db.hasSession, isFalse);
+        await runReal(tester, db.client.removeAllChannels);
+        await settle(tester);
+      },
+      skip: skipUnlessE2E(),
+    );
 
-    testWidgets('comum: login ok, RLS nega RPCs admin e flag is_admin',
-        (tester) async {
-      await resetView(tester);
-      mockAppLinks();
-      SharedPreferences.setMockInitialValues(const {});
-      final db = SupabaseService.instance;
+    testWidgets(
+      'comum: login ok, RLS nega RPCs admin e flag is_admin',
+      (tester) async {
+        await resetView(tester);
+        mockAppLinks();
+        SharedPreferences.setMockInitialValues(const {});
+        final db = SupabaseService.instance;
 
-      // Login real (API direta — mesmo serviço que a tela de login usa).
-      await runReal(
-          tester, () => db.signInWithEmail(_userEmail, _password));
-      expect(db.hasSession, isTrue);
-      expect(db.currentUser?.email, _userEmail);
-      expect(await runReal(tester, FounderService.instance.isAdmin), isFalse,
-          reason: 'comum não tem role admin');
+        // Login real (API direta — mesmo serviço que a tela de login usa).
+        await runReal(tester, () => db.signInWithEmail(_userEmail, _password));
+        expect(db.hasSession, isTrue);
+        expect(db.currentUser?.email, _userEmail);
+        expect(
+          await runReal(tester, FounderService.instance.isAdmin),
+          isFalse,
+          reason: 'comum não tem role admin',
+        );
 
-      // RLS no nível de dados: comum não lê RPCs admin.
-      final statsOutcome = await runReal(tester, () async {
-        try {
-          await FounderService.instance.stats();
-          return 'ok';
-        } on AdminAccessDeniedException {
-          return 'blocked';
-        } catch (e) {
-          return 'other:$e';
-        }
-      });
-      expect(statsOutcome, 'blocked',
-          reason: 'admin_stats deve negar usuário comum (resposta not_admin)');
+        // RLS no nível de dados: comum não lê RPCs admin.
+        final statsOutcome = await runReal(tester, () async {
+          try {
+            await FounderService.instance.stats();
+            return 'ok';
+          } on AdminAccessDeniedException {
+            return 'blocked';
+          } catch (e) {
+            return 'other:$e';
+          }
+        });
+        expect(
+          statsOutcome,
+          'blocked',
+          reason: 'admin_stats deve negar usuário comum (resposta not_admin)',
+        );
 
-      // Escalação via RPC admin: comum NUNCA promove a si ou outro.
-      final denied = await runReal(
-        tester,
-        () => db.client
-            .rpc('admin_set_admin', params: {
-              'p_user_id': db.currentUser?.id ?? '',
-              'p_admin': true,
-            })
-            .then((_) => 'ok')
-            .catchError((Object e) => 'denied'),
-      );
-      expect(denied, 'denied', reason: 'comum jamais promove a si/outro');
+        // Escalação via RPC admin: comum NUNCA promove a si ou outro.
+        final denied = await runReal(
+          tester,
+          () => db.client
+              .rpc(
+                'admin_set_admin',
+                params: {
+                  'p_user_id': db.currentUser?.id ?? '',
+                  'p_admin': true,
+                },
+              )
+              .then((_) => 'ok')
+              .catchError((Object e) => 'denied'),
+        );
+        expect(denied, 'denied', reason: 'comum jamais promove a si/outro');
 
-      // Escalação via UPDATE direto na tabela: a flag is_admin não é gravável
-      // pelo próprio usuário (grants revogados; RLS idempotente de segurança).
-      final direct = await runReal(tester, () async {
-        try {
-          await db.client
-              .from('profiles')
-              .update({'is_admin': true})
-              .eq('id', db.currentUser?.id ?? '')
-              .then((_) => 'ok');
-          return 'ok';
-        } catch (e) {
-          return 'denied';
-        }
-      });
-      expect(direct, 'denied',
-          reason: 'UPDATE direto de profiles.is_admin é negado (grants/RLS)');
+        // Escalação via UPDATE direto na tabela: a flag is_admin não é gravável
+        // pelo próprio usuário (grants revogados; RLS idempotente de segurança).
+        final direct = await runReal(tester, () async {
+          try {
+            await db.client
+                .from('profiles')
+                .update({'is_admin': true})
+                .eq('id', db.currentUser?.id ?? '')
+                .then((_) => 'ok');
+            return 'ok';
+          } catch (e) {
+            return 'denied';
+          }
+        });
+        expect(
+          direct,
+          'denied',
+          reason: 'UPDATE direto de profiles.is_admin é negado (grants/RLS)',
+        );
 
-      await runReal(tester, db.signOut);
-      expect(db.hasSession, isFalse);
-    }, skip: skipUnlessE2E());
+        await runReal(tester, db.signOut);
+        expect(db.hasSession, isFalse);
+      },
+      skip: skipUnlessE2E(),
+    );
 
-    testWidgets('persistência: sessão sobrevive a reinício (storage→recover)',
-        (tester) async {
-      await resetView(tester);
-      mockAppLinks();
-      SharedPreferences.setMockInitialValues(const {});
-      final db = SupabaseService.instance;
+    testWidgets(
+      'persistência: sessão sobrevive a reinício (storage→recover)',
+      (tester) async {
+        await resetView(tester);
+        mockAppLinks();
+        SharedPreferences.setMockInitialValues(const {});
+        final db = SupabaseService.instance;
 
-      await runReal(tester, () => db.signInWithEmail(_adminEmail, _password));
-      expect(db.hasSession, isTrue);
+        await runReal(tester, () => db.signInWithEmail(_adminEmail, _password));
+        expect(db.hasSession, isTrue);
 
-      // A sessão foi persistida no armazenamento local (chave do startup).
-      final prefs = await runReal(tester, SharedPreferences.getInstance);
-      final tokenKey =
-          'sb-${Uri.parse(AppConfig.supabaseUrl).host.split('.').first}-auth-token';
-      final stored = prefs?.getString(tokenKey);
-      expect(stored, isNotNull,
-          reason: 'sessão gravada no storage (persistência real)');
+        // A sessão foi persistida no armazenamento local (chave do startup).
+        final prefs = await runReal(tester, SharedPreferences.getInstance);
+        final tokenKey =
+            'sb-${Uri.parse(AppConfig.supabaseUrl).host.split('.').first}-auth-token';
+        final stored = prefs?.getString(tokenKey);
+        expect(
+          stored,
+          isNotNull,
+          reason: 'sessão gravada no storage (persistência real)',
+        );
 
-      // "Reinício": fora da sessão em memória; a restauração usa o JSON
-      // persistido (mesmo caminho do SupabaseAuth.recoverSession()).
-      await runReal(tester, db.signOut);
-      expect(db.hasSession, isFalse);
-      await runReal(tester, () => db.client.auth.recoverSession(stored!));
-      expect(db.hasSession, isTrue,
-          reason: 'sessão restaurada do armazenamento local');
-      expect(db.currentUser?.email, _adminEmail);
-      expect(await runReal(tester, FounderService.instance.isAdmin), isTrue,
-          reason: 'após reinício a role admin é revalidada no backend');
+        // "Reinício": fora da sessão em memória; a restauração usa o JSON
+        // persistido (mesmo caminho do SupabaseAuth.recoverSession()).
+        await runReal(tester, db.signOut);
+        expect(db.hasSession, isFalse);
+        await runReal(tester, () => db.client.auth.recoverSession(stored!));
+        expect(
+          db.hasSession,
+          isTrue,
+          reason: 'sessão restaurada do armazenamento local',
+        );
+        expect(db.currentUser?.email, _adminEmail);
+        expect(
+          await runReal(tester, FounderService.instance.isAdmin),
+          isTrue,
+          reason: 'após reinício a role admin é revalidada no backend',
+        );
 
-      // O AppGate usa o mesmo caminho (recoverSession) para pular o login após
-      // reiniciar o app — caminho exercitado de ponta a ponta no teste admin,
-      // onde a Splash resolve a sessão e a MainScreen abre sem AuthScreen.
+        // O AppGate usa o mesmo caminho (recoverSession) para pular o login após
+        // reiniciar o app — caminho exercitado de ponta a ponta no teste admin,
+        // onde a Splash resolve a sessão e a MainScreen abre sem AuthScreen.
 
-      await runReal(tester, db.signOut);
-      expect(db.hasSession, isFalse);
-    }, skip: skipUnlessE2E());
+        await runReal(tester, db.signOut);
+        expect(db.hasSession, isFalse);
+      },
+      skip: skipUnlessE2E(),
+    );
   });
 }

@@ -53,7 +53,8 @@ class UserProfile {
     this.isFollowing = false,
     this.isSelf = false,
     DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+  }) : createdAt =
+           createdAt ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
   /// Nome de exibição preferido (fallback: usuário).
   String get name => (displayName != null && displayName!.trim().isNotEmpty)
@@ -61,9 +62,8 @@ class UserProfile {
       : (username?.isNotEmpty == true ? username! : 'Usuário');
 
   /// Handle completo com `@`, ex.: `@klaykoficial`.
-  String get handle => (username != null && username!.isNotEmpty)
-      ? '@$username'
-      : '@usuario';
+  String get handle =>
+      (username != null && username!.isNotEmpty) ? '@$username' : '@usuario';
 
   /// É o fundador oficial da plataforma (role do banco, nunca client-side).
   bool get isFounder => role == 'founder';
@@ -102,7 +102,8 @@ class UserProfile {
       role: base['role']?.toString(),
       profession: base['profession']?.toString(),
       birthDate: _parseDate(base['birth_date']),
-      createdAt: _parseDate(base['created_at']) ??
+      createdAt:
+          _parseDate(base['created_at']) ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       followersCount: count(base['followers_count']),
       followingCount: count(base['following_count']),

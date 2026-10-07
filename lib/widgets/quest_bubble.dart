@@ -30,7 +30,9 @@ class _QuestBubbleState extends State<QuestBubble>
   Offset _pos = const Offset(16, 120);
   Map<String, dynamic> _progress = const {};
   bool _loading = true;
-  final BubbleDismissal _dismissal = BubbleDismissal('quest_bubble_hidden_until');
+  final BubbleDismissal _dismissal = BubbleDismissal(
+    'quest_bubble_hidden_until',
+  );
 
   late final AnimationController _pulse;
   late final Animation<double> _scale;
@@ -42,9 +44,10 @@ class _QuestBubbleState extends State<QuestBubble>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     );
-    _scale = Tween<double>(begin: 1.0, end: 1.12).animate(
-      CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
-    );
+    _scale = Tween<double>(
+      begin: 1.0,
+      end: 1.12,
+    ).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut));
     _dismissal.ensureLoaded().then((_) {
       if (mounted) _syncPulse();
     });
@@ -143,10 +146,7 @@ class _QuestBubbleState extends State<QuestBubble>
     final size = MediaQuery.of(context).size;
     final maxX = (size.width - _size).clamp(0.0, double.infinity);
     final maxY = (size.height - 96 - _size).clamp(0.0, double.infinity);
-    final pos = Offset(
-      _pos.dx.clamp(0.0, maxX),
-      _pos.dy.clamp(0.0, maxY),
-    );
+    final pos = Offset(_pos.dx.clamp(0.0, maxX), _pos.dy.clamp(0.0, maxY));
 
     return Positioned(
       left: 0,
@@ -166,10 +166,12 @@ class _QuestBubbleState extends State<QuestBubble>
                     behavior: HitTestBehavior.opaque,
                     onTap: _open,
                     onPanUpdate: (d) {
-                      setState(() => _pos = Offset(
-                            pos.dx + d.delta.dx,
-                            pos.dy + d.delta.dy,
-                          ));
+                      setState(
+                        () => _pos = Offset(
+                          pos.dx + d.delta.dx,
+                          pos.dy + d.delta.dy,
+                        ),
+                      );
                     },
                     onPanEnd: (_) => _persist(),
                     child: _bubbleWidget(),
@@ -179,11 +181,7 @@ class _QuestBubbleState extends State<QuestBubble>
                     onTap: _hide,
                     child: const Padding(
                       padding: EdgeInsets.only(top: 3),
-                      child: Icon(
-                        Icons.close,
-                        size: 14,
-                        color: Colors.white38,
-                      ),
+                      child: Icon(Icons.close, size: 14, color: Colors.white38),
                     ),
                   ),
                 ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/admin_service.dart';
 import '../services/invite_service.dart';
 import '../services/social_service.dart';
@@ -39,14 +40,14 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
     try {
       final wallet = await AdminService.instance.myWallet();
       final progress = await SocialService.instance.fetchMyProgress();
-      final achievements =
-          await SocialService.instance.fetchAchievements().catchError((_) => const <Achievement>[]);
+      final achievements = await SocialService.instance
+          .fetchAchievements()
+          .catchError((_) => const <Achievement>[]);
       if (!mounted) return;
       setState(() {
         _wallet = wallet;
         _progress = progress;
-        _unlockedCount =
-            achievements.where((a) => a.unlocked).length;
+        _unlockedCount = achievements.where((a) => a.unlocked).length;
         _pendingInvites = inviteSummary.pendingRewards;
         _loading = false;
       });
@@ -58,9 +59,10 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: colors.bg,
-      appBar: AppBar(title: const Text('Central de Recompensas')),
+      appBar: AppBar(title: Text(l10n.rewardsCenterTitle)),
       body: _loading
           ? const Center(child: KlaykLoader())
           : RefreshIndicator(
@@ -72,20 +74,35 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      _shortcut(colors, Icons.military_tech_rounded, 'Missões',
-                          '${_progress.missions.length} no período', () {
-                        KlaykNav.push(context, const MissionsScreen());
-                      }),
+                      _shortcut(
+                        colors,
+                        Icons.military_tech_rounded,
+                        l10n.missionsTab,
+                        l10n.missionsInPeriod(_progress.missions.length),
+                        () {
+                          KlaykNav.push(context, const MissionsScreen());
+                        },
+                      ),
                       const SizedBox(width: 10),
-                      _shortcut(colors, Icons.inventory_2_rounded, 'Baús',
-                          'Abra o diário', () {
-                        KlaykNav.push(context, const ChestsScreen());
-                      }),
+                      _shortcut(
+                        colors,
+                        Icons.inventory_2_rounded,
+                        l10n.chests,
+                        l10n.openDailyChest,
+                        () {
+                          KlaykNav.push(context, const ChestsScreen());
+                        },
+                      ),
                       const SizedBox(width: 10),
-                      _shortcut(colors, Icons.emoji_events_rounded, 'Conquistas',
-                          '$_unlockedCount desbloqueadas', () {
-                        KlaykNav.push(context, const AchievementsScreen());
-                      }),
+                      _shortcut(
+                        colors,
+                        Icons.emoji_events_rounded,
+                        l10n.achievements,
+                        l10n.achievementsUnlocked(_unlockedCount),
+                        () {
+                          KlaykNav.push(context, const AchievementsScreen());
+                        },
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -97,7 +114,14 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
   }
 
   Widget _walletCard() {
-    final currencies = ['credits', 'diamonds', 'crystals', 'rubies', 'emeralds'];
+    final l10n = AppLocalizations.of(context)!;
+    final currencies = [
+      'credits',
+      'diamonds',
+      'crystals',
+      'rubies',
+      'emeralds',
+    ];
     final labels = {
       'credits': '🪙',
       'diamonds': '💎',
@@ -111,17 +135,26 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.workspace_premium_rounded,
-                  color: Color(0xFF8B5CF6)),
-              SizedBox(width: 8),
-              Text('Sua carteira',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              Spacer(),
-              Text('Ver extrato',
-                  style: TextStyle(fontSize: 12, color: Colors.white54)),
-              Icon(Icons.chevron_right_rounded, size: 18),
+              const Icon(
+                Icons.workspace_premium_rounded,
+                color: Color(0xFF8B5CF6),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                l10n.yourWallet,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                l10n.viewStatement,
+                style: const TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+              const Icon(Icons.chevron_right_rounded, size: 18),
             ],
           ),
           const SizedBox(height: 12),
@@ -133,16 +166,26 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
               return Expanded(
                 child: Column(
                   children: [
-                    Text(labels[c] ?? '•',
-                        style: const TextStyle(fontSize: 20)),
+                    Text(
+                      labels[c] ?? '•',
+                      style: const TextStyle(fontSize: 20),
+                    ),
                     const SizedBox(height: 4),
-                    Text('$value',
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w700)),
+                    Text(
+                      '$value',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(_currencyName(c),
-                        style:
-                            const TextStyle(fontSize: 10, color: Colors.white38)),
+                    Text(
+                      _currencyName(c, l10n),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Colors.white38,
+                      ),
+                    ),
                   ],
                 ),
               );
@@ -154,7 +197,12 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
   }
 
   Widget _shortcut(
-      KlaykColors colors, IconData icon, String title, String subtitle, VoidCallback onTap) {
+    KlaykColors colors,
+    IconData icon,
+    String title,
+    String subtitle,
+    VoidCallback onTap,
+  ) {
     return Expanded(
       child: KlaykCard(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
@@ -163,12 +211,15 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
           children: [
             Icon(icon, color: colors.primary),
             const SizedBox(height: 8),
-            Text(title,
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 2),
-            Text(subtitle,
-                style: const TextStyle(fontSize: 10, color: Colors.white38)),
+            Text(
+              subtitle,
+              style: const TextStyle(fontSize: 10, color: Colors.white38),
+            ),
           ],
         ),
       ),
@@ -176,39 +227,42 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
   }
 
   Widget _rewardsStatus(KlaykColors colors) {
+    final l10n = AppLocalizations.of(context)!;
     return KlaykCard(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Como ganhar',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          Text(
+            l10n.howToEarnTitle,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 12),
           _row(
             Icons.star_rounded,
-            'Nível ${_progress.level}',
-            '${_progress.xpTotal} XP acumulados',
+            '${l10n.levelLabel} ${_progress.level}',
+            l10n.xpAccumulated(_progress.xpTotal),
             colors.gold,
           ),
           const SizedBox(height: 10),
           _row(
             Icons.military_tech_rounded,
-            'Complete missões',
-            'Programa missões diárias e semanais',
+            l10n.completeMissions,
+            l10n.missionsProgramDesc,
             colors.info,
           ),
           const SizedBox(height: 10),
           _row(
             Icons.card_giftcard_rounded,
-            'Convites',
-            '$_pendingInvites recompensas pendentes',
+            l10n.invites,
+            l10n.pendingRewards(_pendingInvites),
             colors.success,
           ),
           const SizedBox(height: 10),
           _row(
             Icons.games_rounded,
-            'Jogos',
-            'Suba no ranking e ganhe cristais',
+            l10n.games,
+            l10n.rankUpEarnCrystals,
             colors.warning,
           ),
         ],
@@ -225,12 +279,17 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700)),
-              Text(subtitle,
-                  style:
-                      const TextStyle(fontSize: 12, color: Colors.white54)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12, color: Colors.white54),
+              ),
             ],
           ),
         ),
@@ -238,13 +297,13 @@ class _RewardsCenterScreenState extends State<RewardsCenterScreen> {
     );
   }
 
-  String _currencyName(String id) {
+  String _currencyName(String id, AppLocalizations l10n) {
     return switch (id) {
-      'credits' => 'Moedas',
-      'diamonds' => 'Diamantes',
-      'crystals' => 'Cristais',
-      'rubies' => 'Rubis',
-      'emeralds' => 'Esmeraldas',
+      'credits' => l10n.coinsSection,
+      'diamonds' => l10n.diamonds,
+      'crystals' => l10n.crystals,
+      'rubies' => l10n.rubies,
+      'emeralds' => l10n.emeralds,
       _ => id,
     };
   }

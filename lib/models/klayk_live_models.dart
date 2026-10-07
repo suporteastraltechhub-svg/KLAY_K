@@ -19,6 +19,8 @@ class RealLive {
   final String? gameName;
   final String? coverUrl;
   final bool ageRestricted;
+  final String liveType;
+  final bool rtmpEnabled;
 
   final String? streamerDisplayName;
   final String? streamerUsername;
@@ -42,6 +44,8 @@ class RealLive {
     this.gameName,
     this.coverUrl,
     this.ageRestricted = false,
+    this.liveType = 'camera',
+    this.rtmpEnabled = false,
     this.streamerDisplayName,
     this.streamerUsername,
     this.streamerAvatar,
@@ -68,61 +72,64 @@ class RealLive {
       status: json['status'] as String? ?? 'live',
       startedAt:
           DateTime.tryParse(json['started_at'] as String? ?? '')?.toLocal() ??
-              DateTime.now(),
+          DateTime.now(),
       viewerCount: json['viewer_count'] as int? ?? 0,
       gameName: json['game_name'] as String?,
       coverUrl: json['cover_url'] as String?,
       ageRestricted: json['age_restricted'] == true,
+      liveType: json['live_type'] as String? ?? 'camera',
+      rtmpEnabled: json['rtmp_enabled'] == true,
       streamerDisplayName: profile is Map
           ? profile['display_name'] as String?
           : null,
-      streamerUsername:
-          profile is Map ? profile['username'] as String? : null,
-      streamerAvatar:
-          profile is Map ? profile['avatar_url'] as String? : null,
-      streamerVerified:
-          profile is Map ? profile['is_verified'] == true : false,
+      streamerUsername: profile is Map ? profile['username'] as String? : null,
+      streamerAvatar: profile is Map ? profile['avatar_url'] as String? : null,
+      streamerVerified: profile is Map ? profile['is_verified'] == true : false,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'room_name': roomName,
-        'streamer_id': streamerId,
-        'title': title,
-        'description': description,
-        'category': category,
-        'hashtags': hashtags,
-        'privacy': privacy,
-        'status': status,
-        'started_at': startedAt.toUtc().toIso8601String(),
-        'viewer_count': viewerCount,
-        if (gameName != null) 'game_name': gameName,
-        if (coverUrl != null) 'cover_url': coverUrl,
-        'age_restricted': ageRestricted,
-      };
+    'id': id,
+    'room_name': roomName,
+    'streamer_id': streamerId,
+    'title': title,
+    'description': description,
+    'category': category,
+    'hashtags': hashtags,
+    'privacy': privacy,
+    'status': status,
+    'started_at': startedAt.toUtc().toIso8601String(),
+    'viewer_count': viewerCount,
+    if (gameName != null) 'game_name': gameName,
+    if (coverUrl != null) 'cover_url': coverUrl,
+    'age_restricted': ageRestricted,
+    'live_type': liveType,
+    'rtmp_enabled': rtmpEnabled,
+  };
 
   RealLive copyWith({bool? ended, int? viewerCount}) => RealLive(
-        id: id,
-        roomName: roomName,
-        streamerId: streamerId,
-        title: title,
-        description: description,
-        category: category,
-        hashtags: hashtags,
-        privacy: privacy,
-        status: status,
-        startedAt: startedAt,
-        viewerCount: viewerCount ?? this.viewerCount,
-        gameName: gameName,
-        coverUrl: coverUrl,
-        ageRestricted: ageRestricted,
-        streamerDisplayName: streamerDisplayName,
-        streamerUsername: streamerUsername,
-        streamerAvatar: streamerAvatar,
-        streamerVerified: streamerVerified,
-        ended: ended ?? this.ended,
-      );
+    id: id,
+    roomName: roomName,
+    streamerId: streamerId,
+    title: title,
+    description: description,
+    category: category,
+    hashtags: hashtags,
+    privacy: privacy,
+    status: status,
+    startedAt: startedAt,
+    viewerCount: viewerCount ?? this.viewerCount,
+    gameName: gameName,
+    coverUrl: coverUrl,
+    ageRestricted: ageRestricted,
+    liveType: liveType,
+    rtmpEnabled: rtmpEnabled,
+    streamerDisplayName: streamerDisplayName,
+    streamerUsername: streamerUsername,
+    streamerAvatar: streamerAvatar,
+    streamerVerified: streamerVerified,
+    ended: ended ?? this.ended,
+  );
 }
 
 class LiveChatMessage {
@@ -152,10 +159,7 @@ class LiveChatMessage {
     this.mine = false,
   });
 
-  factory LiveChatMessage.fromJson(
-    Map<String, dynamic> json, {
-    String? myId,
-  }) {
+  factory LiveChatMessage.fromJson(Map<String, dynamic> json, {String? myId}) {
     final sender = json['sender'];
     return LiveChatMessage(
       id: json['id'] as String,
@@ -164,19 +168,16 @@ class LiveChatMessage {
       message: json['message'] as String? ?? '',
       createdAt:
           DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
-              DateTime.now(),
+          DateTime.now(),
       editedAt: json['edited_at'] is DateTime
           ? (json['edited_at'] as DateTime).toLocal()
           : DateTime.tryParse(json['edited_at']?.toString() ?? '')?.toLocal(),
       senderDisplayName: sender is Map
-          ? (sender['display_name'] as String? ??
-              (json['username'] as String?))
+          ? (sender['display_name'] as String? ?? (json['username'] as String?))
           : (json['username'] as String?),
       senderUsername: sender is Map ? sender['username'] as String? : null,
-      senderAvatar:
-          sender is Map ? sender['avatar_url'] as String? : null,
-      senderVerified:
-          sender is Map ? sender['is_verified'] == true : false,
+      senderAvatar: sender is Map ? sender['avatar_url'] as String? : null,
+      senderVerified: sender is Map ? sender['is_verified'] == true : false,
       mine: myId != null && json['user_id'] == myId,
     );
   }
@@ -188,20 +189,19 @@ class LiveChatMessage {
     String? senderAvatar,
     bool? senderVerified,
     bool? mine,
-  }) =>
-      LiveChatMessage(
-        id: id,
-        liveId: liveId,
-        userId: userId,
-        message: message ?? this.message,
-        createdAt: createdAt,
-        editedAt: editedAt ?? this.editedAt,
-        senderDisplayName: senderDisplayName ?? this.senderDisplayName,
-        senderUsername: senderUsername,
-        senderAvatar: senderAvatar ?? this.senderAvatar,
-        senderVerified: senderVerified ?? this.senderVerified,
-        mine: mine ?? this.mine,
-      );
+  }) => LiveChatMessage(
+    id: id,
+    liveId: liveId,
+    userId: userId,
+    message: message ?? this.message,
+    createdAt: createdAt,
+    editedAt: editedAt ?? this.editedAt,
+    senderDisplayName: senderDisplayName ?? this.senderDisplayName,
+    senderUsername: senderUsername,
+    senderAvatar: senderAvatar ?? this.senderAvatar,
+    senderVerified: senderVerified ?? this.senderVerified,
+    mine: mine ?? this.mine,
+  );
 }
 
 class LiveGift {
@@ -263,7 +263,7 @@ class LiveRoomEvent {
       metadata: metadata,
       createdAt:
           DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
-              DateTime.now(),
+          DateTime.now(),
     );
   }
 }

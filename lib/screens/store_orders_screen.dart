@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/store_models.dart';
 import '../services/store_service.dart';
 import '../services/supabase_service.dart';
@@ -39,8 +40,7 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
 
   Future<void> _load() async {
     try {
-      final me =
-          SupabaseService.instance.client.auth.currentUser?.id ?? '';
+      final me = SupabaseService.instance.client.auth.currentUser?.id ?? '';
       final orders = await StoreService.instance.fetchOrders();
       final itemsMap = <String, List<StoreOrderItem>>{};
       for (final o in orders) {
@@ -58,24 +58,28 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
     }
   }
 
-  List<StoreOrder> get _bought => _orders.where((o) => o.userId == _meId).toList();
-  List<StoreOrder> get _sold => _orders.where((o) => o.sellerId == _meId).toList();
+  List<StoreOrder> get _bought =>
+      _orders.where((o) => o.userId == _meId).toList();
+  List<StoreOrder> get _sold =>
+      _orders.where((o) => o.sellerId == _meId).toList();
 
   Future<void> _setStatus(StoreOrder o, String status) async {
+    final l10n = AppLocalizations.of(context)!;
     try {
       await StoreService.instance.updateOrderStatus(o.id, status);
       _load();
     } catch (e) {
-      _snack('Erro: $e');
+      _snack(l10n.storeErrorGeneric(e));
     }
   }
 
   Future<void> _cancel(StoreOrder o) async {
+    final l10n = AppLocalizations.of(context)!;
     try {
       await StoreService.instance.cancelOrder(o.id);
       _load();
     } catch (e) {
-      _snack('Erro: $e');
+      _snack(l10n.storeErrorGeneric(e));
     }
   }
 
@@ -86,20 +90,23 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Pedidos',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.ordersTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         bottom: TabBar(
           controller: _tab,
           indicatorColor: _kAccent,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
-          tabs: const [
-            Tab(text: 'Compras'),
-            Tab(text: 'Vendas'),
+          tabs: [
+            Tab(text: l10n.ordersTabBought),
+            Tab(text: l10n.ordersTabSold),
           ],
         ),
       ),
@@ -108,29 +115,31 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
           : TabBarView(
               controller: _tab,
               children: [
-                _list(_bought, isSold: false),
-                _list(_sold, isSold: true),
+                _list(l10n, _bought, isSold: false),
+                _list(l10n, _sold, isSold: true),
               ],
             ),
     );
   }
 
-  Widget _list(List<StoreOrder> list, {required bool isSold}) {
+  Widget _list(
+    AppLocalizations l10n,
+    List<StoreOrder> list, {
+    required bool isSold,
+  }) {
     if (list.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              isSold
-                  ? Icons.storefront_outlined
-                  : Icons.receipt_long_outlined,
+              isSold ? Icons.storefront_outlined : Icons.receipt_long_outlined,
               color: Colors.white24,
               size: 52,
             ),
             const SizedBox(height: 12),
             Text(
-              isSold ? 'Você ainda não tem vendas' : 'Você ainda não comprou nada',
+              isSold ? l10n.ordersNoSales : l10n.ordersNoPurchases,
               style: const TextStyle(color: Colors.white54),
             ),
           ],
@@ -143,23 +152,27 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: list.length,
-        itemBuilder: (context, i) => _orderCard(list[i], isSold: isSold),
+        itemBuilder: (context, i) => _orderCard(l10n, list[i], isSold: isSold),
       ),
     );
   }
 
-  Widget _orderCard(StoreOrder o, {required bool isSold}) {
+  Widget _orderCard(
+    AppLocalizations l10n,
+    StoreOrder o, {
+    required bool isSold,
+  }) {
     final items = _items[o.id] ?? const <StoreOrderItem>[];
     final otherName = o.buyerDisplayName.isNotEmpty
         ? o.buyerDisplayName
         : o.buyerUsername.isNotEmpty
-            ? '@${o.buyerUsername}'
-            : '';
+        ? '@${o.buyerUsername}'
+        : '';
     final sellerName = o.sellerDisplayName.isNotEmpty
         ? o.sellerDisplayName
         : o.sellerUsername.isNotEmpty
-            ? '@${o.sellerUsername}'
-            : '';
+        ? '@${o.sellerUsername}'
+        : '';
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -172,44 +185,52 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
         children: [
           Row(
             children: [
-              _statusChip(o.status),
+              _statusChip(l10n, o.status),
               const Spacer(),
               Text(
-                _dateLabel(o.createdAt),
+                _dateLabel(l10n, o.createdAt),
                 style: const TextStyle(color: Colors.white38, fontSize: 12),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          ...items.map((it) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${it.quantity}× ${it.title}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 13),
-                      ),
+          ...items.map(
+            (it) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${it.quantity}× ${it.title}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
                     ),
-                    Text(
-                      formatPrice(it.unitPrice * it.quantity),
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-              )),
+                  ),
+                  Text(
+                    formatPrice(it.unitPrice * it.quantity),
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ),
           const Divider(color: Color(0xFF2A2740), height: 18),
           Row(
             children: [
               Expanded(
                 child: Text(
                   isSold
-                      ? 'Comprador: ${otherName.isEmpty ? o.userId.substring(0, 8) : otherName}'
-                      : 'Vendedor: ${sellerName.isEmpty ? o.sellerId.substring(0, 8) : sellerName}',
+                      ? l10n.orderBuyerLabel(
+                          otherName.isEmpty
+                              ? o.userId.substring(0, 8)
+                              : otherName,
+                        )
+                      : l10n.orderSellerLabel(
+                          sellerName.isEmpty
+                              ? o.sellerId.substring(0, 8)
+                              : sellerName,
+                        ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white54, fontSize: 12),
@@ -217,9 +238,12 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
               ),
               const Spacer(),
               Text(
-                'Total ${formatPrice(o.total)}',
+                l10n.ordersTotalPrefix(formatPrice(o.total)),
                 style: const TextStyle(
-                    color: _kAccent, fontWeight: FontWeight.w800, fontSize: 14),
+                  color: _kAccent,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
               ),
             ],
           ),
@@ -228,15 +252,17 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
             Wrap(
               spacing: 8,
               children: _statusActions(o)
-                  .map((s) => OutlinedButton(
-                        onPressed: () => _setStatus(o, s),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(color: _kAccent),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        child: Text(kStoreOrderStatusLabel[s] ?? s),
-                      ))
+                  .map(
+                    (s) => OutlinedButton(
+                      onPressed: () => _setStatus(o, s),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: _kAccent),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: Text(_statusLabel(l10n, s)),
+                    ),
+                  )
                   .toList(),
             ),
           ] else if (o.cancellable) ...[
@@ -244,9 +270,9 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
-                onPressed: () => _confirmCancel(o),
+                onPressed: () => _confirmCancel(l10n, o),
                 icon: const Icon(Icons.cancel_outlined, size: 18),
-                label: const Text('Cancelar pedido'),
+                label: Text(l10n.cancelOrderButton),
                 style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
               ),
             ),
@@ -268,26 +294,31 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
     return out;
   }
 
-  Future<void> _confirmCancel(StoreOrder o) async {
+  Future<void> _confirmCancel(AppLocalizations l10n, StoreOrder o) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF17151F),
-        title: const Text('Cancelar pedido?',
-            style: TextStyle(color: Colors.white)),
-        content: const Text(
-          'O pedido será cancelado e o estoque devolvido.',
-          style: TextStyle(color: Colors.white70),
+        title: Text(
+          l10n.cancelOrderTitle,
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          l10n.cancelOrderBody,
+          style: const TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Voltar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.back,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            child: const Text('Cancelar'),
+            child: Text(l10n.cancel),
           ),
         ],
       ),
@@ -295,7 +326,7 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
     if (ok == true) _cancel(o);
   }
 
-  Widget _statusChip(String status) {
+  Widget _statusChip(AppLocalizations l10n, String status) {
     final color = switch (status) {
       'concluido' => const Color(0xFF4CAF50),
       'cancelado' => Colors.redAccent,
@@ -310,19 +341,31 @@ class _StoreOrdersScreenState extends State<StoreOrdersScreen>
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        kStoreOrderStatusLabel[status] ?? status,
+        _statusLabel(l10n, status),
         style: TextStyle(
-            color: color, fontWeight: FontWeight.w700, fontSize: 12),
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
       ),
     );
   }
 
-  String _dateLabel(DateTime d) {
+  String _statusLabel(AppLocalizations l10n, String status) => switch (status) {
+    'pendente' => l10n.orderStatusPending,
+    'pago' => l10n.orderStatusPaid,
+    'enviado' => l10n.orderStatusShipped,
+    'concluido' => l10n.orderStatusCompleted,
+    'cancelado' => l10n.orderStatusCancelled,
+    _ => status,
+  };
+
+  String _dateLabel(AppLocalizations l10n, DateTime d) {
     final n = DateTime.now();
     if (d.year == n.year && d.month == n.month && d.day == n.day) {
       final h = d.hour.toString().padLeft(2, '0');
       final m = d.minute.toString().padLeft(2, '0');
-      return 'Hoje $h:$m';
+      return '${l10n.todayLabel} $h:$m';
     }
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
   }

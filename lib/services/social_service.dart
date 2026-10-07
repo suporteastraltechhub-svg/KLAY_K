@@ -23,12 +23,12 @@ class SearchResult {
   });
 
   Map<String, dynamic> toMap() => {
-        'type': type,
-        'id': id,
-        'title': title,
-        'subtitle': subtitle,
-        'avatar': avatarUrl,
-      };
+    'type': type,
+    'id': id,
+    'title': title,
+    'subtitle': subtitle,
+    'avatar': avatarUrl,
+  };
 }
 
 /// Hashtag em tendência com a contagem real de posts.
@@ -58,15 +58,15 @@ class CollectionItem {
   });
 
   factory CollectionItem.fromJson(Map<String, dynamic> json) => CollectionItem(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        description: json['description'] as String? ?? '',
-        coverUrl: json['cover_url'] as String?,
-        isPublic: json['is_public'] as bool? ?? false,
-        createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '')
-                ?.toLocal() ??
-            DateTime.now(),
-      );
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    description: json['description'] as String? ?? '',
+    coverUrl: json['cover_url'] as String?,
+    isPublic: json['is_public'] as bool? ?? false,
+    createdAt:
+        DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
+        DateTime.now(),
+  );
 }
 
 /// Estatísticas agregadas do criador (painel do criador).
@@ -90,14 +90,14 @@ class CreatorStats {
   });
 
   factory CreatorStats.fromJson(Map<String, dynamic> json) => CreatorStats(
-        followersCount: (json['followers_count'] as num?)?.toInt() ?? 0,
-        followingCount: (json['following_count'] as num?)?.toInt() ?? 0,
-        postsCount: (json['posts_count'] as num?)?.toInt() ?? 0,
-        totalLikes: (json['total_likes'] as num?)?.toInt() ?? 0,
-        totalComments: (json['total_comments'] as num?)?.toInt() ?? 0,
-        totalViews: (json['total_views'] as num?)?.toInt() ?? 0,
-        totalLiveViews: (json['total_live_views'] as num?)?.toInt() ?? 0,
-      );
+    followersCount: (json['followers_count'] as num?)?.toInt() ?? 0,
+    followingCount: (json['following_count'] as num?)?.toInt() ?? 0,
+    postsCount: (json['posts_count'] as num?)?.toInt() ?? 0,
+    totalLikes: (json['total_likes'] as num?)?.toInt() ?? 0,
+    totalComments: (json['total_comments'] as num?)?.toInt() ?? 0,
+    totalViews: (json['total_views'] as num?)?.toInt() ?? 0,
+    totalLiveViews: (json['total_live_views'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// Conquista (catálogo).
@@ -122,17 +122,19 @@ class Achievement {
     this.unlocked = false,
   });
 
-  factory Achievement.fromJson(Map<String, dynamic> json, {bool unlocked = false}) =>
-      Achievement(
-        id: json['id'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        description: json['description'] as String? ?? '',
-        icon: json['icon'] as String? ?? '',
-        xp: (json['xp'] as num?)?.toInt() ?? 0,
-        conditionType: json['condition_type'] as String? ?? 'manual',
-        conditionValue: (json['condition_value'] as num?)?.toInt() ?? 0,
-        unlocked: unlocked,
-      );
+  factory Achievement.fromJson(
+    Map<String, dynamic> json, {
+    bool unlocked = false,
+  }) => Achievement(
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    description: json['description'] as String? ?? '',
+    icon: json['icon'] as String? ?? '',
+    xp: (json['xp'] as num?)?.toInt() ?? 0,
+    conditionType: json['condition_type'] as String? ?? 'manual',
+    conditionValue: (json['condition_value'] as num?)?.toInt() ?? 0,
+    unlocked: unlocked,
+  );
 }
 
 /// Missão (diária/semanal) com o progresso real do usuário no período.
@@ -199,9 +201,13 @@ class LevelProgress {
     if (rawMissions is List) {
       for (final m in rawMissions) {
         if (m is Map) {
-          missions.add(MissionProgress.fromJson(
-            Map<String, dynamic>.from(m.map((k, v) => MapEntry(k.toString(), v))),
-          ));
+          missions.add(
+            MissionProgress.fromJson(
+              Map<String, dynamic>.from(
+                m.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          );
         }
       }
     }
@@ -251,19 +257,20 @@ class LevelRankEntry {
     this.isVerified = false,
   });
 
-  String get name =>
-      displayName.isNotEmpty ? displayName : (username.isNotEmpty ? username : 'Usuário');
+  String get name => displayName.isNotEmpty
+      ? displayName
+      : (username.isNotEmpty ? username : 'Usuário');
 
   factory LevelRankEntry.fromJson(Map<String, dynamic> json) => LevelRankEntry(
-        rank: (json['rank'] as num?)?.toInt() ?? 0,
-        userId: json['user_id']?.toString() ?? '',
-        username: json['username']?.toString() ?? '',
-        displayName: json['display_name']?.toString() ?? '',
-        avatarUrl: json['avatar_url']?.toString(),
-        level: (json['level'] as num?)?.toInt() ?? 1,
-        xpTotal: (json['xp_total'] as num?)?.toInt() ?? 0,
-        isVerified: json['is_verified'] == true,
-      );
+    rank: (json['rank'] as num?)?.toInt() ?? 0,
+    userId: json['user_id']?.toString() ?? '',
+    username: json['username']?.toString() ?? '',
+    displayName: json['display_name']?.toString() ?? '',
+    avatarUrl: json['avatar_url']?.toString(),
+    level: (json['level'] as num?)?.toInt() ?? 1,
+    xpTotal: (json['xp_total'] as num?)?.toInt() ?? 0,
+    isVerified: json['is_verified'] == true,
+  );
 }
 
 /// Entrada do ranking de missões (RPC `mission_ranking`): XP de missões primeiro.
@@ -288,8 +295,9 @@ class MissionRankEntry {
     this.isVerified = false,
   });
 
-  String get name =>
-      displayName.isNotEmpty ? displayName : (username.isNotEmpty ? username : 'Usuário');
+  String get name => displayName.isNotEmpty
+      ? displayName
+      : (username.isNotEmpty ? username : 'Usuário');
 
   factory MissionRankEntry.fromJson(Map<String, dynamic> json) =>
       MissionRankEntry(
@@ -320,7 +328,10 @@ class SocialService {
 
   /// Busca combinada: usuários, vídeos (posts), hashtags e lives.
   /// `scope` limita: 'all' | 'user' | 'post' | 'hashtag' | 'live'.
-  Future<List<SearchResult>> search(String query, {String scope = 'all'}) async {
+  Future<List<SearchResult>> search(
+    String query, {
+    String scope = 'all',
+  }) async {
     if (query.trim().isEmpty) return const [];
     final q = query.trim().toLowerCase();
     final out = <SearchResult>[];
@@ -334,16 +345,19 @@ class SocialService {
             .limit(20);
         for (final row in (res as List).whereType<Map>()) {
           final m = Map<String, dynamic>.from(row);
-          out.add(SearchResult(
-            type: 'user',
-            id: m['id']?.toString() ?? '',
-            title: m['display_name']?.toString() ??
-                m['username']?.toString() ??
-                'Usuário',
-            subtitle: m['username']?.toString() ?? '',
-            avatarUrl: m['avatar_url']?.toString(),
-            isVerified: m['is_verified'] == true,
-          ));
+          out.add(
+            SearchResult(
+              type: 'user',
+              id: m['id']?.toString() ?? '',
+              title:
+                  m['display_name']?.toString() ??
+                  m['username']?.toString() ??
+                  'Usuário',
+              subtitle: m['username']?.toString() ?? '',
+              avatarUrl: m['avatar_url']?.toString(),
+              isVerified: m['is_verified'] == true,
+            ),
+          );
         }
       } catch (_) {}
     }
@@ -360,13 +374,15 @@ class SocialService {
               .limit(20);
           for (final row in (res as List).whereType<Map>()) {
             final m = Map<String, dynamic>.from(row);
-            out.add(SearchResult(
-              type: 'post',
-              id: m['id']?.toString() ?? '',
-              title: m['description']?.toString() ?? 'Vídeo',
-              subtitle: 'Vídeo',
-              avatarUrl: m['cover_url']?.toString(),
-            ));
+            out.add(
+              SearchResult(
+                type: 'post',
+                id: m['id']?.toString() ?? '',
+                title: m['description']?.toString() ?? 'Vídeo',
+                subtitle: 'Vídeo',
+                avatarUrl: m['cover_url']?.toString(),
+              ),
+            );
           }
         } else {
           final res = await _db
@@ -376,13 +392,15 @@ class SocialService {
               .limit(20);
           for (final row in (res as List).whereType<Map>()) {
             final m = Map<String, dynamic>.from(row);
-            out.add(SearchResult(
-              type: 'post',
-              id: m['id']?.toString() ?? '',
-              title: m['description']?.toString() ?? 'Vídeo',
-              subtitle: 'Vídeo',
-              avatarUrl: m['cover_url']?.toString(),
-            ));
+            out.add(
+              SearchResult(
+                type: 'post',
+                id: m['id']?.toString() ?? '',
+                title: m['description']?.toString() ?? 'Vídeo',
+                subtitle: 'Vídeo',
+                avatarUrl: m['cover_url']?.toString(),
+              ),
+            );
           }
         }
       } catch (_) {}
@@ -393,10 +411,7 @@ class SocialService {
       // Ignora o '#': a coluna posts.hashtags guarda as tags sem o prefixo.
       final hq = q.replaceAll('#', '').trim();
       try {
-        final res = await _db
-            .from('posts')
-            .select('hashtags')
-            .limit(300);
+        final res = await _db.from('posts').select('hashtags').limit(300);
         final seen = <String>{};
         for (final row in (res as List).whereType<Map>()) {
           final tags = row['hashtags'];
@@ -404,12 +419,14 @@ class SocialService {
             for (final tag in tags.whereType<String>()) {
               final lower = tag.toLowerCase();
               if (lower.contains(hq) && seen.add(lower)) {
-                out.add(SearchResult(
-                  type: 'hashtag',
-                  id: lower,
-                  title: '#$lower',
-                  subtitle: 'Hashtag',
-                ));
+                out.add(
+                  SearchResult(
+                    type: 'hashtag',
+                    id: lower,
+                    title: '#$lower',
+                    subtitle: 'Hashtag',
+                  ),
+                );
               }
             }
           }
@@ -427,12 +444,14 @@ class SocialService {
             .limit(10);
         for (final row in (res as List).whereType<Map>()) {
           final m = Map<String, dynamic>.from(row);
-          out.add(SearchResult(
-            type: 'live',
-            id: m['id']?.toString() ?? '',
-            title: m['title']?.toString() ?? 'Live',
-            subtitle: 'Ao vivo',
-          ));
+          out.add(
+            SearchResult(
+              type: 'live',
+              id: m['id']?.toString() ?? '',
+              title: m['title']?.toString() ?? 'Live',
+              subtitle: 'Ao vivo',
+            ),
+          );
         }
       } catch (_) {}
     }
@@ -448,10 +467,10 @@ class SocialService {
   Future<void> recordSearch(String query, {String resultType = 'all'}) async {
     if (query.trim().isEmpty) return;
     try {
-      await _db.rpc('record_search', params: {
-        'p_query': query.trim(),
-        'p_type': resultType,
-      });
+      await _db.rpc(
+        'record_search',
+        params: {'p_query': query.trim(), 'p_type': resultType},
+      );
     } catch (_) {}
   }
 
@@ -485,14 +504,19 @@ class SocialService {
   /// Hashtags mais usadas nos posts (contagem real).
   Future<List<HashtagTrend>> trendingHashtags({int limit = 20}) async {
     try {
-      final res = await _db.rpc('trending_hashtags', params: {'p_limit': limit});
+      final res = await _db.rpc(
+        'trending_hashtags',
+        params: {'p_limit': limit},
+      );
       final list = res as List;
       return list
           .whereType<Map>()
-          .map((r) => HashtagTrend(
-                tag: r['tag']?.toString() ?? '',
-                count: (r['cnt'] as num?)?.toInt() ?? 0,
-              ))
+          .map(
+            (r) => HashtagTrend(
+              tag: r['tag']?.toString() ?? '',
+              count: (r['cnt'] as num?)?.toInt() ?? 0,
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -512,11 +536,13 @@ class SocialService {
         .order('created_at', ascending: false);
     return (res as List)
         .whereType<Map>()
-        .map((r) => CollectionItem.fromJson(
-              Map<String, dynamic>.from(
-                r.map((k, v) => MapEntry(k.toString(), v)),
-              ),
-            ))
+        .map(
+          (r) => CollectionItem.fromJson(
+            Map<String, dynamic>.from(
+              r.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          ),
+        )
         .toList();
   }
 
@@ -546,11 +572,14 @@ class SocialService {
   Future<void> addPostToCollection(String collectionId, String postId) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('collection_posts').insert({
-        'collection_id': collectionId,
-        'post_id': postId,
-        'user_id': user.id,
-      }).then((_) {});
+      await _db
+          .from('collection_posts')
+          .insert({
+            'collection_id': collectionId,
+            'post_id': postId,
+            'user_id': user.id,
+          })
+          .then((_) {});
     } on PostgrestException catch (e) {
       if (e.code != '23505') rethrow;
     }
@@ -632,11 +661,13 @@ class SocialService {
         .inFilter('id', postIds);
     return (posts as List)
         .whereType<Map>()
-        .map((row) => FeedPost.fromJson(
-              Map<String, dynamic>.from(
-                row.map((k, v) => MapEntry(k.toString(), v)),
-              ),
-            ))
+        .map(
+          (row) => FeedPost.fromJson(
+            Map<String, dynamic>.from(
+              row.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          ),
+        )
         .toList()
       ..sort((a, b) => postIds.indexOf(a.id).compareTo(postIds.indexOf(b.id)));
   }
@@ -680,10 +711,10 @@ class SocialService {
   Future<void> muteUser(String userId) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('muted_users').insert({
-        'muter_id': user.id,
-        'muted_id': userId,
-      }).then((_) {});
+      await _db
+          .from('muted_users')
+          .insert({'muter_id': user.id, 'muted_id': userId})
+          .then((_) {});
     } on PostgrestException catch (e) {
       if (e.code != '23505') rethrow;
     }
@@ -744,14 +775,17 @@ class SocialService {
   }) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('moderation_actions').insert({
-        'live_id': liveId,
-        'post_id': postId,
-        'comment_id': commentId,
-        'actor_id': user.id,
-        'action': action,
-        'reason': reason,
-      }).then((_) {});
+      await _db
+          .from('moderation_actions')
+          .insert({
+            'live_id': liveId,
+            'post_id': postId,
+            'comment_id': commentId,
+            'actor_id': user.id,
+            'action': action,
+            'reason': reason,
+          })
+          .then((_) {});
     } catch (_) {}
   }
 
@@ -793,24 +827,27 @@ class SocialService {
     return RegExp(r'^[0-9a-fA-F]{32}$').hasMatch(s);
   }
 
-  Future<void> liveModBan(String liveId, String userId, {String reason = ''}) async {
+  Future<void> liveModBan(
+    String liveId,
+    String userId, {
+    String reason = '',
+  }) async {
     await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.rpc('live_mod_ban', params: {
-        'p_live_id': liveId,
-        'p_user_id': userId,
-        'p_reason': reason,
-      });
+      await _db.rpc(
+        'live_mod_ban',
+        params: {'p_live_id': liveId, 'p_user_id': userId, 'p_reason': reason},
+      );
     } catch (_) {}
   }
 
   Future<void> liveModUnban(String liveId, String userId) async {
     await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.rpc('live_mod_unban', params: {
-        'p_live_id': liveId,
-        'p_user_id': userId,
-      });
+      await _db.rpc(
+        'live_mod_unban',
+        params: {'p_live_id': liveId, 'p_user_id': userId},
+      );
     } catch (_) {}
   }
 
@@ -822,22 +859,25 @@ class SocialService {
   }) async {
     await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.rpc('live_mod_mute', params: {
-        'p_live_id': liveId,
-        'p_user_id': userId,
-        'p_minutes': minutes,
-        'p_reason': reason,
-      });
+      await _db.rpc(
+        'live_mod_mute',
+        params: {
+          'p_live_id': liveId,
+          'p_user_id': userId,
+          'p_minutes': minutes,
+          'p_reason': reason,
+        },
+      );
     } catch (_) {}
   }
 
   Future<void> liveModUnmute(String liveId, String userId) async {
     await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.rpc('live_mod_unmute', params: {
-        'p_live_id': liveId,
-        'p_user_id': userId,
-      });
+      await _db.rpc(
+        'live_mod_unmute',
+        params: {'p_live_id': liveId, 'p_user_id': userId},
+      );
     } catch (_) {}
   }
 
@@ -896,8 +936,10 @@ class SocialService {
   Future<List<Map<String, dynamic>>> modListReports({String? status}) async {
     await SupabaseService.instance.ensureAuthenticated();
     try {
-      final res = await _db
-          .rpc('mod_list_reports', params: {'p_status': status});
+      final res = await _db.rpc(
+        'mod_list_reports',
+        params: {'p_status': status},
+      );
       return List<Map<String, dynamic>>.from(
         (res as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
       );
@@ -913,11 +955,10 @@ class SocialService {
   }) async {
     await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.rpc('mod_update_report', params: {
-        'p_report_id': reportId,
-        'p_status': status,
-        'p_note': note,
-      });
+      await _db.rpc(
+        'mod_update_report',
+        params: {'p_report_id': reportId, 'p_status': status, 'p_note': note},
+      );
     } catch (_) {}
   }
 
@@ -940,11 +981,14 @@ class SocialService {
   }) async {
     await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.rpc('mod_add_spam_rule', params: {
-        'p_pattern': pattern,
-        'p_rule_type': ruleType,
-        'p_scope': scope,
-      });
+      await _db.rpc(
+        'mod_add_spam_rule',
+        params: {
+          'p_pattern': pattern,
+          'p_rule_type': ruleType,
+          'p_scope': scope,
+        },
+      );
     } catch (_) {}
   }
 
@@ -987,7 +1031,10 @@ class SocialService {
           .from('follows')
           .select('id')
           .eq('follower_id', userId);
-      final posts = await _db.from('posts').select('likes_count, comments_count').eq('user_id', userId);
+      final posts = await _db
+          .from('posts')
+          .select('likes_count, comments_count')
+          .eq('user_id', userId);
       final views = await _db
           .from('user_history')
           .select('id')
@@ -1049,29 +1096,34 @@ class SocialService {
           .whereType<Map>()
           .map((r) => r['achievement_id']?.toString() ?? '')
           .toSet();
-      final res = await _db.from('achievements').select().order('xp', ascending: true);
+      final res = await _db
+          .from('achievements')
+          .select()
+          .order('xp', ascending: true);
       return (res as List)
           .whereType<Map>()
-          .map((row) => Achievement.fromJson(
-                Map<String, dynamic>.from(
-                  row.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-                unlocked: unlocked.contains(row['id']?.toString()),
-              ))
+          .map(
+            (row) => Achievement.fromJson(
+              Map<String, dynamic>.from(
+                row.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+              unlocked: unlocked.contains(row['id']?.toString()),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
     }
   }
 
-/// Concede uma conquista quando a condição é atendida (idempotente).
+  /// Concede uma conquista quando a condição é atendida (idempotente).
   Future<void> unlockAchievement(String achievementId) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('user_achievements').insert({
-        'user_id': user.id,
-        'achievement_id': achievementId,
-      }).then((_) {});
+      await _db
+          .from('user_achievements')
+          .insert({'user_id': user.id, 'achievement_id': achievementId})
+          .then((_) {});
     } catch (_) {}
   }
 
@@ -1098,11 +1150,13 @@ class SocialService {
       final res = await _db.rpc('level_ranking', params: {'p_limit': limit});
       return (res as List)
           .whereType<Map>()
-          .map((r) => LevelRankEntry.fromJson(
-                Map<String, dynamic>.from(
-                  r.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-              ))
+          .map(
+            (r) => LevelRankEntry.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -1116,11 +1170,13 @@ class SocialService {
       final res = await _db.rpc('mission_ranking', params: {'p_limit': limit});
       return (res as List)
           .whereType<Map>()
-          .map((r) => MissionRankEntry.fromJson(
-                Map<String, dynamic>.from(
-                  r.map((k, v) => MapEntry(k.toString(), v)),
-                ),
-              ))
+          .map(
+            (r) => MissionRankEntry.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -1134,7 +1190,8 @@ class SocialService {
     try {
       final res = await _db.rpc('rising_creators', params: {'p_limit': limit});
       final rows = res as List? ?? const [];
-      final creatorIds = rows.whereType<Map>()
+      final creatorIds = rows
+          .whereType<Map>()
           .map((r) => r['creator_id']?.toString() ?? '')
           .where((id) => id.isNotEmpty)
           .toList();
@@ -1176,7 +1233,10 @@ class SocialService {
           .map((r) => r['achievement_id']?.toString() ?? '')
           .toList();
       if (ids.isEmpty) return 1;
-      final res = await _db.from('achievements').select('xp').inFilter('id', ids);
+      final res = await _db
+          .from('achievements')
+          .select('xp')
+          .inFilter('id', ids);
       var xp = 0;
       for (final row in (res as List).whereType<Map>()) {
         xp += (row['xp'] as num?)?.toInt() ?? 0;

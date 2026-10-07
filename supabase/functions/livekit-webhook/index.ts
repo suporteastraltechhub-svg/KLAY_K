@@ -1,22 +1,12 @@
+import { WebhookReceiver } from "npm:livekit-server-sdk@^2.9.0";
 import { createClient } from "npm:@supabase/supabase-js@^2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 
-async function verifySignature(rawBody: string, signature: string | null): Promise<boolean> {
-  if (!signature) return false;
-  const secret = Deno.env.get("LIVEKIT_API_SECRET");
-  if (!secret) return false;
-
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
+function buildReceiver(): WebhookReceiver {
+  return new WebhookReceiver(
+    Deno.env.get("LIVEKIT_API_KEY") ?? "",
+    Deno.env.get("LIVEKIT_API_SECRET") ?? "",
   );
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(rawBody));
-  const expected = btoa(String.fromCharCode(...new Uint8Array(sig)));
-  return expected === signature;
 }
 
 function isUuid(value: unknown): boolean {
@@ -54,9 +44,20 @@ Deno.serve(async (req) => {
   }
 
   const rawBody = await req.text();
-  const signature = req.headers.get("x-livekit-signature");
-  const valid = await verifySignature(rawBody, signature);
-  if (!valid) {
+  const authHeader = req.headers.get("authorization") ?? "";
+
+  // O LiveKit Cloud assina o request com um JWT no header Authorization
+  // (HS256, claim "sha256" = hash do corpo em base64). Sem a validação
+  // correta qualquer webhook legítimo era rejeitado (401) e as lives
+  // encerradas nunca viravam LIVE_ENDED no banco ("lives fantasmas").
+  let webhookEvent;
+  try {
+    webhookEvent = await buildReceiver().receive(rawBody, authHeader);
+  } catch (e) {
+    console.error(
+      "livekit-webhook: signature verification failed:",
+      e instanceof Error ? e.message : String(e),
+    );
     return json({ error: "invalid_signature" }, 401);
   }
 
@@ -64,17 +65,10 @@ Deno.serve(async (req) => {
   const respond200 = () => json({ ok: true });
 
   try {
-    const payload = JSON.parse(rawBody) as {
-      event?: string;
-      room?: { name?: string; sid?: string };
-      participant?: { identity?: string };
-      participantKind?: string;
-    };
-
-    const eventType = mapEvent(payload.event ?? "");
+    const eventType = mapEvent(webhookEvent.event);
     if (!eventType) return respond200();
 
-    const roomName = payload.room?.name;
+    const roomName = webhookEvent.room?.name;
     if (!roomName) return respond200();
 
     const serviceClient = createClient(
@@ -84,7 +78,7 @@ Deno.serve(async (req) => {
 
     const { data: live } = await serviceClient
       .from("lives")
-      .select("id, status")
+      .select("id, status, streamer_id")
       .eq("room_name", roomName)
       .maybeSingle();
 
@@ -106,11 +100,8 @@ Deno.serve(async (req) => {
         .eq("id", live.id);
     }
 
-    const identity = payload.participant?.identity ?? "";
-    if (
-      identity.startsWith("bot") ||
-      identity.startsWith("klayk")
-    ) {
+    const identity = webhookEvent.participant?.identity ?? "";
+    if (identity.startsWith("bot") || identity.startsWith("klayk")) {
       return respond200();
     }
 
@@ -129,15 +120,46 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { error } = await serviceClient
-      .from("live_events")
-      .insert({
-        live_id: live.id,
-        event_type: eventType,
-        user_id: userId,
-        username,
-        metadata: {},
-      });
+    if (
+      userId !== null &&
+      (eventType === "USER_JOINED" || eventType === "USER_LEFT")
+    ) {
+      let presenceError: { message: string } | null = null;
+      if (eventType === "USER_JOINED") {
+        const result = await serviceClient.from("live_participants").upsert(
+          {
+            live_id: live.id,
+            user_id: userId,
+            is_streamer: userId === live.streamer_id,
+            joined_at: new Date().toISOString(),
+            left_at: null,
+          },
+          { onConflict: "live_id,user_id" },
+        );
+        presenceError = result.error;
+      } else {
+        const result = await serviceClient
+          .from("live_participants")
+          .update({ left_at: new Date().toISOString() })
+          .eq("live_id", live.id)
+          .eq("user_id", userId);
+        presenceError = result.error;
+      }
+      if (presenceError) {
+        console.error(
+          "livekit-webhook: presence update error:",
+          presenceError.message,
+        );
+      }
+    }
+
+    const { error } = await serviceClient.from("live_events").insert({
+      live_id: live.id,
+      event_type: eventType,
+      user_id: userId,
+      username,
+      metadata: {},
+    });
 
     if (error) {
       console.error("livekit-webhook: event insert error:", error.message);

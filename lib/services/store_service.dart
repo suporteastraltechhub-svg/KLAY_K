@@ -125,9 +125,10 @@ class StoreService {
         .maybeSingle();
     if (existing != null) {
       final current = (existing as Map)['quantity'] as num? ?? 0;
-      await _client.from('store_cart_items').update({
-        'quantity': current.toInt() + quantity,
-      }).eq('id', existing['id']);
+      await _client
+          .from('store_cart_items')
+          .update({'quantity': current.toInt() + quantity})
+          .eq('id', existing['id']);
     } else {
       await _client.from('store_cart_items').insert({
         'user_id': me,
@@ -144,7 +145,8 @@ class StoreService {
     }
     await _client
         .from('store_cart_items')
-        .update({'quantity': quantity}).eq('id', itemId);
+        .update({'quantity': quantity})
+        .eq('id', itemId);
   }
 
   Future<void> removeFromCart(String itemId) async {
@@ -167,12 +169,17 @@ class StoreService {
     required String shippingPhone,
     required String shippingAddress,
   }) async {
-    final res = await _client.rpc('checkout_cart', params: {
-      'p_shipping_name': shippingName.trim(),
-      'p_shipping_phone': shippingPhone.trim(),
-      'p_shipping_address': shippingAddress.trim(),
-    });
-    final map = res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+    final res = await _client.rpc(
+      'checkout_cart',
+      params: {
+        'p_shipping_name': shippingName.trim(),
+        'p_shipping_phone': shippingPhone.trim(),
+        'p_shipping_address': shippingAddress.trim(),
+      },
+    );
+    final map = res is Map
+        ? Map<String, dynamic>.from(res)
+        : <String, dynamic>{};
     return (map['count'] as num?)?.toInt() ?? 0;
   }
 
@@ -203,17 +210,18 @@ class StoreService {
   }
 
   Future<bool> updateOrderStatus(String orderId, String status) async {
-    final ok = await _client.rpc('update_order_status', params: {
-      'p_order_id': orderId,
-      'p_status': status,
-    });
+    final ok = await _client.rpc(
+      'update_order_status',
+      params: {'p_order_id': orderId, 'p_status': status},
+    );
     return ok == true;
   }
 
   Future<bool> cancelOrder(String orderId) async {
-    final ok = await _client.rpc('cancel_order', params: {
-      'p_order_id': orderId,
-    });
+    final ok = await _client.rpc(
+      'cancel_order',
+      params: {'p_order_id': orderId},
+    );
     return ok == true;
   }
 
@@ -230,15 +238,20 @@ class StoreService {
     int stock = 0,
   }) async {
     final me = await _me();
-    final res = await _client.from('store_products').insert({
-      'seller_id': me,
-      'title': title.trim(),
-      'description': description.trim(),
-      'price': price,
-      if (categoryId != null && categoryId.isNotEmpty) 'category_id': categoryId,
-      'image_url': imageUrl,
-      'stock': stock,
-    }).select().single();
+    final res = await _client
+        .from('store_products')
+        .insert({
+          'seller_id': me,
+          'title': title.trim(),
+          'description': description.trim(),
+          'price': price,
+          if (categoryId != null && categoryId.isNotEmpty)
+            'category_id': categoryId,
+          'image_url': imageUrl,
+          'stock': stock,
+        })
+        .select()
+        .single();
     return StoreProduct.fromJson(Map<String, dynamic>.from(res as Map));
   }
 
@@ -252,19 +265,26 @@ class StoreService {
     required int stock,
     required bool isActive,
   }) async {
-    await _client.from('store_products').update({
-      'title': title.trim(),
-      'description': description.trim(),
-      'price': price,
-      if (categoryId != null && categoryId.isNotEmpty) 'category_id': categoryId,
-      'image_url': imageUrl,
-      'stock': stock,
-      'is_active': isActive,
-    }).eq('id', id);
+    await _client
+        .from('store_products')
+        .update({
+          'title': title.trim(),
+          'description': description.trim(),
+          'price': price,
+          if (categoryId != null && categoryId.isNotEmpty)
+            'category_id': categoryId,
+          'image_url': imageUrl,
+          'stock': stock,
+          'is_active': isActive,
+        })
+        .eq('id', id);
   }
 
   Future<void> toggleProductActive(String id, bool active) async {
-    await _client.from('store_products').update({'is_active': active}).eq('id', id);
+    await _client
+        .from('store_products')
+        .update({'is_active': active})
+        .eq('id', id);
   }
 
   Future<void> deleteProduct(String id) async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/post_models.dart';
 import '../services/social_service.dart';
 import '../theme/klayk_theme.dart';
@@ -42,20 +43,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _clear() async {
+    final l10n = AppLocalizations.of(context)!;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF17151F),
-        title: const Text('Limpar histórico?'),
-        content: const Text('Seu histórico de visualização será apagado.'),
+        title: Text(l10n.historyClearTitle),
+        content: Text(l10n.historyClearBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Limpar'),
+            child: Text(l10n.historyClearAction),
           ),
         ],
       ),
@@ -70,25 +75,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _clearing = false;
       _posts = const [];
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Histórico limpo.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(l10n.historyClearedSnack)));
   }
 
   void _openPost(FeedPost post) {
-    KlaykNav.push(
-      context,
-      VideoPreviewScreen(post: post),
-    );
+    KlaykNav.push(context, VideoPreviewScreen(post: post));
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: colors.bg,
       appBar: AppBar(
-        title: const Text('Histórico'),
+        title: Text(l10n.historyTitle),
         actions: [
           if (_posts.isNotEmpty)
             IconButton(
@@ -100,23 +103,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
       body: _loading
           ? const Center(child: KlaykLoader())
           : _posts.isEmpty
-              ? const KlaykEmptyState(
-                  icon: Icons.history_rounded,
-                  title: 'Nada por aqui ainda',
-                  message: 'Os vídeos que você assistir aparecem aqui.',
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _posts.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, i) =>
-                      _historyTile(_posts[i]),
-                ),
+          ? KlaykEmptyState(
+              icon: Icons.history_rounded,
+              title: l10n.historyEmptyTitle,
+              message: l10n.historyEmptyMsg,
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: _posts.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, i) => _historyTile(_posts[i]),
+            ),
     );
   }
 
   Widget _historyTile(FeedPost post) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return KlaykCard(
       padding: const EdgeInsets.all(10),
       onTap: () => _openPost(post),
@@ -150,7 +153,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 Text(
                   post.description.isNotEmpty
                       ? post.description
-                      : 'Vídeo',
+                      : l10n.historyVideo,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -161,13 +164,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.visibility_outlined,
-                        size: 14, color: Colors.white38),
+                    const Icon(
+                      Icons.visibility_outlined,
+                      size: 14,
+                      color: Colors.white38,
+                    ),
                     const SizedBox(width: 4),
                     Text(
-                      post.author?.displayName ?? 'Participante',
+                      post.author?.displayName ?? l10n.historyParticipant,
                       style: const TextStyle(
-                          fontSize: 12, color: Colors.white54),
+                        fontSize: 12,
+                        color: Colors.white54,
+                      ),
                     ),
                   ],
                 ),

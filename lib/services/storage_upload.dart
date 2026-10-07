@@ -31,7 +31,9 @@ Future<String> streamUploadFile({
   final total = await file.length();
   final client = HttpClient();
   try {
-    final request = await client.postUrl(_objectUri(supabaseUrl, bucket, objectPath));
+    final request = await client.postUrl(
+      _objectUri(supabaseUrl, bucket, objectPath),
+    );
     request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
     request.headers.set(HttpHeaders.contentTypeHeader, contentType);
     request.headers.set(HttpHeaders.cacheControlHeader, '3600');
@@ -82,7 +84,9 @@ Stream<List<int>> _progressOf(
     final pct = total <= 0 ? 100 : ((sent * 100) / total).floor();
     if (pct != lastPct) {
       lastPct = pct;
-      onProgress?.call(total <= 0 ? 1 : (sent / total).clamp(0.0, 1.0).toDouble());
+      onProgress?.call(
+        total <= 0 ? 1 : (sent / total).clamp(0.0, 1.0).toDouble(),
+      );
     }
     yield chunk;
   }

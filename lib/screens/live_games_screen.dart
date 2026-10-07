@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../models/klayk_live_models.dart';
 import '../services/content_service.dart';
+import '../services/klay_games_launcher.dart';
 import '../services/live_kit_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/content_actions.dart';
 import '../widgets/verified_badge.dart';
+import '../l10n/app_localizations.dart';
 import 'live_room_screen.dart';
 import 'profile/user_profile_screen.dart';
 import 'start_live_screen.dart';
@@ -54,10 +56,15 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
   String _activeCategory = 'Todos';
   static const String _all = 'Todos';
 
+  List<InstalledGame> _installed = [];
+  bool _installedLoading = true;
+  final TextEditingController _searchController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadInstalled();
     // Atualiza periodicamente o "ao vivo".
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _load());
   }
@@ -65,7 +72,37 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  List<RealLive> get _gameLives =>
+      _lives.where((l) => l.category.toLowerCase() == 'jogos').toList();
+
+  List<RealLive> get _filtered {
+    if (_activeCategory == _all) return _gameLives;
+    // Filtra pela categoria informada no nome do jogo (heurística de busca).
+    final query = _activeCategory.toLowerCase();
+    return _gameLives
+        .where(
+          (l) =>
+              (l.gameName?.toLowerCase().contains(query) ?? false) ||
+              l.title.toLowerCase().contains(query),
+        )
+        .toList();
+  }
+
+  List<RealLive> get _popular {
+    final sorted = [..._gameLives]
+      ..sort((a, b) => b.viewerCount.compareTo(a.viewerCount));
+    return sorted.take(8).toList();
+  }
+
+  /// Jogos instalados filtrados pela busca em tempo real.
+  List<InstalledGame> get _installedFiltered {
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isEmpty) return _installed;
+    return _installed.where((g) => g.label.toLowerCase().contains(q)).toList();
   }
 
   Future<void> _load() async {
@@ -83,7 +120,7 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
         if (!mounted) return;
         setState(() {
           _loading = false;
-          _error = 'Não foi possível carregar as lives de jogo.';
+          _error = AppLocalizations.of(context)!.gameLivesLoadFail;
         });
         return;
       }
@@ -95,42 +132,59 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
     });
   }
 
-  List<RealLive> get _gameLives =>
-      _lives.where((l) => l.category.toLowerCase() == 'jogos').toList();
-
-  List<RealLive> get _filtered {
-    if (_activeCategory == _all) return _gameLives;
-    // Filtra pela categoria informada no nome do jogo (heurística de busca).
-    final query = _activeCategory.toLowerCase();
-    return _gameLives
-        .where((l) =>
-            (l.gameName?.toLowerCase().contains(query) ?? false) ||
-            l.title.toLowerCase().contains(query))
-        .toList();
-  }
-
-  List<RealLive> get _popular {
-    final sorted = [..._gameLives]..sort((a, b) => b.viewerCount.compareTo(a.viewerCount));
-    return sorted.take(8).toList();
+  /// Carrega os jogos/apps instalados (ícone + nome) para a grade "Meus Jogos".
+  Future<void> _loadInstalled({bool forceRefresh = false}) async {
+    final apps = await KlayGames.instance.listInstalledGames(
+      forceRefresh: forceRefresh,
+    );
+    if (!mounted) return;
+    setState(() {
+      _installed = apps;
+      _installedLoading = false;
+    });
   }
 
   /// Ação principal: inicia uma nova Live de Jogo (captura de tela).
   Future<void> _startGameLive() async {
+    final l10n = AppLocalizations.of(context)!;
     if (!_db.isConfigured) {
-      _snack('Configure o Supabase para iniciar uma live real.');
+      _snack(l10n.configureSupabaseToStartLive);
       return;
     }
     // O StartLiveScreen já configura categoria Jogos; aqui forçamos a categoria
     // de jogo e o fluxo de captura de tela no LiveRoomScreen.
     final started = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => const StartLiveScreen(forceGame: true),
-      ),
+      MaterialPageRoute(builder: (_) => const StartLiveScreen(forceGame: true)),
     );
     if (started == true && mounted) _load();
   }
 
+  /// Inicia uma Live de Jogo a partir de um jogo instalado escolhido na grade:
+  /// pré-seleciona o jogo na configuração e repassa o package name para a sala
+  /// abrir o app quando a transmissão de tela entrar no ar.
+  Future<void> _startGameLiveFor(InstalledGame game) async {
+    final l10n = AppLocalizations.of(context)!;
+    if (!_db.isConfigured) {
+      _snack(l10n.configureSupabaseToStartLive);
+      return;
+    }
+    final started = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => StartLiveScreen(
+          forceGame: true,
+          initialGameName: game.label,
+          initialGamePackage: game.package,
+        ),
+      ),
+    );
+    if (started == true && mounted) {
+      _load();
+      _loadInstalled(forceRefresh: true);
+    }
+  }
+
   Future<void> _editLive(RealLive live) async {
+    final l10n = AppLocalizations.of(context)!;
     final res = await editLiveDialog(
       context,
       title: live.title,
@@ -150,40 +204,47 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
     if (!mounted) return;
     if (ok) {
       _load();
-      _snack('Live atualizada.');
+      _snack(l10n.liveUpdated);
     } else {
-      _snack('Não foi possível atualizar agora. Tente de novo.');
+      _snack(l10n.liveUpdateFail);
     }
   }
 
   Future<void> _deleteLive(RealLive live) async {
+    final l10n = AppLocalizations.of(context)!;
     final go = await confirmDeleteDialog(
       context,
-      title: 'Apagar live?',
-      message: 'A live e seu histórico (chat, presentes e eventos) serão '
-          'removidos permanentemente. Essa ação não pode ser desfeita.',
+      title: l10n.deleteLiveTitle,
+      message: l10n.deleteLiveBody,
     );
     if (!go || !mounted) return;
     try {
-      await ContentService.instance.deleteLive(live.id, coverUrl: live.coverUrl);
+      await ContentService.instance.deleteLive(
+        live.id,
+        coverUrl: live.coverUrl,
+      );
       if (!mounted) return;
       _load();
     } catch (_) {
       if (!mounted) return;
-      _snack('Não foi possível apagar a live.');
+      _snack(l10n.liveDeleteFail);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0A0812),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0A0812),
         automaticallyImplyLeading: false,
-        title: const Text(
-          '🎮 LIVE GAMES · Jogos ao Vivo',
-          style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.3),
+        title: Text(
+          l10n.liveGamesTitle,
+          style: const TextStyle(
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.3,
+          ),
         ),
         centerTitle: true,
       ),
@@ -198,6 +259,7 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
   }
 
   Widget _buildStartBanner() {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: FilledButton.icon(
@@ -206,12 +268,14 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
           backgroundColor: const Color(0xFFE11D48),
           foregroundColor: Colors.white,
           minimumSize: const Size.fromHeight(52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
         icon: const Icon(Icons.sensors_rounded),
-        label: const Text(
-          '🔴 INICIAR LIVE DE JOGO',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+        label: Text(
+          l10n.startGameLiveButton,
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
         ),
       ),
     );
@@ -228,9 +292,7 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final name = cats[index];
-          final emoji = index == 0
-              ? ''
-              : kGameCategories[index - 1].emoji;
+          final emoji = index == 0 ? '' : kGameCategories[index - 1].emoji;
           final selected = _activeCategory == name;
           return GestureDetector(
             onTap: () => setState(() => _activeCategory = name),
@@ -261,63 +323,222 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
   }
 
   Widget _buildBody() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6)));
+    final l10n = AppLocalizations.of(context)!;
+    if (_loading && _lives.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+      );
     }
     if (_error != null) {
-      return _ErrorView(message: _error!, onRetry: _load);
-    }
-    if (_gameLives.isEmpty) {
       return ListView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(vertical: 16),
         children: [
-          const SizedBox(height: 40),
-          const Icon(Icons.sports_esports_rounded,
-              color: Colors.white24, size: 72),
-          const SizedBox(height: 16),
-          const Text(
-            'Nenhuma live de jogo no momento',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white70, fontSize: 15),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Seja o primeiro a transmitir seu gameplay agora mesmo!',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white38, fontSize: 13),
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: _startGameLive,
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
-            icon: const Icon(Icons.sensors_rounded),
-            label: const Text('Iniciar Live de Jogo',
-                style: TextStyle(fontWeight: FontWeight.w700)),
-          ),
+          _installedSection(),
+          const SizedBox(height: 160),
+          _ErrorView(message: _error!, onRetry: _load),
         ],
       );
     }
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _sectionHeader('🔴 Ao Vivo Agora'),
-        _buildLivesList(_filtered),
-        if (_filtered.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              'Nenhuma live nesta categoria agora.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38),
+        _installedSection(),
+        if (_gameLives.isEmpty)
+          _emptyGamesState()
+        else ...[
+          _sectionHeader('🔴 ${l10n.liveNowTitle}'),
+          _buildLivesList(_filtered),
+          if (_filtered.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                l10n.noLivesInCategoryTitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white38),
+              ),
+            ),
+          _sectionHeader('🔥 ${l10n.giftPopular}'),
+          _buildPopularList(),
+          _sectionHeader('🏆 ${l10n.creatorRankingTitle}'),
+          _buildRanking(),
+          _sectionHeader('👤 ${l10n.gameCreatorsTitle}'),
+          _buildCreators(),
+        ],
+      ],
+    );
+  }
+
+  /// Grade "🎮 Meus Jogos": busca em tempo real + apps/jogos instalados.
+  /// Tocar num jogo inicia uma Live de Jogo com aquele jogo.
+  Widget _installedSection() {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '🎮 ${l10n.myInstalledGamesTitle}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (_installed.isNotEmpty)
+                IconButton(
+                  onPressed: () {
+                    setState(() => _installedLoading = true);
+                    _loadInstalled(forceRefresh: true);
+                  },
+                  icon: const Icon(
+                    Icons.refresh_rounded,
+                    color: Colors.white54,
+                    size: 20,
+                  ),
+                  tooltip: l10n.refresh,
+                  visualDensity: VisualDensity.compact,
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text(
+            l10n.installedGamesSubtitle,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (_) => setState(() {}),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            cursorColor: const Color(0xFF8B5CF6),
+            decoration: InputDecoration(
+              hintText: l10n.searchInstalledGamesHint,
+              hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: Colors.white54,
+                size: 20,
+              ),
+              suffixIcon: _searchController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {});
+                      },
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white54,
+                        size: 18,
+                      ),
+                    ),
+              filled: true,
+              fillColor: const Color(0xFF1C1C26),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 8,
+              ),
+              isDense: true,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Colors.white10),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Colors.white10),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0xFF8B5CF6)),
+              ),
             ),
           ),
-        _sectionHeader('🔥 Populares'),
-        _buildPopularList(),
-        _sectionHeader('🏆 Ranking de Criadores'),
-        _buildRanking(),
-        _sectionHeader('👤 Criadores de Jogos'),
-        _buildCreators(),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+          child: _buildInstalledGrid(),
+        ),
       ],
+    );
+  }
+
+  Widget _buildInstalledGrid() {
+    final l10n = AppLocalizations.of(context)!;
+    if (_installedLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.2,
+              color: Color(0xFF8B5CF6),
+            ),
+          ),
+        ),
+      );
+    }
+    final games = _installedFiltered;
+    if (games.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C26),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Column(
+          children: [
+            const Icon(
+              Icons.videogame_asset_off_rounded,
+              color: Colors.white24,
+              size: 32,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _searchController.text.trim().isEmpty
+                  ? l10n.noInstalledGamesTitle
+                  : l10n.noInstalledGamesTitle,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              l10n.noInstalledGamesSubtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 0.82,
+      ),
+      itemCount: games.length,
+      itemBuilder: (context, i) {
+        final game = games[i];
+        return _InstalledGameTile(
+          game: game,
+          onTap: () => _startGameLiveFor(game),
+        );
+      },
     );
   }
 
@@ -331,6 +552,46 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
           fontSize: 17,
           fontWeight: FontWeight.w900,
         ),
+      ),
+    );
+  }
+
+  Widget _emptyGamesState() {
+    final l10n = AppLocalizations.of(context)!;
+    return SizedBox(
+      height: 260,
+      child: Column(
+        children: [
+          const Icon(
+            Icons.sports_esports_rounded,
+            color: Colors.white24,
+            size: 64,
+          ),
+          const SizedBox(height: 14),
+          Text(
+            l10n.noGameLivesTitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70, fontSize: 15),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            l10n.noGameLivesSubtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white38, fontSize: 13),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: _startGameLive,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE11D48),
+            ),
+            icon: const Icon(Icons.sensors_rounded),
+            label: Text(
+              l10n.startGameLiveAction,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -393,10 +654,7 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
       child: Column(
         children: [
           for (var i = 0; i < _popular.length && i < 5; i++)
-            _RankingRow(
-              rank: i + 1,
-              live: _popular[i],
-            ),
+            _RankingRow(rank: i + 1, live: _popular[i]),
         ],
       ),
     );
@@ -427,8 +685,77 @@ class _LiveGamesScreenState extends State<LiveGamesScreen> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+}
+
+/// Tile de um jogo/app instalado na grade "Meus Jogos": ícone real do app
+/// (base64 do canal nativo) com fallback de letra e o nome abaixo. Tocar inicia
+/// uma Live de Jogo com esse jogo.
+class _InstalledGameTile extends StatelessWidget {
+  final InstalledGame game;
+  final VoidCallback onTap;
+  const _InstalledGameTile({required this.game, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final iconBytes = game.iconBytes;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            clipBehavior: Clip.antiAlias,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFF1C1C26),
+            ),
+            child: iconBytes != null
+                ? Image.memory(
+                    iconBytes,
+                    width: 56,
+                    height: 56,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, __, ___) => _letterFallback(),
+                  )
+                : _letterFallback(),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Text(
+              game.label,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _letterFallback() {
+    final letter = game.label.isEmpty ? '?' : game.label[0].toUpperCase();
+    return ColoredBox(
+      color: const Color(0xFF8B5CF6).withValues(alpha: 0.35),
+      child: Center(
+        child: Text(
+          letter,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -449,14 +776,14 @@ class _GameLiveCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final card = GestureDetector(
       onTap: () {
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => LiveRoomScreen(
               live: live,
-              role:
-                  _isOwner ? LiveRole.streamer : LiveRole.viewer,
+              role: _isOwner ? LiveRole.streamer : LiveRole.viewer,
               isGameLive: true,
             ),
           ),
@@ -471,7 +798,9 @@ class _GameLiveCard extends StatelessWidget {
             end: Alignment.bottomRight,
             colors: [Color(0xFF2A1B4D), Color(0xFF14142B)],
           ),
-          border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.4)),
+          border: Border.all(
+            color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
+          ),
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -482,7 +811,7 @@ class _GameLiveCard extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
-            Positioned(top: 8, left: 8, child: _liveBadge()),
+            Positioned(top: 8, left: 8, child: _liveBadge(context)),
             if (_isOwner || onEditLive != null || onDeleteLive != null)
               Positioned(
                 top: 4,
@@ -505,7 +834,9 @@ class _GameLiveCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w800),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -513,13 +844,19 @@ class _GameLiveCard extends StatelessWidget {
                       CircleAvatar(
                         radius: 8,
                         backgroundColor: Colors.white24,
-                        backgroundImage: live.streamerAvatar != null &&
+                        backgroundImage:
+                            live.streamerAvatar != null &&
                                 live.streamerAvatar!.isNotEmpty
                             ? NetworkImage(live.streamerAvatar!)
                             : null,
-                        child: live.streamerAvatar == null ||
+                        child:
+                            live.streamerAvatar == null ||
                                 live.streamerAvatar!.isEmpty
-                            ? const Icon(Icons.person, size: 10, color: Colors.white)
+                            ? const Icon(
+                                Icons.person,
+                                size: 10,
+                                color: Colors.white,
+                              )
                             : null,
                       ),
                       const SizedBox(width: 6),
@@ -528,11 +865,13 @@ class _GameLiveCard extends StatelessWidget {
                           children: [
                             Flexible(
                               child: Text(
-                                live.streamerDisplayName ?? 'Criador',
+                                live.streamerDisplayName ?? l10n.creatorLabel,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                    color: Colors.white70, fontSize: 12),
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                             if (live.streamerVerified) ...[
@@ -546,8 +885,7 @@ class _GameLiveCard extends StatelessWidget {
                   ),
                   if (live.gameName != null && live.gameName!.isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    const Text('🎮',
-                        style: TextStyle(fontSize: 13)),
+                    const Text('🎮', style: TextStyle(fontSize: 13)),
                   ],
                 ],
               ),
@@ -560,7 +898,8 @@ class _GameLiveCard extends StatelessWidget {
     return card;
   }
 
-  Widget _liveBadge() {
+  Widget _liveBadge(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -574,13 +913,18 @@ class _GameLiveCard extends StatelessWidget {
             width: 6,
             height: 6,
             decoration: const BoxDecoration(
-                color: Colors.white, shape: BoxShape.circle),
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
           ),
           const SizedBox(width: 5),
           Text(
-            'AO VIVO · ${live.viewerCount}',
+            '${l10n.liveBadge} · ${live.viewerCount}',
             style: const TextStyle(
-                color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -598,22 +942,28 @@ class _RankingRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final medals = <String>['🥇', '🥈', '🥉'];
     return ListTile(
       leading: Text(
         rank <= 3 ? medals[rank - 1] : '$rank°',
         style: const TextStyle(
-            fontSize: 18, color: Colors.white, fontWeight: FontWeight.w900),
+          fontSize: 18,
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+        ),
       ),
       title: Row(
         children: [
           Flexible(
             child: Text(
-              live.streamerDisplayName ?? 'Criador',
+              live.streamerDisplayName ?? l10n.creatorLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w700),
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           if (live.streamerVerified) ...[
@@ -623,18 +973,20 @@ class _RankingRow extends StatelessWidget {
         ],
       ),
       subtitle: Text(
-        '${live.viewerCount} espectadores',
+        l10n.viewersCount(live.viewerCount),
         style: const TextStyle(color: Colors.white54),
       ),
       trailing: const Icon(Icons.chevron_right, color: Colors.white38),
       onTap: () {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => LiveRoomScreen(
-            live: live,
-            role: _isOwner ? LiveRole.streamer : LiveRole.viewer,
-            isGameLive: true,
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => LiveRoomScreen(
+              live: live,
+              role: _isOwner ? LiveRole.streamer : LiveRole.viewer,
+              isGameLive: true,
+            ),
           ),
-        ));
+        );
       },
     );
   }
@@ -646,11 +998,14 @@ class _CreatorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GestureDetector(
       onTap: () {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => UserProfileScreen(userId: live.streamerId),
-        ));
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => UserProfileScreen(userId: live.streamerId),
+          ),
+        );
       },
       child: Column(
         children: [
@@ -659,8 +1014,8 @@ class _CreatorCard extends StatelessWidget {
             backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
             backgroundImage:
                 live.streamerAvatar != null && live.streamerAvatar!.isNotEmpty
-                    ? NetworkImage(live.streamerAvatar!)
-                    : null,
+                ? NetworkImage(live.streamerAvatar!)
+                : null,
             child: live.streamerAvatar == null || live.streamerAvatar!.isEmpty
                 ? const Icon(Icons.person, color: Colors.white, size: 28)
                 : null,
@@ -674,7 +1029,7 @@ class _CreatorCard extends StatelessWidget {
               children: [
                 Flexible(
                   child: Text(
-                    live.streamerDisplayName ?? 'Criador',
+                    live.streamerDisplayName ?? l10n.creatorLabel,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
@@ -701,19 +1056,26 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded, color: Colors.white38, size: 56),
+            const Icon(
+              Icons.cloud_off_rounded,
+              color: Colors.white38,
+              size: 56,
+            ),
             const SizedBox(height: 12),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70),
+            ),
             const SizedBox(height: 16),
-            OutlinedButton(onPressed: onRetry, child: const Text('Tentar novamente')),
+            OutlinedButton(onPressed: onRetry, child: Text(l10n.retry)),
           ],
         ),
       ),

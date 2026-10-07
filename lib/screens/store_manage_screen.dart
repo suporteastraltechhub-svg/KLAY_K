@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/store_models.dart';
 import '../services/content_service.dart';
 import '../services/store_service.dart';
@@ -43,39 +44,48 @@ class _StoreManageScreenState extends State<StoreManageScreen> {
   }
 
   Future<void> _openForm([StoreProduct? p]) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => _ProductFormScreen(product: p)),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => _ProductFormScreen(product: p)));
     _load();
   }
 
   Future<void> _toggle(StoreProduct p) async {
+    final l10n = AppLocalizations.of(context)!;
     try {
       await StoreService.instance.toggleProductActive(p.id, !p.isActive);
       _load();
     } catch (e) {
-      _snack('Erro: $e');
+      _snack(l10n.storeErrorGeneric(e));
     }
   }
 
   Future<void> _delete(StoreProduct p) async {
+    final l10n = AppLocalizations.of(context)!;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF17151F),
-        title: const Text('Excluir produto?',
-            style: TextStyle(color: Colors.white)),
-        content: Text('"${p.title}" será removido da Loja.',
-            style: const TextStyle(color: Colors.white70)),
+        title: Text(
+          l10n.deleteProductTitle,
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          l10n.deleteProductBody(p.title),
+          style: const TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Voltar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.back,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            child: const Text('Excluir'),
+            child: Text(l10n.delete),
           ),
         ],
       ),
@@ -85,7 +95,7 @@ class _StoreManageScreenState extends State<StoreManageScreen> {
       await StoreService.instance.deleteProduct(p.id);
       _load();
     } catch (e) {
-      _snack('Erro: $e');
+      _snack(l10n.storeErrorGeneric(e));
     }
   }
 
@@ -96,51 +106,57 @@ class _StoreManageScreenState extends State<StoreManageScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Meus anúncios',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.myAdsTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openForm(),
         backgroundColor: _kAccent,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
-        label: const Text('Novo produto'),
+        label: Text(l10n.newProductButton),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: _kAccent))
           : _products.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.storefront_outlined,
-                          color: Colors.white24, size: 52),
-                      SizedBox(height: 12),
-                      Text(
-                        'Você ainda não tem produtos\nCadastre o primeiro e comece a vender no KLAY K',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white54),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.storefront_outlined,
+                    color: Colors.white24,
+                    size: 52,
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: _kAccent,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                    itemCount: _products.length,
-                    itemBuilder: (context, i) => _productRow(_products[i]),
+                  const SizedBox(height: 12),
+                  Text(
+                    '${l10n.storeNoProductsTitle}\n${l10n.storeNoProductsBody}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white54),
                   ),
-                ),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              color: _kAccent,
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                itemCount: _products.length,
+                itemBuilder: (context, i) => _productRow(l10n, _products[i]),
+              ),
+            ),
     );
   }
 
-  Widget _productRow(StoreProduct p) {
+  Widget _productRow(AppLocalizations l10n, StoreProduct p) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(10),
@@ -164,8 +180,11 @@ class _StoreManageScreenState extends State<StoreManageScreen> {
                   : Container(
                       color: const Color(0xFF26223A),
                       child: const Center(
-                          child: Icon(Icons.image_outlined,
-                              color: Colors.white24)),
+                        child: Icon(
+                          Icons.image_outlined,
+                          color: Colors.white24,
+                        ),
+                      ),
                     ),
             ),
           ),
@@ -182,20 +201,25 @@ class _StoreManageScreenState extends State<StoreManageScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14),
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                     if (!p.isActive)
-                      const Text('  (pausado)',
-                          style: TextStyle(
-                              color: Colors.orange, fontSize: 12)),
+                      Text(
+                        '  ${l10n.storeProductPaused}',
+                        style: const TextStyle(
+                          color: Colors.orange,
+                          fontSize: 12,
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${formatPrice(p.price)} • ${p.stock} em estoque',
+                  '${formatPrice(p.price)} • ${l10n.storeInStock(p.stock)}',
                   style: const TextStyle(color: Colors.white54, fontSize: 12),
                 ),
               ],
@@ -215,16 +239,27 @@ class _StoreManageScreenState extends State<StoreManageScreen> {
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(
-                  value: 'edit',
-                  child: Text('Editar', style: TextStyle(color: Colors.white))),
               PopupMenuItem(
-                  value: 'toggle',
-                  child: Text(p.isActive ? 'Pausar' : 'Ativar',
-                      style: const TextStyle(color: Colors.white))),
-              const PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Excluir', style: TextStyle(color: Colors.redAccent))),
+                value: 'edit',
+                child: Text(
+                  l10n.edit,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'toggle',
+                child: Text(
+                  p.isActive ? l10n.pauseTooltip : l10n.enableTooltip,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text(
+                  l10n.delete,
+                  style: const TextStyle(color: Colors.redAccent),
+                ),
+              ),
             ],
           ),
         ],
@@ -291,6 +326,7 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
   }
 
   Future<void> _pickImage() async {
+    final l10n = AppLocalizations.of(context)!;
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       maxWidth: 1024,
@@ -301,8 +337,8 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (_) => const Center(
-            child: CircularProgressIndicator(color: _kAccent)),
+        builder: (_) =>
+            const Center(child: CircularProgressIndicator(color: _kAccent)),
       );
       final url = await ContentService.instance.uploadCover(File(picked.path));
       if (!mounted) return;
@@ -310,7 +346,7 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
       setState(() => _imageUrl = url);
     } catch (e) {
       if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      _snack('Erro ao enviar imagem: $e');
+      _snack(l10n.storeImageUploadError(e));
     }
   }
 
@@ -321,9 +357,10 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
   }
 
   Future<void> _save() async {
+    final l10n = AppLocalizations.of(context)!;
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
-      _snack('Informe o título');
+      _snack(l10n.storeTitleRequired);
       return;
     }
     final price = _parsePrice();
@@ -356,7 +393,7 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
       Navigator.of(context).pop();
     } catch (e) {
       if (mounted) setState(() => _saving = false);
-      _snack('Erro ao salvar: $e');
+      _snack(l10n.storeSaveError(e));
     }
   }
 
@@ -367,13 +404,15 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
         title: Text(
-            _p == null ? 'Novo produto' : 'Editar produto',
-            style: const TextStyle(fontWeight: FontWeight.w800)),
+          _p == null ? l10n.productFormTitleNew : l10n.productFormTitleEdit,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: _kAccent))
@@ -401,38 +440,44 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                const Center(
-                  child: Text('Toque para escolher a foto',
-                      style: TextStyle(color: Colors.white38, fontSize: 12)),
+                Center(
+                  child: Text(
+                    l10n.storePickPhotoHint,
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
                 ),
                 const SizedBox(height: 16),
-                _field(_titleCtrl, 'Título do produto'),
+                _field(_titleCtrl, l10n.storeProductTitleHint),
                 const SizedBox(height: 10),
-                _field(_descCtrl, 'Descrição', maxLines: 3),
+                _field(_descCtrl, l10n.descriptionLabel, maxLines: 3),
                 const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(
                       child: _field(
                         _priceCtrl,
-                        'Preço (R\$)',
-                        keyboard: const TextInputType.numberWithOptions(decimal: true),
-                        prefix: const Text('R\$ ',
-                            style: TextStyle(color: Colors.white54)),
+                        l10n.storePriceHint,
+                        keyboard: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        prefix: const Text(
+                          'R\$ ',
+                          style: TextStyle(color: Colors.white54),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: _field(
                         _stockCtrl,
-                        'Estoque',
+                        l10n.stockLabel,
                         keyboard: TextInputType.number,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
-                _categoryDropdown(),
+                _categoryDropdown(l10n),
                 const SizedBox(height: 20),
                 FilledButton(
                   onPressed: _saving ? null : _save,
@@ -441,7 +486,9 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  child: Text(_saving ? 'Salvando…' : 'Salvar produto'),
+                  child: Text(
+                    _saving ? l10n.savingLabel : l10n.saveProductButton,
+                  ),
                 ),
                 const SizedBox(height: 24),
               ],
@@ -453,13 +500,21 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
     return Container(
       color: const Color(0xFF26223A),
       alignment: Alignment.center,
-      child: const Icon(Icons.add_a_photo_outlined,
-          color: Colors.white38, size: 40),
+      child: const Icon(
+        Icons.add_a_photo_outlined,
+        color: Colors.white38,
+        size: 40,
+      ),
     );
   }
 
-  Widget _field(TextEditingController ctrl, String hint,
-      {int maxLines = 1, TextInputType? keyboard, Widget? prefix}) {
+  Widget _field(
+    TextEditingController ctrl,
+    String hint, {
+    int maxLines = 1,
+    TextInputType? keyboard,
+    Widget? prefix,
+  }) {
     return TextField(
       controller: ctrl,
       maxLines: maxLines,
@@ -482,13 +537,13 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
     );
   }
 
-  Widget _categoryDropdown() {
+  Widget _categoryDropdown(AppLocalizations l10n) {
     return DropdownButtonFormField<String>(
       initialValue: _categoryId,
       dropdownColor: const Color(0xFF17151F),
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
-        hintText: 'Categoria',
+        hintText: l10n.categoryLabel,
         hintStyle: const TextStyle(color: Colors.white38),
         filled: true,
         fillColor: const Color(0xFF1B1A26),
@@ -500,21 +555,27 @@ class _ProductFormScreenState extends State<_ProductFormScreen> {
       items: [
         DropdownMenuItem<String>(
           value: '',
-          child: Text('Sem categoria',
-              style: TextStyle(
-                  color: _categoryId == null || _categoryId!.isEmpty
-                      ? Colors.white
-                      : Colors.white54)),
+          child: Text(
+            l10n.noCategoryLabel,
+            style: TextStyle(
+              color: _categoryId == null || _categoryId!.isEmpty
+                  ? Colors.white
+                  : Colors.white54,
+            ),
+          ),
         ),
         ..._categories.map(
           (c) => DropdownMenuItem<String>(
             value: c.id,
-            child: Text('${c.icon} ${c.name}',
-                style: const TextStyle(color: Colors.white)),
+            child: Text(
+              '${c.icon} ${c.name}',
+              style: const TextStyle(color: Colors.white),
+            ),
           ),
         ),
       ],
-      onChanged: (v) => setState(() => _categoryId = (v == null || v.isEmpty) ? null : v),
+      onChanged: (v) =>
+          setState(() => _categoryId = (v == null || v.isEmpty) ? null : v),
     );
   }
 }

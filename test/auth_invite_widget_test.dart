@@ -10,13 +10,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:klay_k/l10n/app_localizations.dart';
 import 'package:klay_k/screens/auth_screen.dart';
 import 'package:klay_k/services/invite_service.dart';
 import 'package:klay_k/theme/klayk_theme.dart';
 
+// Harness com os delegates de localização do app (mesmos do main.dart). Sem
+// eles, `AppLocalizations.of(context)` é nulo e AuthScreen não constrói.
+Widget _app({required Widget home}) => MaterialApp(
+  theme: KlaykTheme.dark(),
+  locale: const Locale('pt'),
+  supportedLocales: AppLocalizations.supportedLocales,
+  localizationsDelegates: AppLocalizations.localizationsDelegates,
+  home: home,
+);
+
 Future<void> goToSignup(WidgetTester tester) async {
-  await tester.pumpWidget(MaterialApp(
-      theme: KlaykTheme.dark(), home: const AuthScreen()));
+  await tester.pumpWidget(_app(home: const AuthScreen()));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Criar conta'));
   await tester.pumpAndSettle();
@@ -29,19 +39,21 @@ Future<void> settleCheck(WidgetTester tester) async {
   await tester.pump();
 }
 
-InviteCheck validCheck(String code) => const InviteCheck(reachable: true,
-      validation: InviteValidation(
-        code: 'KLAYK-AB12CD',
-        inviterId: 'u111',
-        displayName: 'Amigo Teste',
-        username: 'amigoteste',
-        avatarUrl: '',
-      ),
-    );
+InviteCheck validCheck(String code) => const InviteCheck(
+  reachable: true,
+  validation: InviteValidation(
+    code: 'KLAYK-AB12CD',
+    inviterId: 'u111',
+    displayName: 'Amigo Teste',
+    username: 'amigoteste',
+    avatarUrl: '',
+  ),
+);
 
 void main() {
-  testWidgets('cadastro: convite vazio mantém o texto de ajuda padrão',
-      (tester) async {
+  testWidgets('cadastro: convite vazio mantém o texto de ajuda padrão', (
+    tester,
+  ) async {
     await goToSignup(tester);
 
     expect(
@@ -54,10 +66,13 @@ void main() {
 
   testWidgets('cadastro: código válido exibe o convidante e mantém o texto '
       'digitado (uppercase é aplicado no submit)', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      theme: KlaykTheme.dark(),
-      home: AuthScreen(inviteChecker: (_) async => validCheck('KLAYK-AB12CD')),
-    ));
+    await tester.pumpWidget(
+      _app(
+        home: AuthScreen(
+          inviteChecker: (_) async => validCheck('KLAYK-AB12CD'),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Criar conta'));
     await tester.pumpAndSettle();
@@ -77,18 +92,21 @@ void main() {
 
   testWidgets('cadastro: código inválido mostra mensagem clara e não some ao '
       'digitar mais', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      theme: KlaykTheme.dark(),
-      home: AuthScreen(inviteChecker: (_) async => const InviteCheck(
-            reachable: true,
-          )),
-    ));
+    await tester.pumpWidget(
+      _app(
+        home: AuthScreen(
+          inviteChecker: (_) async => const InviteCheck(reachable: true),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Criar conta'));
     await tester.pumpAndSettle();
 
     await tester.enterText(
-        find.byKey(const ValueKey('auth_invite_code')), 'KLAYK-ZZZZZZ');
+      find.byKey(const ValueKey('auth_invite_code')),
+      'KLAYK-ZZZZZZ',
+    );
     await settleCheck(tester);
 
     expect(
@@ -101,22 +119,27 @@ void main() {
 
   testWidgets('cadastro: verificação indisponível avisa mas não bloqueia '
       '(campo continua útil)', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      theme: KlaykTheme.dark(),
-      home: AuthScreen(inviteChecker: (_) async => const InviteCheck(
-            reachable: false,
-          )),
-    ));
+    await tester.pumpWidget(
+      _app(
+        home: AuthScreen(
+          inviteChecker: (_) async => const InviteCheck(reachable: false),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Criar conta'));
     await tester.pumpAndSettle();
 
     await tester.enterText(
-        find.byKey(const ValueKey('auth_invite_code')), 'KLAYK-AB12CD');
+      find.byKey(const ValueKey('auth_invite_code')),
+      'KLAYK-AB12CD',
+    );
     await settleCheck(tester);
 
-    expect(find.text('Não foi possível verificar o código agora.'),
-        findsOneWidget);
+    expect(
+      find.text('Não foi possível verificar o código agora.'),
+      findsOneWidget,
+    );
     expect(find.textContaining('Código de convite inválido'), findsNothing);
 
     // Limpar o campo volta ao estado normal.

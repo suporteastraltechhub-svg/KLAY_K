@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/security_models.dart';
 import '../../services/security_service.dart';
 
@@ -63,16 +64,16 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _revokeSession(AccountSession s) async {
     _setWorking(true);
+    final l10n = AppLocalizations.of(context)!;
     try {
       await _svc.authRevokeSession(s.id);
       await _load();
-      _snack('Sessão encerrada.');
+      _snack(l10n.accountGuardSessionRevoked);
     } catch (e) {
       _snack(e.toString());
     } finally {
@@ -81,21 +82,21 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
   }
 
   Future<void> _revokeOthers() async {
+    final l10n = AppLocalizations.of(context)!;
     if (_sessions.length <= 1) {
-      _snack('Você só tem esta sessão ativa.');
+      _snack(l10n.accountGuardOnlyThisSession);
       return;
     }
     final ok = await _confirmDialog(
-      'Encerrar outras sessões?',
-      'Você permanecerá conectado neste dispositivo. As demais sessões '
-          'serão revogadas no backend.',
+      l10n.accountGuardRevokeOthersTitle,
+      l10n.accountGuardRevokeOthersBody,
     );
     if (!ok) return;
     _setWorking(true);
     try {
       await _svc.authRevokeOtherSessions();
       await _load();
-      _snack('Outras sessões encerradas.');
+      _snack(l10n.accountGuardOthersRevoked);
     } catch (e) {
       _snack(e.toString());
     } finally {
@@ -104,28 +105,28 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
   }
 
   Future<void> _changePassword() async {
+    final l10n = AppLocalizations.of(context)!;
     final current = _current.text.trim();
     final next = _newPwd.text;
     final confirm = _confirm.text;
-    if (current.isEmpty) return _snack('Informe a senha atual.');
-    if (next.length < 8) {
-      return _snack('A nova senha precisa ter pelo menos 8 caracteres.');
+    if (current.isEmpty) {
+      return _snack(l10n.accountGuardPwdRequired);
     }
-    if (next != confirm) return _snack('A confirmação não confere.');
+    if (next.length < 8) {
+      return _snack(l10n.accountGuardPwdMinLength);
+    }
+    if (next != confirm) return _snack(l10n.accountGuardPwdMismatch);
     if (next == current) {
-      return _snack('A nova senha deve ser diferente da atual.');
+      return _snack(l10n.accountGuardPwdSameAsCurrent);
     }
     _setWorking(true);
     try {
-      await _svc.changePassword(
-        currentPassword: current,
-        newPassword: next,
-      );
+      await _svc.changePassword(currentPassword: current, newPassword: next);
       _current.clear();
       _newPwd.clear();
       _confirm.clear();
       await _load();
-      _snack('Senha alterada com sucesso.');
+      _snack(l10n.accountGuardPwdChanged);
     } catch (e) {
       _snack(e.toString());
     } finally {
@@ -134,22 +135,33 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
   }
 
   Future<bool> _confirmDialog(String title, String body) async {
+    final l10n = AppLocalizations.of(context)!;
     final res = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1B1A26),
-        title: Text(title,
-            style: const TextStyle(color: Colors.white, fontSize: 18)),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontSize: 18),
+        ),
         content: Text(body, style: const TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: const TextStyle(color: Colors.white54),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirmar',
-                style: TextStyle(color: _kAccent, fontWeight: FontWeight.w700)),
+            child: Text(
+              l10n.confirm,
+              style: const TextStyle(
+                color: _kAccent,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ],
       ),
@@ -170,12 +182,15 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Proteção da conta',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.accountGuardTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
       ),
       body: _loading
@@ -183,19 +198,17 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _infoCard(),
+                _infoCard(l10n),
                 const SizedBox(height: 24),
-                _sectionHeader('SESSÕES ATIVAS'),
-                _sessionsCard(),
+                _sectionHeader(l10n.accountGuardSessionsHeader),
+                _sessionsCard(l10n),
                 const SizedBox(height: 24),
-                _sectionHeader('TROCA DE SENHA'),
-                _passwordCard(),
+                _sectionHeader(l10n.accountGuardPasswordHeader),
+                _passwordCard(l10n),
                 const SizedBox(height: 12),
-                const Text(
-                  'A troca de senha é feita pelo backend (auth real): sua '
-                  'senha atual é conferida antes de qualquer mudança e as '
-                  'demais sessões são encerradas.',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                Text(
+                  l10n.accountGuardPwdNote,
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
               ],
             ),
@@ -203,16 +216,19 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
   }
 
   Widget _sectionHeader(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8, left: 4),
-        child: Text(text,
-            style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.1)),
-      );
+    padding: const EdgeInsets.only(bottom: 8, left: 4),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: Colors.white54,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.1,
+      ),
+    ),
+  );
 
-  Widget _infoCard() {
+  Widget _infoCard(AppLocalizations l10n) {
     final a = _account;
     if (a == null) return const SizedBox.shrink();
     return Container(
@@ -230,14 +246,15 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  a.email.isEmpty ? 'Conta' : a.email,
+                  a.email.isEmpty ? l10n.accountGuardAccountLabel : a.email,
                   style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w700),
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: a.emailConfirmed
                       ? const Color(0xFF34D399).withValues(alpha: 0.15)
@@ -245,7 +262,9 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  a.emailConfirmed ? 'verificada' : 'não verificada',
+                  a.emailConfirmed
+                      ? l10n.accountGuardVerified
+                      : l10n.accountGuardNotVerified,
                   style: TextStyle(
                     color: a.emailConfirmed
                         ? const Color(0xFF34D399)
@@ -258,34 +277,40 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          _kv('Último acesso', _fmt(a.lastSignInAt)),
-          _kv('Conta criada em', _fmt(a.accountCreatedAt)),
-          _kv('Provedores',
-              a.providers.isEmpty ? '—' : a.providers.join(', ')),
+          _kv(l10n.accountGuardLastAccess, _fmt(a.lastSignInAt)),
+          _kv(l10n.accountGuardAccountCreated, _fmt(a.accountCreatedAt)),
+          _kv(
+            l10n.accountGuardProviders,
+            a.providers.isEmpty ? '—' : a.providers.join(', '),
+          ),
         ],
       ),
     );
   }
 
   Widget _kv(String label, String value) => Padding(
-        padding: const EdgeInsets.only(top: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 110,
-              child: Text(label,
-                  style: const TextStyle(color: Colors.white38, fontSize: 13)),
-            ),
-            Expanded(
-              child: Text(value,
-                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
-            ),
-          ],
+    padding: const EdgeInsets.only(top: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 110,
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white38, fontSize: 13),
+          ),
         ),
-      );
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ),
+      ],
+    ),
+  );
 
-  Widget _sessionsCard() {
+  Widget _sessionsCard(AppLocalizations l10n) {
     if (_working) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
@@ -305,8 +330,10 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
           color: const Color(0xFF1B1A26),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: const Text('Nenhuma sessão ativa encontrada.',
-            style: TextStyle(color: Colors.white54)),
+        child: Text(
+          l10n.accountGuardNoSessions,
+          style: const TextStyle(color: Colors.white54),
+        ),
       );
     }
     return Container(
@@ -317,17 +344,22 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
       child: Column(
         children: [
           for (final s in _sessions)
-            _sessionTile(s, isLast: identical(s, _sessions.last)),
+            _sessionTile(s, l10n, isLast: identical(s, _sessions.last)),
           const Divider(height: 1, color: Colors.white12),
           ListTile(
             tileColor: Colors.transparent,
-            leading: const Icon(Icons.devices_other_rounded,
-                color: Color(0xFF4CAF50)),
-            title: const Text('Encerrar outras sessões',
-                style:
-                    TextStyle(color: Color(0xFF4CAF50), fontSize: 14)),
-            subtitle: const Text('Mantém apenas este dispositivo',
-                style: TextStyle(color: Colors.white38, fontSize: 12)),
+            leading: const Icon(
+              Icons.devices_other_rounded,
+              color: Color(0xFF4CAF50),
+            ),
+            title: Text(
+              l10n.accountGuardRevokeOthers,
+              style: const TextStyle(color: Color(0xFF4CAF50), fontSize: 14),
+            ),
+            subtitle: Text(
+              l10n.accountGuardKeepsThisDevice,
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            ),
             onTap: _revokeOthers,
           ),
         ],
@@ -335,16 +367,25 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
     );
   }
 
-  Widget _sessionTile(AccountSession s, {required bool isLast}) {
+  Widget _sessionTile(
+    AccountSession s,
+    AppLocalizations l10n, {
+    required bool isLast,
+  }) {
     return ListTile(
       title: Row(
         children: [
-          Icon(s.isMobile ? Icons.smartphone_rounded : Icons.desktop_windows,
-              color: _kAccent, size: 20),
+          Icon(
+            s.isMobile ? Icons.smartphone_rounded : Icons.desktop_windows,
+            color: _kAccent,
+            size: 20,
+          ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(s.deviceLabel,
-                style: const TextStyle(color: Colors.white, fontSize: 14)),
+            child: Text(
+              s.deviceLabel,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
           ),
         ],
       ),
@@ -352,22 +393,26 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            s.ip.isEmpty ? s.aal.toUpperCase() : 'IP ${s.ip} · ${s.aal.toUpperCase()}',
+            s.ip.isEmpty
+                ? s.aal.toUpperCase()
+                : 'IP ${s.ip} · ${s.aal.toUpperCase()}',
             style: const TextStyle(color: Colors.white38, fontSize: 12),
           ),
-          Text('Atividade: ${_fmt(s.refreshedAt)}',
-              style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          Text(
+            l10n.accountGuardActivityTime(_fmt(s.refreshedAt)),
+            style: const TextStyle(color: Colors.white38, fontSize: 12),
+          ),
         ],
       ),
       trailing: IconButton(
         icon: const Icon(Icons.logout_rounded, color: Colors.white38),
         onPressed: _working ? null : () => _revokeSession(s),
-        tooltip: 'Encerrar sessão',
+        tooltip: l10n.accountGuardRevokeSessionTooltip,
       ),
     );
   }
 
-  Widget _passwordCard() {
+  Widget _passwordCard(AppLocalizations l10n) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -377,21 +422,21 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
       child: Column(
         children: [
           _pwdField(
-            hint: 'Senha atual',
+            hint: l10n.accountGuardCurrentPwd,
             controller: _current,
             obscure: _obscure1,
             toggle: () => setState(() => _obscure1 = !_obscure1),
           ),
           const SizedBox(height: 10),
           _pwdField(
-            hint: 'Nova senha (mín. 8)',
+            hint: l10n.accountGuardNewPwd,
             controller: _newPwd,
             obscure: _obscure2,
             toggle: () => setState(() => _obscure2 = !_obscure2),
           ),
           const SizedBox(height: 10),
           _pwdField(
-            hint: 'Confirmar nova senha',
+            hint: l10n.accountGuardConfirmPwd,
             controller: _confirm,
             obscure: _obscure3,
             toggle: () => setState(() => _obscure3 = !_obscure3),
@@ -406,8 +451,10 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
                 foregroundColor: Colors.white,
                 disabledBackgroundColor: Colors.white12,
               ),
-              child: const Text('Trocar senha',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+              child: Text(
+                l10n.accountGuardChangePwd,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -435,8 +482,10 @@ class _AccountGuardScreenState extends State<AccountGuardScreen> {
           borderSide: BorderSide.none,
         ),
         suffixIcon: IconButton(
-          icon: Icon(obscure ? Icons.visibility_off : Icons.visibility,
-              color: Colors.white38),
+          icon: Icon(
+            obscure ? Icons.visibility_off : Icons.visibility,
+            color: Colors.white38,
+          ),
           onPressed: toggle,
         ),
       ),

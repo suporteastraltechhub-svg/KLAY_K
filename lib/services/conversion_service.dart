@@ -58,10 +58,10 @@ class ConversionService {
   }) async {
     if (!_ready) throw StateError('Backend não configurado.');
     await _auth();
-    final res = await _client.rpc('currency_conversion_request', params: {
-      'p_setting_id': settingId,
-      'p_amount': amount,
-    });
+    final res = await _client.rpc(
+      'currency_conversion_request',
+      params: {'p_setting_id': settingId, 'p_amount': amount},
+    );
     return res is Map ? Map<String, dynamic>.from(res) : const {};
   }
 
@@ -69,9 +69,10 @@ class ConversionService {
   Future<Map<String, dynamic>> cancel(String requestId) async {
     if (!_ready) throw StateError('Backend não configurado.');
     await _auth();
-    final res = await _client.rpc('cancel_conversion_request', params: {
-      'p_request_id': requestId,
-    });
+    final res = await _client.rpc(
+      'cancel_conversion_request',
+      params: {'p_request_id': requestId},
+    );
     return res is Map ? Map<String, dynamic>.from(res) : const {};
   }
 
@@ -79,9 +80,10 @@ class ConversionService {
   Future<List<Map<String, dynamic>>> history({int limit = 30}) async {
     if (!_ready) throw StateError('Backend não configurado.');
     await _auth();
-    final res = await _client.rpc('my_conversion_requests', params: {
-      'p_limit': limit,
-    });
+    final res = await _client.rpc(
+      'my_conversion_requests',
+      params: {'p_limit': limit},
+    );
     if (res is List) {
       return res
           .whereType<Map>()

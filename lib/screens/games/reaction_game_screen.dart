@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/game_service.dart';
 import '../../theme/klayk_theme.dart';
 
@@ -60,6 +61,7 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
   }
 
   void _finish() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() {
       _running = false;
       _finished = true;
@@ -75,14 +77,15 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _resultText = '$_score toques'
-            '${r.improved ? '\n🎉 +${r.reward} 🔮 cristais!' : ''}';
+        _resultText =
+            l10n.gameTaps(_score) +
+            (r.improved ? '\n${l10n.engineReward(r.reward)}' : '');
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _resultText = '$_score toques\n(Não sincronizado agora)';
+        _resultText = '${l10n.gameTaps(_score)}\n${l10n.gameNotSynced}';
       });
     }
   }
@@ -112,9 +115,10 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: colors.bg,
-      appBar: AppBar(title: const Text('Toque Rápido')),
+      appBar: AppBar(title: Text(l10n.gameTapTitle)),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -124,7 +128,7 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
                 children: [
                   _statCard(colors, '⏱', '$_remaining s'),
                   const SizedBox(width: 12),
-                  _statCard(colors, '🎯', '$_score toques'),
+                  _statCard(colors, '🎯', l10n.gameTaps(_score)),
                 ],
               ),
               const SizedBox(height: 16),
@@ -132,9 +136,7 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     if (!_running) {
-                      return Center(
-                        child: _idleView(colors),
-                      );
+                      return Center(child: _idleView(colors));
                     }
                     return Stack(
                       children: [
@@ -142,8 +144,7 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
                           left: _target.dx,
                           top: _target.dy,
                           child: GestureDetector(
-                            onTap: () =>
-                                _hitTarget(constraints),
+                            onTap: () => _hitTarget(constraints),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 120),
                               width: _size,
@@ -153,16 +154,18 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
                                 color: colors.danger,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: colors.danger
-                                        .withValues(alpha: 0.4),
+                                    color: colors.danger.withValues(alpha: 0.4),
                                     blurRadius: 18,
                                     spreadRadius: 2,
                                   ),
                                 ],
                               ),
                               child: const Center(
-                                child: Icon(Icons.bolt_rounded,
-                                    color: Colors.white, size: 22),
+                                child: Icon(
+                                  Icons.bolt_rounded,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
                               ),
                             ),
                           ),
@@ -187,20 +190,26 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : Text(
-                            _finished ? 'Jogar novamente' : 'Começar',
+                            _finished ? l10n.enginePlayAgain : l10n.engineStart,
                             style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w800),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                   ),
                 )
               else
-                const Text(
-                  'Toque no alvo vermelho!',
-                  style: TextStyle(
-                      color: Color(0xFFB28DFF), fontSize: 14),
+                Text(
+                  l10n.gameTapTargetHint,
+                  style: const TextStyle(
+                    color: Color(0xFFB28DFF),
+                    fontSize: 14,
+                  ),
                 ),
             ],
           ),
@@ -234,24 +243,26 @@ class _ReactionGameScreenState extends State<ReactionGameScreen> {
   }
 
   Widget _idleView(KlaykColors colors) {
+    final l10n = AppLocalizations.of(context)!;
     return Column(
       children: [
         const Text('⚡', style: TextStyle(fontSize: 64)),
         const SizedBox(height: 16),
-        const Text(
-          'Toque o alvo vermelho o máximo de vezes\nem 15 segundos.',
+        Text(
+          l10n.gameTapIntro15,
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, height: 1.5, color: Colors.white70),
+          style: const TextStyle(
+            fontSize: 15,
+            height: 1.5,
+            color: Colors.white70,
+          ),
         ),
         if (_resultText != null) ...[
           const SizedBox(height: 20),
           Text(
             _resultText!,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-            ),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
           ),
         ],
       ],

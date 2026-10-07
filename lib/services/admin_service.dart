@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'founder_service.dart';
@@ -21,7 +22,17 @@ class AdminService {
     return u.id;
   }
 
+  /// Backend injetável APENAS em testes locais (sem rede): quando definido,
+  /// substitui a chamada `rpc` do Supabase por um fake. Nunca é atribuído em
+  /// produção — apenas os testes definem/limpam para verificar o contrato e o
+  /// fluxo da UI sem depender de instância real.
+  @visibleForTesting
+  static Future<dynamic> Function(String name, Map<String, dynamic> params)?
+  rpcOverride;
+
   Future<dynamic> _rpc(String name, [Map<String, dynamic> params = const {}]) {
+    final override = rpcOverride;
+    if (override != null) return override(name, params);
     return _db.rpc(name, params: params);
   }
 
@@ -185,16 +196,14 @@ class AdminService {
   // Verificação (admin)
   // ---------------------------------------------------------------------------
 
-  Future<List<Map<String, dynamic>>> adminListVerifications(
-      [String? status]) async {
+  Future<List<Map<String, dynamic>>> adminListVerifications([
+    String? status,
+  ]) async {
     final r = await _rpc('admin_list_verifications', {
       if (status != null) 'p_status': status,
     });
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -220,10 +229,7 @@ class AdminService {
       if (status != null) 'p_status': status,
     });
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -237,6 +243,35 @@ class AdminService {
       'p_status': status,
       'p_reply': reply,
     });
+    return r is Map ? Map<String, dynamic>.from(r) : const {};
+  }
+
+  // ---------------------------------------------------------------------------
+  // Publicações (admin — cap: moderation; validação sempre no backend)
+  // ---------------------------------------------------------------------------
+
+  /// Lista as publicações recentes de TODOS os autores (moderação de
+  /// conteúdo), com perfil do autor no mesmo formato do feed. Acesso e
+  /// conteúdo vêm da RPC `admin_list_posts` (security definer).
+  Future<List<Map<String, dynamic>>> adminListPosts({
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final r = await _rpc('admin_list_posts', {
+      'p_limit': limit,
+      'p_offset': offset,
+    });
+    return r is List
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : const [];
+  }
+
+  /// Exclui QUALQUER publicação (mesmo de outro usuário). O app passa apenas
+  /// o id: quem pode (capability 'moderation') e a limpeza de vídeo/capa no
+  /// Storage são decididas/re-executadas na RPC `admin_delete_post`
+  /// (security definer) no backend — um usuário comum recebe `not_admin`.
+  Future<Map<String, dynamic>> adminDeletePost(String postId) async {
+    final r = await _rpc('admin_delete_post', {'p_post_id': postId});
     return r is Map ? Map<String, dynamic>.from(r) : const {};
   }
 
@@ -276,10 +311,7 @@ class AdminService {
   Future<List<Map<String, dynamic>>> adminListChests() async {
     final r = await _rpc('admin_list_chests');
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -303,10 +335,7 @@ class AdminService {
   Future<List<Map<String, dynamic>>> adminListStaff() async {
     final r = await _rpc('admin_list_staff');
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -334,7 +363,8 @@ class AdminService {
   }
 
   Future<bool> setMyProfession(String profession) async {
-    return await _rpc('set_my_profession', {'p_profession': profession}) == true;
+    return await _rpc('set_my_profession', {'p_profession': profession}) ==
+        true;
   }
 
   Future<List<Map<String, dynamic>>> adminListProfessions() async {
@@ -353,20 +383,22 @@ class AdminService {
     int sortOrder = 0,
   }) async {
     return await _rpc('admin_upsert_profession', {
-      if (id != null) 'p_id': id,
-      'p_name': name,
-      'p_icon': icon,
-      'p_category': category,
-      'p_status': status,
-      'p_sort_order': sortOrder,
-    }) == true;
+          if (id != null) 'p_id': id,
+          'p_name': name,
+          'p_icon': icon,
+          'p_category': category,
+          'p_status': status,
+          'p_sort_order': sortOrder,
+        }) ==
+        true;
   }
 
   Future<bool> adminSetProfessionStatus(String id, String status) async {
     return await _rpc('admin_set_profession_status', {
-      'p_id': id,
-      'p_status': status,
-    }) == true;
+          'p_id': id,
+          'p_status': status,
+        }) ==
+        true;
   }
 
   Future<bool> adminDeleteProfession(String id) async {
@@ -375,9 +407,10 @@ class AdminService {
 
   Future<bool> adminSetUserProfession(String userId, String profession) async {
     return await _rpc('admin_set_user_profession', {
-      'p_user_id': userId,
-      'p_profession': profession,
-    }) == true;
+          'p_user_id': userId,
+          'p_profession': profession,
+        }) ==
+        true;
   }
 
   Future<bool> adminClearUserProfession(String userId) =>
@@ -404,21 +437,23 @@ class AdminService {
     Map<String, dynamic> permissions = const {},
   }) async {
     return await _rpc('admin_upsert_bot', {
-      if (id != null) 'p_id': id,
-      'p_name': name,
-      'p_avatar': avatar,
-      'p_bio': bio,
-      'p_bot_role': botRole,
-      'p_status': status,
-      'p_permissions': permissions,
-    }) == true;
+          if (id != null) 'p_id': id,
+          'p_name': name,
+          'p_avatar': avatar,
+          'p_bio': bio,
+          'p_bot_role': botRole,
+          'p_status': status,
+          'p_permissions': permissions,
+        }) ==
+        true;
   }
 
   Future<bool> adminSetBotStatus(String id, String status) async {
     return await _rpc('admin_set_bot_status', {
-      'p_id': id,
-      'p_status': status,
-    }) == true;
+          'p_id': id,
+          'p_status': status,
+        }) ==
+        true;
   }
 
   Future<bool> adminDeleteBot(String id) async {
@@ -432,10 +467,7 @@ class AdminService {
   Future<List<Map<String, dynamic>>> adminAuditList({int limit = 100}) async {
     final r = await _rpc('admin_audit_list', {'p_limit': limit});
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -451,7 +483,9 @@ class AdminService {
           .select('bubble_enabled, bubble_x, bubble_y')
           .eq('user_id', uid)
           .maybeSingle();
-      if (res == null) return const {'bubble_enabled': true, 'bubble_x': 0.0, 'bubble_y': 0.0};
+      if (res == null) {
+        return const {'bubble_enabled': true, 'bubble_x': 0.0, 'bubble_y': 0.0};
+      }
       return Map<String, dynamic>.from(res as Map);
     } catch (_) {
       return const {'bubble_enabled': true, 'bubble_x': 0.0, 'bubble_y': 0.0};
@@ -486,13 +520,18 @@ class AdminService {
       return 'Permissão negada pelo servidor.';
     }
     if (raw.contains('already_opened')) return 'Este baú já foi aberto.';
-    if (raw.contains('rate_limited')) return 'Muitas aberturas por hora/dia. Vá com calma!';
-    if (raw.contains('already_reviewed')) return 'Este pedido já foi analisado.';
-    if (raw.contains('insufficient_funds') ||
-        raw.contains('bad_amount')) {
+    if (raw.contains('rate_limited')) {
+      return 'Muitas aberturas por hora/dia. Vá com calma!';
+    }
+    if (raw.contains('already_reviewed')) {
+      return 'Este pedido já foi analisado.';
+    }
+    if (raw.contains('insufficient_funds') || raw.contains('bad_amount')) {
       return 'Saldo insuficiente ou valor inválido.';
     }
-    if (raw.contains('PGRST116') || raw.contains('request_not_found')) {
+    if (raw.contains('PGRST116') ||
+        raw.contains('request_not_found') ||
+        raw.contains('post_not_found')) {
       return 'Registro não encontrado.';
     }
     return 'Falha de rede ou ação não autorizada.';

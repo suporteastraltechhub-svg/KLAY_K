@@ -23,7 +23,8 @@ class MomentService {
       final res = await _db.rpc('moment_feed', params: {'p_limit': limit});
       final rows = res as List? ?? const [];
       // Amplía cada row com dados reais do autor (join nidificado).
-      final authorIds = rows.whereType<Map>()
+      final authorIds = rows
+          .whereType<Map>()
           .map((r) => r['user_id']?.toString() ?? '')
           .where((id) => id.isNotEmpty)
           .toSet()
@@ -71,17 +72,23 @@ class MomentService {
       if (ids.isEmpty) return const [];
       final res = await _db
           .from('moments')
-          .select('*, profiles:user_id(display_name, username, avatar_url, is_verified)')
+          .select(
+            '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+          )
           .inFilter('id', ids)
           .order('created_at', ascending: false)
           .limit(limit);
       final myId = _myId;
       return (res as List? ?? const [])
           .whereType<Map>()
-          .map((r) => KlayKMoment.fromJson(
-                Map<String, dynamic>.from(r.map((k, v) => MapEntry(k.toString(), v))),
-                myId: myId,
-              ))
+          .map(
+            (r) => KlayKMoment.fromJson(
+              Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+              myId: myId,
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -100,13 +107,17 @@ class MomentService {
     if (trimmed.isEmpty) {
       throw StateError('Digite algo para publicar seu momento.');
     }
-    final res = await _db.from('moments').insert({
-      'user_id': user.id,
-      'text': trimmed,
-      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
-      if (sticker != null && sticker.isNotEmpty) 'sticker': sticker,
-      'expires_at': DateTime.now().add(lifetime).toUtc().toIso8601String(),
-    }).select('id').single();
+    final res = await _db
+        .from('moments')
+        .insert({
+          'user_id': user.id,
+          'text': trimmed,
+          if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+          if (sticker != null && sticker.isNotEmpty) 'sticker': sticker,
+          'expires_at': DateTime.now().add(lifetime).toUtc().toIso8601String(),
+        })
+        .select('id')
+        .single();
     final id = res['id']?.toString() ?? '';
     return KlayKMoment(
       id: id,

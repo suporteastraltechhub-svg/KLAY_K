@@ -28,7 +28,9 @@ class PlaylistService {
     try {
       var req = _db
           .from('playlists')
-          .select('*, profiles:creator_id(display_name, username, avatar_url, is_verified)')
+          .select(
+            '*, profiles:creator_id(display_name, username, avatar_url, is_verified)',
+          )
           .eq('is_public', true);
       if (query != null && query.trim().isNotEmpty) {
         final q = query.trim().toLowerCase();
@@ -56,7 +58,9 @@ class PlaylistService {
       if (ids.isEmpty) return const [];
       final res = await _db
           .from('playlists')
-          .select('*, profiles:creator_id(display_name, username, avatar_url, is_verified)')
+          .select(
+            '*, profiles:creator_id(display_name, username, avatar_url, is_verified)',
+          )
           .inFilter('id', ids)
           .order('created_at', ascending: false)
           .limit(limit);
@@ -77,13 +81,17 @@ class PlaylistService {
     if (trimmed.isEmpty) {
       throw StateError('Dê um nome à sua playlist.');
     }
-    final res = await _db.from('playlists').insert({
-      'creator_id': user.id,
-      'name': trimmed,
-      'description': description.trim(),
-      if (coverUrl.isNotEmpty) 'cover_url': coverUrl,
-      'is_public': true,
-    }).select('id').single();
+    final res = await _db
+        .from('playlists')
+        .insert({
+          'creator_id': user.id,
+          'name': trimmed,
+          'description': description.trim(),
+          if (coverUrl.isNotEmpty) 'cover_url': coverUrl,
+          'is_public': true,
+        })
+        .select('id')
+        .single();
     return KlayKPlaylist(
       id: res['id']?.toString() ?? '',
       creatorId: user.id,
@@ -125,10 +133,14 @@ class PlaylistService {
     final myId = _myId ?? '';
     return (res as List? ?? const [])
         .whereType<Map>()
-        .map((r) => KlayKPlaylist.fromJson(
-              Map<String, dynamic>.from(r.map((k, v) => MapEntry(k.toString(), v))),
-              myId: myId,
-            ))
+        .map(
+          (r) => KlayKPlaylist.fromJson(
+            Map<String, dynamic>.from(
+              r.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+            myId: myId,
+          ),
+        )
         .toList();
   }
 }

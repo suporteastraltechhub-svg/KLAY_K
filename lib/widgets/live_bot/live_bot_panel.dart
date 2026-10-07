@@ -17,12 +17,20 @@ import 'live_bot_tabs.dart';
 ///  * Anúncios
 ///  * Configurações
 class LiveBotPanel extends StatefulWidget {
-  const LiveBotPanel({super.key, required this.liveId, this.canModerate = true});
+  const LiveBotPanel({
+    super.key,
+    required this.liveId,
+    this.canModerate = true,
+  });
 
   final String liveId;
   final bool canModerate;
 
-  static Future<void> show(BuildContext context, {required String liveId, bool canModerate = true}) {
+  static Future<void> show(
+    BuildContext context, {
+    required String liveId,
+    bool canModerate = true,
+  }) {
     return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -91,9 +99,12 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
     final previous = _settings;
     try {
       await _service.saveSettings(widget.liveId, next);
-      await _service.log(widget.liveId, eventType: 'config',
-          message: 'Configurações do bot atualizadas',
-          metadata: {'enabled': next.enabled});
+      await _service.log(
+        widget.liveId,
+        eventType: 'config',
+        message: 'Configurações do bot atualizadas',
+        metadata: {'enabled': next.enabled},
+      );
       if (mounted) setState(() => _saving = false);
     } catch (_) {
       if (!mounted) return;
@@ -153,10 +164,12 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
           _tabBar(c),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF8B5CF6)))
+                ? const Center(
+                    child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+                  )
                 : _error != null
-                    ? _errorView(c)
-                    : _buildTab(c),
+                ? _errorView(c)
+                : _buildTab(c),
           ),
         ],
       ),
@@ -164,53 +177,64 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
   }
 
   Widget _handle() => Container(
-        margin: const EdgeInsets.only(top: 10),
-        width: 44,
-        height: 5,
-        decoration: BoxDecoration(
-          color: Colors.white24,
-          borderRadius: BorderRadius.circular(3),
-        ),
-      );
+    margin: const EdgeInsets.only(top: 10),
+    width: 44,
+    height: 5,
+    decoration: BoxDecoration(
+      color: Colors.white24,
+      borderRadius: BorderRadius.circular(3),
+    ),
+  );
 
   Widget _header(KlaykColors c) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF8B5CF6), Color(0xFF38BDF8)],
-                ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.smart_toy_rounded, color: Colors.white, size: 20),
+    padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8B5CF6), Color(0xFF38BDF8)],
             ),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('KLAY K LIVE BOT',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.5)),
-                  Text('Assistente de voz da sua live',
-                      style: TextStyle(color: Colors.white54, fontSize: 12)),
-                ],
-              ),
-            ),
-            if (widget.canModerate)
-              IconButton(
-                onPressed: _saving ? null : _load,
-                icon: Icon(Icons.refresh_rounded,
-                    color: _saving ? c.primary : Colors.white70),
-              ),
-          ],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(
+            Icons.smart_toy_rounded,
+            color: Colors.white,
+            size: 20,
+          ),
         ),
-      );
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'KLAY K LIVE BOT',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              Text(
+                'Assistente de voz da sua live',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        if (widget.canModerate)
+          IconButton(
+            onPressed: _saving ? null : _load,
+            icon: Icon(
+              Icons.refresh_rounded,
+              color: _saving ? c.primary : Colors.white70,
+            ),
+          ),
+      ],
+    ),
+  );
 
   Widget _statusHeader(KlaykColors c) {
     final on = _settings.enabled;
@@ -226,8 +250,9 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
         ),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: on ? const Color(0xFF22C55E).withValues(alpha: 0.5)
-                    : Colors.white12,
+          color: on
+              ? const Color(0xFF22C55E).withValues(alpha: 0.5)
+              : Colors.white12,
           width: 1,
         ),
       ),
@@ -241,8 +266,9 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
               color: on ? const Color(0xFF22C55E) : const Color(0xFFFF4D6A),
               boxShadow: [
                 BoxShadow(
-                  color: (on ? const Color(0xFF22C55E) : const Color(0xFFFF4D6A))
-                      .withValues(alpha: 0.6),
+                  color:
+                      (on ? const Color(0xFF22C55E) : const Color(0xFFFF4D6A))
+                          .withValues(alpha: 0.6),
                   blurRadius: 8,
                 ),
               ],
@@ -251,7 +277,11 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
           const SizedBox(width: 8),
           Text(
             on ? '🟢 ONLINE' : '🔴 OFFLINE',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 13,
+            ),
           ),
           const Spacer(),
           if (widget.canModerate && !_saving)
@@ -262,8 +292,13 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
             )
           else if (_saving)
             const SizedBox(
-                width: 16, height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF22C55E))),
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF22C55E),
+              ),
+            ),
         ],
       ),
     );
@@ -296,27 +331,31 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
   }
 
   Widget _errorView(KlaykColors c) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline_rounded, color: Colors.white38, size: 40),
-              const SizedBox(height: 10),
-              Text(_error!, style: const TextStyle(color: Colors.white70)),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: _load,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: c.primary,
-                  side: const BorderSide(color: Color(0xFF8B5CF6)),
-                ),
-                child: const Text('Tentar novamente'),
-              ),
-            ],
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Colors.white38,
+            size: 40,
           ),
-        ),
-      );
+          const SizedBox(height: 10),
+          Text(_error!, style: const TextStyle(color: Colors.white70)),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: _load,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: c.primary,
+              side: const BorderSide(color: Color(0xFF8B5CF6)),
+            ),
+            child: const Text('Tentar novamente'),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _buildTab(KlaykColors c) {
     final write = widget.canModerate && !_saving;
@@ -339,10 +378,12 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
           settings: _settings,
           onTestSpeak: (t) {
             _queue.cancelAll();
-            _queue.enqueue(LiveBotSpeechItem(
-              text: t,
-              priority: LiveBotSpeechPriority.moderation,
-            ));
+            _queue.enqueue(
+              LiveBotSpeechItem(
+                text: t,
+                priority: LiveBotSpeechPriority.moderation,
+              ),
+            );
           },
           onChange: write ? _save : null,
         );
@@ -353,15 +394,15 @@ class _LiveBotPanelState extends State<LiveBotPanel> {
           announcements: _announcements,
           onChange: (next) {
             setState(() => _announcements = next);
-            _service.log(widget.liveId, eventType: 'announcement',
-                message: 'Anúncio atualizado');
+            _service.log(
+              widget.liveId,
+              eventType: 'announcement',
+              message: 'Anúncio atualizado',
+            );
           },
         );
       default:
-        return SettingsTab(
-          settings: _settings,
-          onChange: write ? _save : null,
-        );
+        return SettingsTab(settings: _settings, onChange: write ? _save : null);
     }
   }
 }
@@ -390,25 +431,30 @@ class _TabChip extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: selected
               ? const LinearGradient(
-                  colors: [Color(0xFF8B5CF6), Color(0xFF38BDF8)])
+                  colors: [Color(0xFF8B5CF6), Color(0xFF38BDF8)],
+                )
               : null,
           color: selected ? null : const Color(0xFF1E1A2B),
           borderRadius: BorderRadius.circular(12),
-          border: selected
-              ? null
-              : Border.all(color: Colors.white12),
+          border: selected ? null : Border.all(color: Colors.white12),
         ),
         child: Row(
           children: [
-            Icon(icon, color: selected ? Colors.white : Colors.white54, size: 16),
+            Icon(
+              icon,
+              color: selected ? Colors.white : Colors.white54,
+              size: 16,
+            ),
             const SizedBox(width: 6),
-            Text(label,
-                style: TextStyle(
-                  color: selected ? Colors.white : Colors.white60,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 11,
-                  letterSpacing: 0.5,
-                )),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : Colors.white60,
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                letterSpacing: 0.5,
+              ),
+            ),
           ],
         ),
       ),

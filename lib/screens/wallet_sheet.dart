@@ -1,10 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/admin_service.dart';
 import '../services/conversion_service.dart';
 import '../services/reward_service.dart';
 import 'conversion_screen.dart';
-import 'store_screen.dart';
+import 'finance_wallet_screen.dart';
+import 'shop_screen.dart';
 
 /// Carteira virtual premium do KLAY K.
 ///
@@ -45,6 +49,7 @@ class _WalletSheetState extends State<WalletSheet> {
   Map<String, dynamic> _progress = const {};
   bool _loading = true;
   String? _error;
+  String? _debugError;
 
   bool _claimingChest = false;
   bool _claimingWatch = false;
@@ -63,6 +68,7 @@ class _WalletSheetState extends State<WalletSheet> {
     setState(() {
       _loading = true;
       _error = null;
+      _debugError = null;
     });
     try {
       // Cargas paralelas: saldo + catálogo + histórico + conversão + missões.
@@ -70,8 +76,8 @@ class _WalletSheetState extends State<WalletSheet> {
         _admin.myWallet(),
         _admin.currencies(),
         _admin.myTransactions(limit: 40),
-        _safe(_conversion.settings()),
-        _safe(_admin.myProgress()),
+        _safeList(_conversion.settings),
+        _safeMap(_admin.myProgress),
       ]);
       if (!mounted) return;
       setState(() {
@@ -84,18 +90,34 @@ class _WalletSheetState extends State<WalletSheet> {
       });
     } catch (e) {
       if (!mounted) return;
+      if (kDebugMode) debugPrint('[KLayK][Wallet] load falhou: $e');
       setState(() {
         _error = e.toString();
+        _debugError = e.toString();
         _loading = false;
       });
     }
   }
 
-  Future<T> _safe<T>(Future<T> future) async {
+  Future<List<Map<String, dynamic>>> _safeList(
+    Future<List<Map<String, dynamic>>> Function() request,
+  ) async {
     try {
-      return await future;
-    } catch (_) {
-      return Future.value(<dynamic>[]).then((_) => ([] as dynamic));
+      return await request();
+    } catch (error) {
+      if (kDebugMode) debugPrint('[KLayK][Wallet] lista falhou: $error');
+      return const [];
+    }
+  }
+
+  Future<Map<String, dynamic>> _safeMap(
+    Future<Map<String, dynamic>> Function() request,
+  ) async {
+    try {
+      return await request();
+    } catch (error) {
+      if (kDebugMode) debugPrint('[KLayK][Wallet] mapa falhou: $error');
+      return const {};
     }
   }
 
@@ -150,6 +172,7 @@ class _WalletSheetState extends State<WalletSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.82,
@@ -169,59 +192,65 @@ class _WalletSheetState extends State<WalletSheet> {
             Expanded(
               child: _loading
                   ? const Center(
-                      child: CircularProgressIndicator(color: Color(0xFF8B5CF6)))
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF8B5CF6),
+                      ),
+                    )
                   : _error != null
-                      ? _buildError()
-                      : RefreshIndicator(
-                          color: const Color(0xFF8B5CF6),
-                          onRefresh: _load,
-                          child: ListView(
-                            controller: scrollController,
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                  ? _buildError()
+                  : RefreshIndicator(
+                      color: const Color(0xFF8B5CF6),
+                      onRefresh: _load,
+                      child: ListView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                        children: [
+                          _buildHeader(l10n),
+                          const SizedBox(height: 14),
+                          _buildPremiumCard(l10n),
+                          const SizedBox(height: 22),
+                          _buildTaskHeader(l10n),
+                          const SizedBox(height: 10),
+                          _buildDailyTasks(l10n),
+                          const SizedBox(height: 24),
+                          _sectionTitle(
+                            Icons.grid_view_rounded,
+                            l10n.coinsSection,
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
                             children: [
-                              _buildHeader(),
-                              const SizedBox(height: 14),
-                              _buildPremiumCard(),
-                              const SizedBox(height: 22),
-                              _buildTaskHeader(),
-                              const SizedBox(height: 10),
-                              _buildDailyTasks(),
-                              const SizedBox(height: 24),
-                              _sectionTitle(
-                                  Icons.grid_view_rounded, 'Moedas'),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: [
-                                  for (final c in _currencies)
-                                    _currencyCard(context, c, _wallet),
-                                ],
-                              ),
-                              const SizedBox(height: 24),
-                              _sectionTitle(
-                                  Icons.receipt_long_rounded, 'Extrato'),
-                              _buildTxFilters(),
-                              if (_filteredTx.isEmpty)
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 20),
-                                  child: Center(
-                                    child: Text(
-                                      _tx.isEmpty
-                                          ? 'Sem movimentações ainda.'
-                                          : 'Nada por aqui nesse filtro.',
-                                      style:
-                                          const TextStyle(color: Colors.white38),
-                                    ),
-                                  ),
-                                )
-                              else
-                                ..._filteredTx
-                                    .map((t) => _txTile(t, _currencies)),
+                              for (final c in _currencies)
+                                _currencyCard(context, c, _wallet),
                             ],
                           ),
-                        ),
+                          const SizedBox(height: 24),
+                          _sectionTitle(
+                            Icons.receipt_long_rounded,
+                            l10n.statementSection,
+                          ),
+                          _buildTxFilters(l10n),
+                          if (_filteredTx.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 20),
+                              child: Center(
+                                child: Text(
+                                  _tx.isEmpty
+                                      ? l10n.noTransactionsYet
+                                      : l10n.nothingInThisFilter,
+                                  style: const TextStyle(color: Colors.white38),
+                                ),
+                              ),
+                            )
+                          else
+                            ..._filteredTx.map(
+                              (t) => _txTile(t, _currencies, l10n),
+                            ),
+                        ],
+                      ),
+                    ),
             ),
           ],
         );
@@ -232,7 +261,7 @@ class _WalletSheetState extends State<WalletSheet> {
   // ---------------------------------------------------------------------------
   // Topo
   // ---------------------------------------------------------------------------
-  Widget _buildHeader() {
+  Widget _buildHeader(AppLocalizations l10n) {
     return Row(
       children: [
         Container(
@@ -256,37 +285,40 @@ class _WalletSheetState extends State<WalletSheet> {
           ),
         ),
         const SizedBox(width: 12),
-        const Column(
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Carteira',
-              style: TextStyle(
+              l10n.wallet,
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 18,
                 fontWeight: FontWeight.w900,
               ),
             ),
             Text(
-              'Seu saldo real',
-              style: TextStyle(color: Colors.white38, fontSize: 12),
+              l10n.yourRealBalance,
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
           ],
         ),
         const Spacer(),
-        _glassPill('🪙 ${_fmt(_credits)}', const Color(0xFFFFD700)),
+        _glassPill('🪙 ${_fmt(_credits, l10n)}', const Color(0xFFFFD700)),
         const SizedBox(width: 8),
         IconButton(
           onPressed: () => ConversionScreen.show(context),
-          tooltip: 'Converter moedas',
+          tooltip: l10n.convertCoins,
           style: IconButton.styleFrom(
             backgroundColor: const Color(0x228B5CF6),
             side: BorderSide(
               color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
             ),
           ),
-          icon: const Icon(Icons.swap_horiz_rounded,
-              color: Color(0xFF8B5CF6), size: 20),
+          icon: const Icon(
+            Icons.swap_horiz_rounded,
+            color: Color(0xFF8B5CF6),
+            size: 20,
+          ),
         ),
       ],
     );
@@ -302,7 +334,11 @@ class _WalletSheetState extends State<WalletSheet> {
       ),
       child: Text(
         text,
-        style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 13),
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w800,
+          fontSize: 13,
+        ),
       ),
     );
   }
@@ -313,7 +349,7 @@ class _WalletSheetState extends State<WalletSheet> {
   /// Card do saldo — limpo e compacto (preto/grafite + roxo neon + dourado só
   /// p/ moedas), sem glass-blur nem adornos decorativos. Valores reais do
   /// backend e ações reais: Obter moedas → Loja, Converter → conversão.
-  Widget _buildPremiumCard() {
+  Widget _buildPremiumCard(AppLocalizations l10n) {
     final brl = _brlEstimate;
     return Container(
       width: double.infinity,
@@ -323,11 +359,7 @@ class _WalletSheetState extends State<WalletSheet> {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF211447),
-            Color(0xFF161130),
-            Color(0xFF0E1124),
-          ],
+          colors: [Color(0xFF211447), Color(0xFF161130), Color(0xFF0E1124)],
         ),
         border: Border.all(
           color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
@@ -344,14 +376,17 @@ class _WalletSheetState extends State<WalletSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.workspace_premium_rounded,
-                  color: Color(0xFFFFD700), size: 16),
-              SizedBox(width: 6),
+              const Icon(
+                Icons.workspace_premium_rounded,
+                color: Color(0xFFFFD700),
+                size: 16,
+              ),
+              const SizedBox(width: 6),
               Text(
-                'CARTEIRA KLAY K',
-                style: TextStyle(
+                l10n.walletCardBadge,
+                style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
@@ -374,8 +409,11 @@ class _WalletSheetState extends State<WalletSheet> {
                     colors: [Color(0xFFFFD700), Color(0xFFFF8A00)],
                   ),
                 ),
-                child: const Icon(Icons.monetization_on_rounded,
-                    color: Color(0xFF1A1205), size: 24),
+                child: const Icon(
+                  Icons.monetization_on_rounded,
+                  color: Color(0xFF1A1205),
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -386,7 +424,7 @@ class _WalletSheetState extends State<WalletSheet> {
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        _fmt(_credits),
+                        _fmt(_credits, l10n),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 34,
@@ -395,9 +433,12 @@ class _WalletSheetState extends State<WalletSheet> {
                         ),
                       ),
                     ),
-                    const Text(
-                      'Saldo em Moedas',
-                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    Text(
+                      l10n.coinBalanceLabel,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -407,7 +448,7 @@ class _WalletSheetState extends State<WalletSheet> {
           if (brl != null) ...[
             const SizedBox(height: 10),
             Text(
-              '≈ R\$ ${brl.toStringAsFixed(2)} (saldo estimado p/ resgate)',
+              l10n.estimatedRedeemBalance(brl.toStringAsFixed(2)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white54, fontSize: 12),
@@ -418,25 +459,38 @@ class _WalletSheetState extends State<WalletSheet> {
             children: [
               Expanded(
                 child: _GradientActionButton(
-                  label: 'Obter moedas',
+                  label: l10n.getCoins,
                   icon: Icons.add_rounded,
                   gradient: const [Color(0xFF8B5CF6), Color(0xFF38BDF8)],
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const StoreScreen()),
-                  ),
+                  onPressed: () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const ShopScreen())),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _GradientActionButton(
-                  label: 'Converter',
+                  label: l10n.convertAction,
                   icon: Icons.swap_horiz_rounded,
                   gold: true,
                   onPressed: () => ConversionScreen.show(context),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: OutlinedButton.icon(
+              onPressed: () => FinanceWalletScreen.show(context),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF8B5CF6),
+                side: const BorderSide(color: Color(0xFF8B5CF6)),
+              ),
+              icon: const Icon(Icons.savings_rounded, size: 18),
+              label: Text(l10n.financeExpandWallet),
+            ),
           ),
         ],
       ),
@@ -446,14 +500,14 @@ class _WalletSheetState extends State<WalletSheet> {
   // ---------------------------------------------------------------------------
   // Tarefas diárias
   // ---------------------------------------------------------------------------
-  Widget _buildTaskHeader() {
-    return const Row(
+  Widget _buildTaskHeader(AppLocalizations l10n) {
+    return Row(
       children: [
-        Icon(Icons.bolt_rounded, color: Color(0xFFFFD700), size: 18),
-        SizedBox(width: 6),
+        const Icon(Icons.bolt_rounded, color: Color(0xFFFFD700), size: 18),
+        const SizedBox(width: 6),
         Text(
-          'Tarefas diárias',
-          style: TextStyle(
+          l10n.dailyTasks,
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 14,
             fontWeight: FontWeight.w800,
@@ -463,7 +517,7 @@ class _WalletSheetState extends State<WalletSheet> {
     );
   }
 
-  Widget _buildDailyTasks() {
+  Widget _buildDailyTasks(AppLocalizations l10n) {
     return Column(
       children: [
         Row(
@@ -472,9 +526,9 @@ class _WalletSheetState extends State<WalletSheet> {
               child: _DailyTaskCard(
                 icon: Icons.card_giftcard_rounded,
                 iconColor: const Color(0xFFFFD700),
-                title: 'Bônus Diário',
-                subtitle: 'Abra seu baú grátis',
-                reward: '+recompensas',
+                title: l10n.dailyBonus,
+                subtitle: l10n.openFreeChest,
+                reward: l10n.plusRewards,
                 loading: _claimingChest,
                 onPressed: _claimChest,
               ),
@@ -484,9 +538,9 @@ class _WalletSheetState extends State<WalletSheet> {
               child: _DailyTaskCard(
                 icon: Icons.play_circle_fill_rounded,
                 iconColor: const Color(0xFF38BDF8),
-                title: 'Recompensa assistida',
-                subtitle: 'A cada 20s de vídeo',
-                reward: '+15 moedas',
+                title: l10n.watchRewardTitle,
+                subtitle: l10n.every20sOfVideo,
+                reward: l10n.watchRewardAmount,
                 loading: _claimingWatch,
                 onPressed: _claimWatch,
               ),
@@ -503,22 +557,28 @@ class _WalletSheetState extends State<WalletSheet> {
 
   Future<void> _claimChest() async {
     if (_claimingChest) return;
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _claimingChest = true);
     try {
       final res = await _admin.claimDailyChest();
       if (!mounted) return;
       final daily = res['daily'];
       final status = daily is Map ? daily['status']?.toString() : '';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(status == 'unlocked' || status == 'opened'
-            ? 'Baú diário liberado! Abra na aba de presentes.'
-            : 'Baú diário indisponível agora.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status == 'unlocked' || status == 'opened'
+                ? l10n.chestUnlocked
+                : l10n.chestUnavailable,
+          ),
+        ),
+      );
       _load();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível reclamar o baú.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.chestClaimFail)));
     } finally {
       if (mounted) setState(() => _claimingChest = false);
     }
@@ -526,16 +586,19 @@ class _WalletSheetState extends State<WalletSheet> {
 
   Future<void> _claimWatch() async {
     if (_claimingWatch) return;
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _claimingWatch = true);
     try {
       final res = await RewardService.instance.claimWatchCycleReward();
       if (!mounted) return;
       if (res.ok) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('+${res.reward} moedas no saldo real!')));
+          SnackBar(content: Text(l10n.watchRewardClaimed(res.reward))),
+        );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(res.error ?? 'Recompensa ainda em cooldown.')));
+          SnackBar(content: Text(res.error ?? l10n.rewardInCooldown)),
+        );
       }
       _load();
     } finally {
@@ -564,13 +627,13 @@ class _WalletSheetState extends State<WalletSheet> {
   }
 
   /// Chips de categoria do extrato (filtro só de apresentação).
-  Widget _buildTxFilters() {
-    const filters = [
-      'Tudo',
-      'Entradas',
-      'Saídas',
-      'Presentes',
-      'Recompensas',
+  Widget _buildTxFilters(AppLocalizations l10n) {
+    final filters = [
+      l10n.txFilterAll,
+      l10n.txFilterIn,
+      l10n.txFilterOut,
+      l10n.giftsTitle,
+      l10n.rewards,
     ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -609,7 +672,11 @@ class _WalletSheetState extends State<WalletSheet> {
   }
 
   Widget _currencyCard(
-      BuildContext context, Map<String, dynamic> currency, Map<String, dynamic> wallet) {
+    BuildContext context,
+    Map<String, dynamic> currency,
+    Map<String, dynamic> wallet,
+  ) {
+    final l10n = AppLocalizations.of(context)!;
     final width = (MediaQuery.of(context).size.width - 42) / 2;
     final id = currency['id']?.toString() ?? '';
     final emoji = currency['emoji']?.toString() ?? '🪙';
@@ -636,24 +703,28 @@ class _WalletSheetState extends State<WalletSheet> {
               const Spacer(),
               if (currency['is_premium'] == true)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFD4AF37).withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Text(
-                    'rare',
-                    style: TextStyle(
-                        color: Color(0xFFD4AF37),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800),
+                  child: Text(
+                    l10n.rareBadge,
+                    style: const TextStyle(
+                      color: Color(0xFFD4AF37),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
-            _fmt(value),
+            _fmt(value, l10n),
             style: TextStyle(
               color: color,
               fontSize: 20,
@@ -672,12 +743,16 @@ class _WalletSheetState extends State<WalletSheet> {
     );
   }
 
-  Widget _txTile(Map<String, dynamic> t, List<Map<String, dynamic>> currencies) {
+  Widget _txTile(
+    Map<String, dynamic> t,
+    List<Map<String, dynamic>> currencies,
+    AppLocalizations l10n,
+  ) {
     final kind = t['kind']?.toString() ?? 'grant';
     final delta = (t['delta'] as num?)?.toInt() ?? 0;
     final gain = delta >= 0;
     final cur = t['currency']?.toString() ?? 'credits';
-    final label = _kindLabel(kind);
+    final label = _kindLabel(kind, l10n);
     final curColor = _currencyColor(cur, currencies);
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -686,8 +761,9 @@ class _WalletSheetState extends State<WalletSheet> {
         width: 34,
         height: 34,
         decoration: BoxDecoration(
-          color: (gain ? curColor : const Color(0xFFFF6B81))
-              .withValues(alpha: 0.14),
+          color: (gain ? curColor : const Color(0xFFFF6B81)).withValues(
+            alpha: 0.14,
+          ),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
@@ -724,25 +800,46 @@ class _WalletSheetState extends State<WalletSheet> {
   }
 
   Widget _buildError() {
+    final l10n = AppLocalizations.of(context)!;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded,
-                color: Colors.white38, size: 32),
-            const SizedBox(height: 10),
-            const Text(
-              'Não foi possível carregar a carteira.',
-              style: TextStyle(color: Colors.white54),
+            const Icon(
+              Icons.cloud_off_rounded,
+              color: Colors.white38,
+              size: 32,
             ),
+            const SizedBox(height: 10),
+            Text(
+              _error ?? l10n.walletLoadFail,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54),
+            ),
+            if (kDebugMode && _debugError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _debugError!,
+                textAlign: TextAlign.center,
+                maxLines: 6,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white30,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             FilledButton.icon(
               onPressed: _load,
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6)),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8B5CF6),
+              ),
               icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Tentar novamente'),
+              label: Text(l10n.retry),
             ),
           ],
         ),
@@ -761,29 +858,26 @@ class _WalletSheetState extends State<WalletSheet> {
 
   String _trim(String? s) =>
       (s ?? '').replaceAll(RegExp(r'\s+'), ' ').trim().isEmpty
-          ? '—'
-          : s!.replaceAll(RegExp(r'\s+'), ' ').trim();
+      ? '—'
+      : s!.replaceAll(RegExp(r'\s+'), ' ').trim();
 
-  String _kindLabel(String kind) {
-    const labels = {
-      'grant': 'Crédito',
-      'spend': 'Gasto',
-      'refund': 'Reembolso',
-      'admin': 'Administração',
-      'reward': 'Recompensa',
-      'chest': 'Baú',
-      'mission': 'Missão',
-      'gift': 'Presente',
+  String _kindLabel(String kind, AppLocalizations l10n) {
+    return switch (kind) {
+      'grant' => l10n.txKindGrant,
+      'spend' => l10n.txKindSpend,
+      'refund' => l10n.txKindRefund,
+      'admin' => l10n.txKindAdmin,
+      'reward' => l10n.txKindReward,
+      'chest' => l10n.txKindChest,
+      'mission' => l10n.txKindMission,
+      'gift' => l10n.txKindGift,
+      _ => kind,
     };
-    return labels[kind] ?? kind;
   }
 
-  String _fmt(Object? v) {
+  String _fmt(Object? v, AppLocalizations l10n) {
     final n = (v is num ? v : 0).toDouble();
-    if (n >= 1e9) return '${(n / 1e9).toStringAsFixed(1)}B';
-    if (n >= 1e6) return '${(n / 1e6).toStringAsFixed(1)}M';
-    if (n >= 1e3) return '${(n / 1e3).toStringAsFixed(1)}k';
-    return n == n.truncateToDouble() ? n.toInt().toString() : n.toStringAsFixed(1);
+    return NumberFormat.compact(locale: l10n.localeName).format(n);
   }
 
   Color _parseColor(String? hex) {
@@ -855,7 +949,10 @@ class _GradientActionButton extends StatelessWidget {
                   )
                 else
                   Icon(icon, color: Colors.white, size: 18),
-                if (loading) const SizedBox(width: 8) else const SizedBox(width: 8),
+                if (loading)
+                  const SizedBox(width: 8)
+                else
+                  const SizedBox(width: 8),
                 if (!loading)
                   Flexible(
                     child: Text(
@@ -906,10 +1003,7 @@ class _DailyTaskCard extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF1B1A26),
-            iconColor.withValues(alpha: 0.10),
-          ],
+          colors: [const Color(0xFF1B1A26), iconColor.withValues(alpha: 0.10)],
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: iconColor.withValues(alpha: 0.35)),
@@ -969,7 +1063,8 @@ class _MissionTaskTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = m['title']?.toString() ?? 'Tarefa';
+    final l10n = AppLocalizations.of(context)!;
+    final title = m['title']?.toString() ?? l10n.taskFallback;
     final icon = m['icon']?.toString() ?? '📋';
     final target = (m['target'] as num?)?.toInt() ?? 1;
     final progress = (m['progress'] as num?)?.toInt() ?? 0;
@@ -979,7 +1074,9 @@ class _MissionTaskTile extends StatelessWidget {
     final rewardsMap = m['rewards'];
     String rewardLabel = 'XP';
     if (rewardsMap is Map && rewardsMap.isNotEmpty) {
-      final entries = rewardsMap.entries.map((e) => '${e.value} ${e.key}').join(' + ');
+      final entries = rewardsMap.entries
+          .map((e) => '${e.value} ${e.key}')
+          .join(' + ');
       if (entries.isNotEmpty) rewardLabel = entries;
     }
 
@@ -1028,7 +1125,9 @@ class _MissionTaskTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  completed ? 'Concluída' : 'Recompensa: $rewardLabel',
+                  completed
+                      ? l10n.missionCompleted
+                      : l10n.missionReward(rewardLabel),
                   style: TextStyle(
                     color: completed ? Colors.white54 : Colors.white38,
                     fontSize: 11,

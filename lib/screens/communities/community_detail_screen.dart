@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../design/klayk_design.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/community_models.dart';
 import '../../services/community_service.dart';
 import '../../services/supabase_service.dart';
@@ -44,12 +45,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       if (!SupabaseService.instance.isConfigured) {
         throw Exception('Supabase não configurado');
       }
-      final membership = await CommunityService.instance
-          .myMembership(_community.id);
-      final fetched = await CommunityService.instance
-          .fetchCommunity(_community.id);
-      final posts = await CommunityService.instance
-          .fetchPosts(_community.id);
+      final membership = await CommunityService.instance.myMembership(
+        _community.id,
+      );
+      final fetched = await CommunityService.instance.fetchCommunity(
+        _community.id,
+      );
+      final posts = await CommunityService.instance.fetchPosts(_community.id);
       if (!mounted) return;
       setState(() {
         _membership = membership;
@@ -83,6 +85,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
 
   Future<void> _createPost() async {
     final controller = TextEditingController();
+    final l10n = AppLocalizations.of(context)!;
     final created = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: const Color(0xFF17151F),
@@ -90,80 +93,83 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 16,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(4),
+      builder: (ctx) {
+        final sheetL10n = AppLocalizations.of(ctx)!;
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Novo post',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              maxLines: 4,
-              maxLength: 500,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: 'Compartilhe algo com a comunidade…',
-                hintStyle: TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: Color(0xFF1B1A26),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(12)),
-                  borderSide: BorderSide.none,
+              const SizedBox(height: 16),
+              Text(
+                sheetL10n.communityDetailNewPost,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: KlayKButton(
-                label: 'Publicar',
-                expanded: true,
-                onPressed: () async {
-                  if (controller.text.trim().isEmpty) return;
-                  await CommunityService.instance.createPost(
-                    _community.id,
-                    content: controller.text.trim(),
-                  );
-                  if (ctx.mounted) Navigator.of(ctx).pop(true);
-                },
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLines: 4,
+                maxLength: 500,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: l10n.communityDetailPostHint,
+                  hintStyle: const TextStyle(color: Colors.white38),
+                  filled: true,
+                  fillColor: const Color(0xFF1B1A26),
+                  border: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: KlayKButton(
+                  label: sheetL10n.communityDetailPublish,
+                  expanded: true,
+                  onPressed: () async {
+                    if (controller.text.trim().isEmpty) return;
+                    await CommunityService.instance.createPost(
+                      _community.id,
+                      content: controller.text.trim(),
+                    );
+                    if (ctx.mounted) Navigator.of(ctx).pop(true);
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
     if (created == true) await _load();
   }
 
   Future<void> _openMembers() async {
-    final members = await CommunityService.instance
-        .fetchMembers(_community.id);
+    final members = await CommunityService.instance.fetchMembers(_community.id);
     if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF17151F),
@@ -177,11 +183,11 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         builder: (ctx, scrollController) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: Text(
-                'Membros',
-                style: TextStyle(
+                l10n.communityDetailMembers,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
@@ -192,18 +198,16 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               child: ListView.separated(
                 controller: scrollController,
                 itemCount: members.length,
-                separatorBuilder: (_, _) => const Divider(
-                  height: 1,
-                  color: Colors.white10,
-                ),
+                separatorBuilder: (_, _) =>
+                    const Divider(height: 1, color: Colors.white10),
                 itemBuilder: (context, i) {
                   final m = members[i];
                   final profile = m['profiles'];
                   final name = profile is Map
                       ? (profile['display_name']?.toString() ??
-                          profile['username']?.toString() ??
-                          'Membro')
-                      : 'Membro';
+                            profile['username']?.toString() ??
+                            l10n.communityDetailRoleMember)
+                      : l10n.communityDetailRoleMember;
                   final user = profile is Map
                       ? profile['username']?.toString() ?? ''
                       : '';
@@ -213,21 +217,29 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                       backgroundColor: Color(0xFF2A2540),
                       child: Icon(Icons.person, color: Colors.white54),
                     ),
-                    title: Text(name,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600)),
+                    title: Text(
+                      name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     subtitle: user.isNotEmpty
-                        ? Text('@$user',
-                            style:
-                                const TextStyle(color: Colors.white38))
+                        ? Text(
+                            '@$user',
+                            style: const TextStyle(color: Colors.white38),
+                          )
                         : null,
                     trailing: role != 'member'
                         ? Chip(
                             label: Text(
-                              role == 'admin' ? 'Admin' : 'Moderador',
+                              role == 'admin'
+                                  ? l10n.communityDetailRoleAdmin
+                                  : l10n.communityDetailRoleModerator,
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 11),
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
                             ),
                             backgroundColor: _kAccent.withValues(alpha: 0.2),
                             side: BorderSide.none,
@@ -244,6 +256,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   }
 
   Future<void> _postActions(CommunityPost post) async {
+    final l10n = AppLocalizations.of(context)!;
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: const Color(0xFF17151F),
@@ -256,38 +269,51 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.flag_outlined, color: _kAccent),
-              title: const Text('Denunciar',
-                  style: TextStyle(color: Colors.white)),
+              title: Text(
+                l10n.communityDetailReport,
+                style: const TextStyle(color: Colors.white),
+              ),
               onTap: () => Navigator.of(ctx).pop('report'),
             ),
             if (_isMod) ...[
               const Divider(height: 1, color: Colors.white10),
               ListTile(
-                leading: const Icon(Icons.visibility_off_outlined,
-                    color: Colors.white54),
-                title: const Text('Ocultar post',
-                    style: TextStyle(color: Colors.white)),
+                leading: const Icon(
+                  Icons.visibility_off_outlined,
+                  color: Colors.white54,
+                ),
+                title: Text(
+                  l10n.communityDetailHidePost,
+                  style: const TextStyle(color: Colors.white),
+                ),
                 onTap: () => Navigator.of(ctx).pop('hide'),
               ),
               ListTile(
                 leading: Icon(
-                  post.pinned
-                      ? Icons.push_pin_outlined
-                      : Icons.push_pin,
+                  post.pinned ? Icons.push_pin_outlined : Icons.push_pin,
                   color: Colors.white54,
                 ),
-                title: Text(post.pinned ? 'Desafixar' : 'Fixar',
-                    style: const TextStyle(color: Colors.white)),
+                title: Text(
+                  post.pinned
+                      ? l10n.communityDetailUnpin
+                      : l10n.communityDetailPin,
+                  style: const TextStyle(color: Colors.white),
+                ),
                 onTap: () => Navigator.of(ctx).pop('pin'),
               ),
             ],
-            if (_isMod || post.userId == SupabaseService.instance.currentUser?.id) ...[
+            if (_isMod ||
+                post.userId == SupabaseService.instance.currentUser?.id) ...[
               const Divider(height: 1, color: Colors.white10),
               ListTile(
-                leading: const Icon(Icons.delete_outline,
-                    color: Color(0xFFFF4D6A)),
-                title: const Text('Excluir',
-                    style: TextStyle(color: Color(0xFFFF4D6A))),
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: Color(0xFFFF4D6A),
+                ),
+                title: Text(
+                  l10n.communityDetailDelete,
+                  style: const TextStyle(color: Color(0xFFFF4D6A)),
+                ),
                 onTap: () => Navigator.of(ctx).pop('delete'),
               ),
             ],
@@ -304,8 +330,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         await CommunityService.instance.hidePost(post.id);
         await _load();
       case 'pin':
-        await CommunityService.instance
-            .pinPost(post.id, !post.pinned);
+        await CommunityService.instance.pinPost(post.id, !post.pinned);
         await _load();
       case 'delete':
         await CommunityService.instance.deletePost(post.id);
@@ -314,12 +339,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   }
 
   Future<void> _reportPost(CommunityPost post) async {
+    final l10n = AppLocalizations.of(context)!;
     final reasons = [
-      'Spam',
-      'Discurso de ódio',
-      'Conteúdo violento',
-      'Assédio',
-      'Outro',
+      l10n.communityDetailReportSpam,
+      l10n.communityDetailReportHate,
+      l10n.communityDetailReportViolence,
+      l10n.communityDetailReportHarassment,
+      l10n.communityDetailReportOther,
     ];
     final reason = await showModalBottomSheet<String>(
       context: context,
@@ -331,21 +357,23 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: Text(
-                'Denunciar post',
-                style: TextStyle(
+                l10n.communityDetailReportTitle,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                 ),
               ),
             ),
-            ...reasons.map((r) => ListTile(
-                  title: Text(r, style: const TextStyle(color: Colors.white)),
-                  onTap: () => Navigator.of(ctx).pop(r),
-                )),
+            ...reasons.map(
+              (r) => ListTile(
+                title: Text(r, style: const TextStyle(color: Colors.white)),
+                onTap: () => Navigator.of(ctx).pop(r),
+              ),
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -358,9 +386,9 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       reason: reason,
     );
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Denúncia enviada. Obrigado!')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.communityDetailReportSent)));
     }
   }
 
@@ -397,13 +425,14 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   }
 
   Widget _body() {
+    final l10n = AppLocalizations.of(context)!;
     if (_loading) return const KlaykListSkeleton(rows: 5);
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar a comunidade. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.communityDetailLoadError,
+        message: l10n.communityDetailLoadErrorMsg,
+        actionLabel: l10n.communitiesLoadErrorAction,
         actionIcon: Icons.refresh_rounded,
         onAction: _load,
       );
@@ -414,13 +443,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          _header(),
+          _header(l10n),
           const SizedBox(height: 18),
           Row(
             children: [
-              const Text(
-                'Publicações',
-                style: TextStyle(
+              Text(
+                l10n.communityDetailPosts,
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
                   fontSize: 16,
@@ -435,13 +464,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
           ),
           const SizedBox(height: 10),
           if (_posts.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 28),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28),
               child: Center(
                 child: Text(
-                  'Ainda não há publicações.\nSeja a primeira voz aqui!',
+                  l10n.communityDetailEmptyPosts,
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white54, height: 1.4),
+                  style: const TextStyle(color: Colors.white54, height: 1.4),
                 ),
               ),
             )
@@ -452,7 +481,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     );
   }
 
-  Widget _header() {
+  Widget _header(AppLocalizations l10n) {
     final communityColors = _communityColors();
     return Container(
       padding: const EdgeInsets.all(16),
@@ -460,10 +489,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF1C1630),
-            Color(0xFF100B1D),
-          ],
+          colors: [Color(0xFF1C1630), Color(0xFF100B1D)],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: communityColors.withValues(alpha: 0.3)),
@@ -481,7 +507,8 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                   borderRadius: BorderRadius.circular(18),
                   color: communityColors.withValues(alpha: 0.18),
                   border: Border.all(
-                      color: communityColors.withValues(alpha: 0.45)),
+                    color: communityColors.withValues(alpha: 0.45),
+                  ),
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -506,10 +533,14 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_community.memberCount} membros · '
-                      '${_community.postCount} posts',
+                      l10n.communityDetailStats(
+                        _community.memberCount,
+                        _community.postCount,
+                      ),
                       style: const TextStyle(
-                          color: Colors.white54, fontSize: 13),
+                        color: Colors.white54,
+                        fontSize: 13,
+                      ),
                     ),
                   ],
                 ),
@@ -530,8 +561,10 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                 child: _isMember
                     ? KlayKSecondaryButton(
                         label: _isAdmin
-                            ? 'Admin'
-                            : (_isMod ? 'Moderador' : 'Entrar'),
+                            ? l10n.communityDetailRoleAdmin
+                            : (_isMod
+                                  ? l10n.communityDetailRoleModerator
+                                  : l10n.communityDetailJoin),
                         icon: _isAdmin
                             ? Icons.shield_outlined
                             : Icons.group_add_outlined,
@@ -539,7 +572,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                         onPressed: _isMod ? null : _toggleJoin,
                       )
                     : KlayKButton(
-                        label: 'Participar',
+                        label: l10n.communityDetailJoin,
                         icon: Icons.group_add_rounded,
                         expanded: true,
                         onPressed: _toggleJoin,
@@ -547,7 +580,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               ),
               const SizedBox(width: 10),
               KlayKSecondaryButton(
-                label: 'Postar',
+                label: l10n.communityDetailPost,
                 icon: Icons.edit_rounded,
                 onPressed: _isMember ? _createPost : _toggleJoin,
               ),
@@ -561,6 +594,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   Color _communityColors() => _kAccent;
 
   Widget _postCard(CommunityPost post) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
@@ -581,8 +615,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                     ? NetworkImage(post.authorAvatar!)
                     : null,
                 child: post.authorAvatar == null
-                    ? const Icon(Icons.person,
-                        color: Colors.white54, size: 20)
+                    ? const Icon(Icons.person, color: Colors.white54, size: 20)
                     : null,
               ),
               const SizedBox(width: 10),
@@ -606,15 +639,20 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                         ),
                         if (post.authorVerified) ...[
                           const SizedBox(width: 4),
-                          const Icon(Icons.verified_rounded,
-                              color: _kAccent, size: 15),
+                          const Icon(
+                            Icons.verified_rounded,
+                            color: _kAccent,
+                            size: 15,
+                          ),
                         ],
                       ],
                     ),
                     Text(
-                      _timeAgo(post.createdAt),
+                      _timeAgo(l10n, post.createdAt),
                       style: const TextStyle(
-                          color: Colors.white38, fontSize: 12),
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -622,16 +660,18 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               if (post.pinned)
                 const Padding(
                   padding: EdgeInsets.only(right: 6),
-                  child: Icon(Icons.push_pin_rounded,
-                      color: Colors.white24, size: 18),
+                  child: Icon(
+                    Icons.push_pin_rounded,
+                    color: Colors.white24,
+                    size: 18,
+                  ),
                 ),
               InkWell(
                 onTap: () => _postActions(post),
                 borderRadius: BorderRadius.circular(8),
                 child: const Padding(
                   padding: EdgeInsets.all(4),
-                  child: Icon(Icons.more_horiz_rounded,
-                      color: Colors.white38),
+                  child: Icon(Icons.more_horiz_rounded, color: Colors.white38),
                 ),
               ),
             ],
@@ -655,9 +695,10 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               Text(
                 '#${_community.slug}',
                 style: TextStyle(
-                    color: _kAccent.withValues(alpha: 0.8),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600),
+                  color: _kAccent.withValues(alpha: 0.8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -672,9 +713,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       builder: (context, snap) {
         final liked = snap.data ?? false;
         return _iconWithCount(
-          liked
-              ? Icons.favorite_rounded
-              : Icons.favorite_border_rounded,
+          liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
           post.likesCount,
           color: liked ? const Color(0xFFFF4D6A) : Colors.white70,
           onTap: () async {
@@ -730,13 +769,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     if (added == true) await _load();
   }
 
-  String _timeAgo(DateTime dt) {
+  String _timeAgo(AppLocalizations l10n, DateTime dt) {
     final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'agora';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}min';
-    if (diff.inHours < 24) return '${diff.inHours}h';
-    if (diff.inDays < 7) return '${diff.inDays}d';
-    return '${diff.inDays ~/ 7}sem';
+    if (diff.inMinutes < 1) return l10n.communityRelNow;
+    if (diff.inMinutes < 60) return l10n.communityRelMinutes(diff.inMinutes);
+    if (diff.inHours < 24) return l10n.communityRelHours(diff.inHours);
+    if (diff.inDays < 7) return l10n.communityRelDays(diff.inDays);
+    return l10n.communityRelWeeks(diff.inDays ~/ 7);
   }
 }
 
@@ -770,20 +809,19 @@ class _CommentsSheetState extends State<_CommentsSheet> {
     if (text.isEmpty) return;
     _ctrl.clear();
     setState(() {
-      _comments = CommunityService.instance
-          .fetchComments(widget.post.id);
+      _comments = CommunityService.instance.fetchComments(widget.post.id);
     });
     await CommunityService.instance.addComment(widget.post.id, text);
     if (mounted) {
       setState(() {
-        _comments = CommunityService.instance
-            .fetchComments(widget.post.id);
+        _comments = CommunityService.instance.fetchComments(widget.post.id);
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -793,11 +831,11 @@ class _CommentsSheetState extends State<_CommentsSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
-                'Comentários',
-                style: TextStyle(
+                l10n.communityDetailComments,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
@@ -812,16 +850,20 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                   if (snap.connectionState != ConnectionState.done) {
                     return const Center(
                       child: CircularProgressIndicator(
-                          color: _kAccent, strokeWidth: 2.5),
+                        color: _kAccent,
+                        strokeWidth: 2.5,
+                      ),
                     );
                   }
                   if (comments.isEmpty) {
-                    return const Center(
+                    return Center(
                       child: Text(
-                        'Sem comentários ainda.\nSeja o primeiro!',
+                        l10n.communityDetailCommentsEmpty,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Colors.white38, height: 1.4),
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          height: 1.4,
+                        ),
                       ),
                     );
                   }
@@ -840,14 +882,16 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                             const CircleAvatar(
                               radius: 16,
                               backgroundColor: Color(0xFF2A2540),
-                              child: Icon(Icons.person,
-                                  color: Colors.white54, size: 18),
+                              child: Icon(
+                                Icons.person,
+                                color: Colors.white54,
+                                size: 18,
+                              ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
@@ -855,8 +899,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                                         child: Text(
                                           c.authorDisplay,
                                           maxLines: 1,
-                                          overflow:
-                                              TextOverflow.ellipsis,
+                                          overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontWeight: FontWeight.w700,
@@ -866,10 +909,11 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                                       ),
                                       const SizedBox(width: 6),
                                       Text(
-                                        _relative(c.createdAt),
+                                        _relative(l10n, c.createdAt),
                                         style: const TextStyle(
-                                            color: Colors.white24,
-                                            fontSize: 11),
+                                          color: Colors.white24,
+                                          fontSize: 11,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -877,9 +921,10 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                                   Text(
                                     c.content,
                                     style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 13,
-                                        height: 1.4),
+                                      color: Colors.white70,
+                                      fontSize: 13,
+                                      height: 1.4,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -903,9 +948,8 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                         controller: _ctrl,
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
-                          hintText: 'Escreva um comentário…',
-                          hintStyle:
-                              const TextStyle(color: Colors.white38),
+                          hintText: l10n.communityDetailCommentHint,
+                          hintStyle: const TextStyle(color: Colors.white38),
                           filled: true,
                           fillColor: const Color(0xFF1B1A26),
                           border: OutlineInputBorder(
@@ -931,11 +975,11 @@ class _CommentsSheetState extends State<_CommentsSheet> {
     );
   }
 
-  String _relative(DateTime dt) {
+  String _relative(AppLocalizations l10n, DateTime dt) {
     final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'agora';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}min';
-    if (diff.inHours < 24) return '${diff.inHours}h';
-    return '${diff.inDays}d';
+    if (diff.inMinutes < 1) return l10n.communityRelNow;
+    if (diff.inMinutes < 60) return l10n.communityRelMinutes(diff.inMinutes);
+    if (diff.inHours < 24) return l10n.communityRelHours(diff.inHours);
+    return l10n.communityRelDays(diff.inDays);
   }
 }

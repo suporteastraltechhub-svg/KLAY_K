@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_service.dart';
@@ -29,8 +30,8 @@ class RewardClaimResult {
     final map = raw is Map<String, dynamic>
         ? raw
         : raw is Map
-            ? Map<String, dynamic>.from(raw)
-            : <String, dynamic>{};
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{};
     final ok = map['ok'] == true;
     final reward = (map['reward'] as num?)?.toInt() ?? 0;
     final balance = (map['balance'] as num?)?.toInt() ?? 0;
@@ -96,7 +97,9 @@ class RewardService {
   Future<int?> fetchCreditsBalance() async {
     try {
       final r = await _db.rpc('my_wallet');
-      final map = r is Map ? Map<String, dynamic>.from(r) : const <String, dynamic>{};
+      final map = r is Map
+          ? Map<String, dynamic>.from(r)
+          : const <String, dynamic>{};
       return (map['credits'] as num?)?.toInt();
     } catch (_) {
       return null;
@@ -123,6 +126,11 @@ class RewardTimerController extends ChangeNotifier {
   int _tick = 0;
   bool _active = false;
   bool _claiming = false;
+  bool _disposed = false;
+
+  /// Valor de [setActive] que ficou esperando o fim do frame.
+  bool? _pendingActive;
+  bool _deferredScheduled = false;
 
   RewardTimerController({this.onClaimed});
 
@@ -132,8 +140,7 @@ class RewardTimerController extends ChangeNotifier {
     return (_tick / ticksPerCycle).clamp(0.0, 1.0);
   }
 
-  bool get isRunning =>
-      _timer != null && _timer!.isActive && !_claiming;
+  bool get isRunning => _timer != null && _timer!.isActive && !_claiming;
 
   bool get isClaiming => _claiming;
 
@@ -141,8 +148,45 @@ class RewardTimerController extends ChangeNotifier {
 
   /// Liga/desliga o ciclo. Use `false` quando o feed sair de foco, o app for
   /// para background, não houver vídeo reproduzindo etc.
+  ///
+  /// Nunca notifica durante o build: os `AnimatedBuilder` que escutam este
+  /// controller receberiam `markNeedsBuild()` com a árvore ainda em construção
+  /// ("setState() or markNeedsBuild() called during build"). Nesse caso a
+  /// aplicação é adiada para depois do frame.
   void setActive(bool active) {
     if (active == _active) return;
+    if (_disposed) return;
+    if (_isBuildingFrame) {
+      _defer(active);
+      return;
+    }
+    _apply(active);
+  }
+
+  /// `true` enquanto o framework está na fase de build/layout/paint do frame.
+  bool get _isBuildingFrame =>
+      SchedulerBinding.instance.schedulerPhase ==
+      SchedulerPhase.persistentCallbacks;
+
+  /// Adia a aplicação para o fim do frame, sem duplicar callbacks e sem
+  /// perder o valor mais recente pedido.
+  void _defer(bool active) {
+    _pendingActive = active;
+    if (_deferredScheduled) return;
+    _deferredScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _deferredScheduled = false;
+      final value = _pendingActive;
+      _pendingActive = null;
+      // O widget pode ter sido descartado enquanto esperava o frame: nesse caso
+      // o controller já está disposed e notificar lançaria.
+      if (value == null || _disposed) return;
+      if (value == _active) return;
+      _apply(value);
+    });
+  }
+
+  void _apply(bool active) {
     _active = active;
     if (active) {
       _resumeIfReady();
@@ -219,6 +263,9 @@ class RewardTimerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _pendingActive = null;
+    _deferredScheduled = false;
     _pause();
     super.dispose();
   }

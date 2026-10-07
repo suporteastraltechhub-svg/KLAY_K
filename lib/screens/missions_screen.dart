@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/admin_service.dart';
 import '../services/supabase_service.dart';
+import '../l10n/app_localizations.dart';
 import 'chests_screen.dart';
 
 /// Missões do KLAY K: tarefas diárias/semanais com recompensas multi-moeda.
@@ -50,7 +51,9 @@ class _MissionsScreenState extends State<MissionsScreen> {
 
   Future<void> _load() async {
     if (!SupabaseService.instance.isConfigured) {
-      if (mounted) setState(() => _error = 'Modo demo: conecte-se para ver missões.');
+      if (mounted) {
+        setState(() => _error = AppLocalizations.of(context)!.missionsDemoHint);
+      }
       return;
     }
     try {
@@ -68,6 +71,7 @@ class _MissionsScreenState extends State<MissionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.85,
@@ -84,11 +88,11 @@ class _MissionsScreenState extends State<MissionsScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 14, 20, 6),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
               child: Text(
-                '🎯 Missões',
-                style: TextStyle(
+                '🎯 ${l10n.missionsTab}',
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
@@ -108,37 +112,41 @@ class _MissionsScreenState extends State<MissionsScreen> {
                       ),
                     )
                   : _progress == null
-                      ? const Center(
-                          child: CircularProgressIndicator(
-                              color: Color(0xFF8B5CF6)),
-                        )
-                      : ListView(
-                          controller: scrollController,
-                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 30),
-                          children: [
-                            _levelCard(),
-                            const SizedBox(height: 10),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                ChestsScreen.show(context);
-                              },
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFB794FF),
-                                side: const BorderSide(color: Color(0xFF8B5CF6)),
-                              ),
-                              icon: const Icon(Icons.inventory_2_rounded, size: 18),
-                              label: const Text('🎁 Abrir meus baús'),
-                            ),
-                            const SizedBox(height: 10),
-                            const Text(
-                              'Completa missões e ganha moedas, cristais e baús!',
-                              style: TextStyle(color: Colors.white54, fontSize: 12),
-                            ),
-                            const SizedBox(height: 10),
-                            ..._missionTiles(),
-                          ],
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF8B5CF6),
+                      ),
+                    )
+                  : ListView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 30),
+                      children: [
+                        _levelCard(),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            ChestsScreen.show(context);
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFB794FF),
+                            side: const BorderSide(color: Color(0xFF8B5CF6)),
+                          ),
+                          icon: const Icon(Icons.inventory_2_rounded, size: 18),
+                          label: Text(l10n.openMyChests),
                         ),
+                        const SizedBox(height: 10),
+                        Text(
+                          l10n.missionsRewardsHint,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ..._missionsContent(),
+                      ],
+                    ),
             ),
           ],
         );
@@ -147,14 +155,18 @@ class _MissionsScreenState extends State<MissionsScreen> {
   }
 
   Widget _levelCard() {
+    final l10n = AppLocalizations.of(context)!;
     final level = (_progress?['level'] as num?)?.toInt() ?? 1;
-    final title = _progress?['level_title']?.toString() ?? 'Novato';
+    final title = _progress?['level_title']?.toString() ?? l10n.newcomerTitle;
     final xpTotal = (_progress?['xp_total'] as num?)?.toInt() ?? 0;
     final xpStart = (_progress?['xp_level_start'] as num?)?.toInt() ?? 0;
     final xpNext = (_progress?['xp_next_level'] as num?)?.toInt();
     final hasNext = xpNext != null && xpNext > 0;
     final ratio = hasNext
-        ? (((xpTotal - xpStart) / (xpNext - xpStart)).clamp(0.0, 1.0)).toDouble()
+        ? (((xpTotal - xpStart) / (xpNext - xpStart)).clamp(
+            0.0,
+            1.0,
+          )).toDouble()
         : 1.0;
 
     return Container(
@@ -164,7 +176,9 @@ class _MissionsScreenState extends State<MissionsScreen> {
           colors: [Color(0xFF2A1B54), Color(0xFF151126)],
         ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.5)),
+        border: Border.all(
+          color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
+        ),
       ),
       child: Row(
         children: [
@@ -195,7 +209,7 @@ class _MissionsScreenState extends State<MissionsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Nível $level • $title',
+                  l10n.levelLine(level, title),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -209,15 +223,16 @@ class _MissionsScreenState extends State<MissionsScreen> {
                     value: ratio,
                     minHeight: 8,
                     backgroundColor: Colors.white12,
-                    valueColor:
-                        const AlwaysStoppedAnimation<Color>(Color(0xFF8B5CF6)),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Color(0xFF8B5CF6),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   hasNext
-                      ? '$xpTotal / $xpNext XP'
-                      : '$xpTotal XP • nível máximo',
+                      ? l10n.xpProgress(xpTotal, xpNext)
+                      : l10n.xpMaxLevel(xpTotal),
                   style: const TextStyle(color: Colors.white54, fontSize: 11),
                 ),
               ],
@@ -228,28 +243,82 @@ class _MissionsScreenState extends State<MissionsScreen> {
     );
   }
 
-  List<Widget> _missionTiles() {
+  /// Conteúdo das missões: agrupa "hoje" (diárias rotativas) e "esta semana"
+  /// (semanais). Quando todas as diárias do dia foram concluídas, mostra o
+  /// banner de celebração — nada é inventado: vem do backend (my_progress).
+  List<Widget> _missionsContent() {
+    final l10n = AppLocalizations.of(context)!;
     final missions = (_progress?['missions'] as List?) ?? const [];
     if (missions.isEmpty) {
       return [
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 28),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
           child: Center(
             child: Text(
-              'Nenhuma missão disponível agora.',
-              style: TextStyle(color: Colors.white38),
+              l10n.noMissionsAvailable,
+              style: const TextStyle(color: Colors.white38),
             ),
           ),
         ),
       ];
     }
-    return missions.map((raw) {
+    final dailies = <Map<String, dynamic>>[];
+    final weeklies = <Map<String, dynamic>>[];
+    for (final raw in missions) {
       final m = Map<String, dynamic>.from(raw as Map);
-      return _missionTile(m);
-    }).toList();
+      ((m['frequency']?.toString() ?? 'daily') == 'weekly' ? weeklies : dailies)
+          .add(m);
+    }
+
+    final widgets = <Widget>[];
+    if (dailies.isNotEmpty && dailies.every((m) => m['completed'] == true)) {
+      widgets.add(_dailyDoneBanner());
+    }
+    if (dailies.isNotEmpty) {
+      widgets.add(_SectionLabel(l10n.todayLabel));
+      widgets.addAll(dailies.map(_missionTile));
+    }
+    if (weeklies.isNotEmpty) {
+      widgets.add(const SizedBox(height: 8));
+      widgets.add(_SectionLabel(l10n.thisWeekLabel));
+      widgets.addAll(weeklies.map(_missionTile));
+    }
+    return widgets;
+  }
+
+  /// Banner de "missões de hoje concluídas" (recompensas já pagas no backend).
+  Widget _dailyDoneBanner() {
+    final l10n = AppLocalizations.of(context)!;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF34D399), Color(0xFF10B981)],
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          const Text('🎉', style: TextStyle(fontSize: 22)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              l10n.dailyMissionsDone,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _missionTile(Map<String, dynamic> m) {
+    final l10n = AppLocalizations.of(context)!;
     final target = (m['target'] as num?)?.toInt() ?? 1;
     final progress = (m['progress'] as num?)?.toInt() ?? 0;
     final completed = m['completed'] == true;
@@ -280,7 +349,7 @@ class _MissionsScreenState extends State<MissionsScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  m['title']?.toString() ?? 'Missão',
+                  m['title']?.toString() ?? l10n.missionLabel,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 14,
@@ -295,8 +364,13 @@ class _MissionsScreenState extends State<MissionsScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  frequency == 'weekly' ? 'semanal' : 'diária',
-                  style: const TextStyle(color: Color(0xFFC4B5FD), fontSize: 10),
+                  frequency == 'weekly'
+                      ? l10n.missionWeekly
+                      : l10n.missionDaily,
+                  style: const TextStyle(
+                    color: Color(0xFFC4B5FD),
+                    fontSize: 10,
+                  ),
                 ),
               ),
             ],
@@ -340,7 +414,9 @@ class _MissionsScreenState extends State<MissionsScreen> {
             spacing: 6,
             runSpacing: 6,
             children: [
-              _rewardChip('+${m['xp_reward']} XP'),
+              _rewardChip(
+                '+${l10n.xpAmount(m['xp_reward']?.toString() ?? '0')}',
+              ),
               if (rewards is Map && rewards.isNotEmpty)
                 ...rewards.entries.map((e) {
                   final cur = e.key?.toString() ?? '';
@@ -348,7 +424,7 @@ class _MissionsScreenState extends State<MissionsScreen> {
                   return _rewardChip('+$amount $cur', premium: _isPremium(cur));
                 }),
               if (awardChest != null && awardChest.isNotEmpty)
-                _rewardChip('🎁 Baú', premium: true),
+                _rewardChip(l10n.chestRewardChip, premium: true),
             ],
           ),
         ],
@@ -356,7 +432,13 @@ class _MissionsScreenState extends State<MissionsScreen> {
     );
   }
 
-  static const Set<String> _premium = {'diamonds', 'crystals', 'rubies', 'emeralds', 'crystal_rare'};
+  static const Set<String> _premium = {
+    'diamonds',
+    'crystals',
+    'rubies',
+    'emeralds',
+    'crystal_rare',
+  };
 
   bool _isPremium(String cur) => _premium.contains(cur);
 
@@ -378,6 +460,28 @@ class _MissionsScreenState extends State<MissionsScreen> {
           color: premium ? const Color(0xFFD4AF37) : Colors.white70,
           fontSize: 11,
           fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// Título discreto de seção ("Hoje" / "Esta semana").
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 8),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white70,
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );

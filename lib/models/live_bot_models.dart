@@ -2,14 +2,30 @@ import 'package:flutter/material.dart' show IconData, Icons, immutable;
 
 /// Modos de leitura de comentários pelo Live Bot.
 enum LiveBotCommentMode {
-  all('all', 'Ler todos', 'Lê todos os comentários do chat.',
-      Icons.chat_bubble_outline_rounded),
-  selected('selected', 'Comentários selecionados', 'Lê apenas comentários escolhidos.',
-      Icons.push_pin_rounded),
-  questions('questions', 'Ler perguntas', 'Lê comentários que parecem perguntas.',
-      Icons.help_outline_rounded),
-  highlighted('highlighted', 'Apenas destacados', 'Lê comentários destacados pelo criador.',
-      Icons.star_border_rounded);
+  all(
+    'all',
+    'Ler todos',
+    'Lê todos os comentários do chat.',
+    Icons.chat_bubble_outline_rounded,
+  ),
+  selected(
+    'selected',
+    'Comentários selecionados',
+    'Lê apenas comentários escolhidos.',
+    Icons.push_pin_rounded,
+  ),
+  questions(
+    'questions',
+    'Ler perguntas',
+    'Lê comentários que parecem perguntas.',
+    Icons.help_outline_rounded,
+  ),
+  highlighted(
+    'highlighted',
+    'Apenas destacados',
+    'Lê comentários destacados pelo criador.',
+    Icons.star_border_rounded,
+  );
 
   const LiveBotCommentMode(this.value, this.label, this.description, this.icon);
   final String value;
@@ -56,12 +72,12 @@ class LiveBotVoiceSettings {
   });
 
   Map<String, dynamic> toJson() => {
-        'voice': voice,
-        'voice_type': voiceType,
-        'language': language,
-        'speed': speed,
-        'volume': volume,
-      };
+    'voice': voice,
+    'voice_type': voiceType,
+    'language': language,
+    'speed': speed,
+    'volume': volume,
+  };
 
   LiveBotVoiceSettings copyWith({
     String? voice,
@@ -101,11 +117,10 @@ class LiveBotAutoReply {
 
   Map<String, dynamic> toJson() => {'question': question, 'answer': answer};
 
-  static LiveBotAutoReply fromJson(Map<String, dynamic> j) =>
-      LiveBotAutoReply(
-        question: j['question']?.toString() ?? '',
-        answer: j['answer']?.toString() ?? '',
-      );
+  static LiveBotAutoReply fromJson(Map<String, dynamic> j) => LiveBotAutoReply(
+    question: j['question']?.toString() ?? '',
+    answer: j['answer']?.toString() ?? '',
+  );
 }
 
 /// Configurações completas do Live Bot para uma live.
@@ -170,7 +185,8 @@ class LiveBotSettings {
   LiveBotSettings copyWithCommentMode(LiveBotCommentMode mode) =>
       copyWith(commentMode: mode);
 
-  LiveBotSettings copyWithCommentsEnabled(bool v) => copyWith(commentsEnabled: v);
+  LiveBotSettings copyWithCommentsEnabled(bool v) =>
+      copyWith(commentsEnabled: v);
 
   LiveBotSettings copyWithModerationEnabled(bool v) =>
       copyWith(moderationEnabled: v);
@@ -191,13 +207,14 @@ class LiveBotSettings {
             ? Map<String, dynamic>.from((j['voice_settings'] as Map))
             : null,
       ),
-      commentMode: LiveBotCommentMode.fromValue(j['comment_reading_mode']?.toString()),
+      commentMode: LiveBotCommentMode.fromValue(
+        j['comment_reading_mode']?.toString(),
+      ),
       commentsEnabled: j['comments_enabled'] != false,
       autoRepliesEnabled: j['auto_replies_enabled'] == true,
       autoReplies: [
         for (final e in ar)
-          if (e is Map)
-            LiveBotAutoReply.fromJson(Map<String, dynamic>.from(e)),
+          if (e is Map) LiveBotAutoReply.fromJson(Map<String, dynamic>.from(e)),
       ],
       announcementsEnabled: j['announcements_enabled'] != false,
       announcementsIntervalSeconds:
@@ -222,9 +239,8 @@ class LiveBotSpeechItem {
     String? id,
   }) : id = id ?? '';
 
-  String get display => commentAuthor != null
-      ? '$commentAuthor disse: $text'
-      : text;
+  String get display =>
+      commentAuthor != null ? '$commentAuthor disse: $text' : text;
 }
 
 /// Um anúncio salvo no backend.
@@ -249,8 +265,7 @@ class LiveBotAnnouncement {
         id: j['id']?.toString() ?? '',
         liveId: j['live_id']?.toString() ?? '',
         message: j['message']?.toString() ?? '',
-        intervalSeconds:
-            (j['interval_seconds'] as num?)?.toInt() ?? 120,
+        intervalSeconds: (j['interval_seconds'] as num?)?.toInt() ?? 120,
         enabled: j['enabled'] != false,
       );
 }

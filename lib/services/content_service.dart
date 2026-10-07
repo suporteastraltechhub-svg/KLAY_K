@@ -1,11 +1,20 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/post_models.dart';
 import 'app_config.dart';
 import 'storage_upload.dart';
 import 'supabase_service.dart';
+
+/// Entrada de cache em memória com validade (URL assinada já resolvida).
+class _UrlCacheEntry {
+  final String url;
+  final DateTime at;
+  const _UrlCacheEntry(this.url, this.at);
+}
 
 /// Camada de acesso ao conteúdo real do KLAY K (feed, upload, curtidas,
 /// comentários, salvos, seguidores, notificações e perfil). Não há mocks aqui:
@@ -32,16 +41,25 @@ class ContentService {
     int? offset,
   }) async {
     await SupabaseService.instance.ensureAuthenticated();
+    debugPrint(
+      '[ContentService.fetchFeed] autenticação concluída '
+      '(limit=$limit, offset=$offset, onlyFollowing=$onlyFollowing)',
+    );
     final me = _db.auth.currentUser?.id;
 
-    final base = _db.from('posts').select(
-      '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
-    );
+    final base = _db
+        .from('posts')
+        .select(
+          '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+        );
     final filtered = userId != null ? base.eq('user_id', userId) : base;
     final ordered = filtered.order('created_at', ascending: false);
-    final rows = await (offset != null && offset > 0
-        ? ordered.range(offset, offset + limit - 1)
-        : ordered.limit(limit));
+    final rows =
+        await (offset != null && offset > 0
+                ? ordered.range(offset, offset + limit - 1)
+                : ordered.limit(limit))
+            .timeout(SupabaseService.networkTimeout);
+    debugPrint('[ContentService.fetchFeed] posts consultados: ${rows.length}');
     final posts = <FeedPost>[];
 
     // Recolhe os ids para consultar likes/saves do usuário atual em lote.
@@ -55,41 +73,51 @@ class ContentService {
     Set<String> savedIds = {};
     Set<String> followingIds = {};
     if (me != null && ids.isNotEmpty) {
-      try {
-        final likeRes = await _db
-            .from('post_likes')
-            .select('post_id')
-            .eq('user_id', me)
-            .inFilter('post_id', ids);
-        likedIds = (likeRes as List)
-            .whereType<Map>()
-            .map((r) => r['post_id']?.toString() ?? '')
-            .toSet();
-      } catch (_) {}
+      // Curtidas/salvos/seguindo vêm do MESMO query já feito — antes eram
+      // consultas em série (2 RTTs extras de latência no feed). Agora são
+      // lançadas em paralelo; uma falha não derruba as demais.
+      final likesQ = _db
+          .from('post_likes')
+          .select('post_id')
+          .eq('user_id', me)
+          .inFilter('post_id', ids);
+      final savesQ = _db
+          .from('saved_posts')
+          .select('post_id')
+          .eq('user_id', me);
+      final followsQ = onlyFollowing
+          ? _db.from('follows').select('following_id').eq('follower_id', me)
+          : null;
 
-      try {
-        final savedRes = await _db
-            .from('saved_posts')
-            .select('post_id')
-            .eq('user_id', me);
-        savedIds = (savedRes as List)
-            .whereType<Map>()
-            .map((r) => r['post_id']?.toString() ?? '')
-            .toSet();
-      } catch (_) {}
+      Future<List<dynamic>> safe(Future<dynamic> q) => q
+          .timeout(SupabaseService.networkTimeout)
+          .then<List<dynamic>>((r) => r as List<dynamic>)
+          .onError((Object _, StackTrace __) => const <dynamic>[]);
 
-      if (onlyFollowing) {
-        try {
-          final followRes = await _db
-              .from('follows')
-              .select('following_id')
-              .eq('follower_id', me);
-          followingIds = (followRes as List)
-              .whereType<Map>()
-              .map((r) => r['following_id']?.toString() ?? '')
-              .toSet();
-        } catch (_) {}
+      final results = await Future.wait<List<dynamic>>([
+        safe(likesQ),
+        safe(savesQ),
+        if (followsQ != null) safe(followsQ),
+      ]);
+
+      likedIds = results[0]
+          .whereType<Map>()
+          .map((r) => r['post_id']?.toString() ?? '')
+          .toSet();
+      savedIds = results[1]
+          .whereType<Map>()
+          .map((r) => r['post_id']?.toString() ?? '')
+          .toSet();
+      if (followsQ != null) {
+        followingIds = results[2]
+            .whereType<Map>()
+            .map((r) => r['following_id']?.toString() ?? '')
+            .toSet();
       }
+      debugPrint(
+        '[ContentService.fetchFeed] likes=${likedIds.length} '
+        'saves=${savedIds.length} follows=${followingIds.length}',
+      );
     }
 
     for (final row in rows.whereType<Map>()) {
@@ -161,7 +189,9 @@ class ContentService {
     try {
       final rows = await _db
           .from('posts')
-          .select('*, profiles:user_id(display_name, username, avatar_url, is_verified)')
+          .select(
+            '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+          )
           .inFilter('id', ids)
           .order('created_at', ascending: false)
           .limit(limit);
@@ -263,14 +293,17 @@ class ContentService {
     final ext = coverExtension != null && coverExtension.trim().isNotEmpty
         ? coverExtension.toLowerCase().replaceFirst(RegExp(r'^\.'), '')
         : 'png';
-    final resolvedMime = mime ??
+    final resolvedMime =
+        mime ??
         (ext == 'jpg' || ext == 'jpeg'
             ? 'image/jpeg'
             : ext == 'webp'
-                ? 'image/webp'
-                : 'image/png');
+            ? 'image/webp'
+            : 'image/png');
     final path = '${user.id}/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _db.storage.from('covers').upload(
+    await _db.storage
+        .from('covers')
+        .upload(
           path,
           file,
           fileOptions: FileOptions(
@@ -321,12 +354,15 @@ class ContentService {
     String? coverUrl,
   }) async {
     try {
-      final res = await _db.rpc('update_post', params: {
-        'p_post_id': postId,
-        'p_description': description,
-        'p_hashtags': hashtags,
-        'p_cover_url': coverUrl,
-      });
+      final res = await _db.rpc(
+        'update_post',
+        params: {
+          'p_post_id': postId,
+          'p_description': description,
+          'p_hashtags': hashtags,
+          'p_cover_url': coverUrl,
+        },
+      );
       final data = res is Map ? Map<String, dynamic>.from(res) : const {};
       return data['ok'] == true;
     } on PostgrestException catch (e) {
@@ -340,16 +376,33 @@ class ContentService {
   }
 
   /// Apaga o próprio vídeo: remove os arquivos de vídeo/capa do Storage
-  /// (best-effort) e então remove a linha (RPC backend valida a posse; a
-  /// cascata limpa curtidas/comentários/salvos).
+  /// (best-effort, nunca bloqueia a exclusão) e então remove a linha. O RPC
+  /// backend valida a posse e também limpa o Storage server-side; a cascata
+  /// limpa curtidas/comentários/salvos.
   Future<void> deletePost(
     String postId, {
     String? videoPath,
     String? coverUrl,
   }) async {
-    removeVideoObject(videoPath ?? '');
-    removeCoverObject(coverUrl ?? '');
+    await removeVideoObject(videoPath ?? '');
+    await removeCoverObject(coverUrl ?? '');
     await _db.rpc('delete_post', params: {'p_post_id': postId});
+  }
+
+  /// Mensagem amigável para falha ao apagar conteúdo próprio, mapeando
+  /// os erros reais do RPC `delete_post` (security definer).
+  static String deletePostErrorMessage(Object error, AppLocalizations l10n) {
+    final message = error.toString();
+    if (message.contains('not_authenticated')) {
+      return l10n.deleteSessionExpired;
+    }
+    if (message.contains('not_owner')) {
+      return l10n.deleteNotOwner;
+    }
+    if (message.contains('post_not_found')) {
+      return l10n.deletePostGone;
+    }
+    return l10n.deletePostFail;
   }
 
   /// Edita a própria live (título, descrição, categoria, privacidade e capa)
@@ -363,14 +416,17 @@ class ContentService {
     String? coverUrl,
   }) async {
     try {
-      final res = await _db.rpc('update_live', params: {
-        'p_live_id': liveId,
-        'p_title': title,
-        'p_description': description,
-        'p_category': category,
-        'p_privacy': privacy,
-        'p_cover_url': coverUrl,
-      });
+      final res = await _db.rpc(
+        'update_live',
+        params: {
+          'p_live_id': liveId,
+          'p_title': title,
+          'p_description': description,
+          'p_category': category,
+          'p_privacy': privacy,
+          'p_cover_url': coverUrl,
+        },
+      );
       final data = res is Map ? Map<String, dynamic>.from(res) : const {};
       return data['ok'] == true;
     } on PostgrestException catch (e) {
@@ -383,15 +439,69 @@ class ContentService {
     }
   }
 
-  /// Apaga a própria live: remove a capa do Storage (se houver, best-effort) e
-  /// remove a linha (RPC backend valida a posse; a cascata limpa participantes/
-  /// chat/presentes/eventos).
-  Future<void> deleteLive(
-    String liveId, {
-    String? coverUrl,
-  }) async {
-    removeCoverObject(coverUrl ?? '');
+  /// Apaga a própria live: se ainda estiver ativa, primeiro encerra (backend
+  /// valida a posse; viewers são avisados e a sala LiveKit é fechada), depois
+  /// remove a capa do Storage (best-effort, aguardado) e a linha — a cascata
+  /// remove participantes/chat/presentes/eventos.
+  Future<void> deleteLive(String liveId, {String? coverUrl}) async {
+    if (await _isLiveActive(liveId)) {
+      try {
+        // Encerramento é idempotente; só o dono consegue (edge valida).
+        await _db.functions.invoke('end-live', body: {'live_id': liveId});
+      } catch (_) {
+        // Segue para o delete: o RPC delete_live continua validando a posse e
+        // a remoção da linha apaga o histórico via cascata.
+      }
+    }
+    try {
+      await removeCoverObject(coverUrl ?? '');
+    } catch (_) {}
     await _db.rpc('delete_live', params: {'p_live_id': liveId});
+  }
+
+  /// Apaga em massa as lives que o solicitante tem permissão de apagar no
+  /// backend (próprias sempre; TODAS apenas com capability 'moderation').
+  /// Antes da exclusão, tenta encerrar (edge `end-live`, idempotente e
+  /// validado por posse) as salas ativas informadas em [activeIds] para que os
+  /// viewers sejam avisados. Retorna a quantidade removida; `-1` quando o RPC
+  /// ainda não existe no backend (nada é apagado).
+  Future<int> deleteAllLives({List<String> activeIds = const []}) async {
+    for (final id in activeIds) {
+      try {
+        await _db.functions.invoke('end-live', body: {'live_id': id});
+      } catch (_) {}
+    }
+    try {
+      final res = await _db.rpc('delete_lives', params: {'p_all': true});
+      final data = res is Map ? Map<String, dynamic>.from(res) : const {};
+      final deleted = data['deleted'];
+      if (deleted is int) return deleted;
+      if (deleted is num) return deleted.toInt();
+      return -1;
+    } on PostgrestException catch (e) {
+      if (e.code == 'PGRST202' ||
+          e.message.toString().contains('404') ||
+          e.message.toString().contains('function')) {
+        return -1;
+      }
+      rethrow;
+    }
+  }
+
+  Future<bool> _isLiveActive(String liveId) async {
+    try {
+      final res = await _db
+          .from('lives')
+          .select('status')
+          .eq('id', liveId)
+          .maybeSingle();
+      if (res == null) return true;
+      return res['status'] == 'live';
+    } catch (_) {
+      // Sem leitura (rede/RLS), tenta encerrar de qualquer forma — o edge é
+      // idempotente e trata 'already ended' sem erro.
+      return true;
+    }
   }
 
   /// Cria um post de vídeo na tabela `public.posts`.
@@ -410,7 +520,8 @@ class ContentService {
           'video_url': videoPath,
           if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
           'description': description,
-          if (audioName != null && audioName.isNotEmpty) 'audio_name': audioName,
+          if (audioName != null && audioName.isNotEmpty)
+            'audio_name': audioName,
           'hashtags': hashtags,
         })
         .select()
@@ -421,16 +532,23 @@ class ContentService {
   /// Obtém a URL assinada (1h) de um vídeo privado via Edge Function
   /// `signed-url`. Necessário para reproduzir vídeos do feed.
   Future<String> signedVideoUrl(String path) async {
-    final res = await SupabaseService.instance.invoke('signed-url', body: {
-      'bucket': 'videos',
-      'path': path,
-    });
+    final res = await SupabaseService.instance.invoke(
+      'signed-url',
+      body: {'bucket': 'videos', 'path': path},
+    );
     final url = res['url'] as String?;
     if (url == null || url.isEmpty) {
       throw StateError('Não foi possível gerar a URL assinada do vídeo.');
     }
     return url;
   }
+
+  /// Cache curto de URLs assinadas (chave: post id). Evita re-resolver o mesmo
+  /// vídeo privado a cada reload/paginação; LRU limitado + TTL curto (a URL
+  /// assinada expira), então a memória nunca cresce sem limite.
+  final Map<String, _UrlCacheEntry> _signedUrlCache = {};
+  static const int _signedUrlCacheMax = 256;
+  static const Duration _signedUrlCacheTtl = Duration(minutes: 4);
 
   /// Se o vídeo for público (URL http/https) retorna direto; caso contrário
   /// resolve a URL assinada. Útil para `VideoPlayerController.networkUrl`.
@@ -441,7 +559,17 @@ class ContentService {
       // Pode já ser uma URL assinada ou um link externo de demonstração.
       return url;
     }
-    return signedVideoUrl(url);
+    final now = DateTime.now();
+    final cached = _signedUrlCache[post.id];
+    if (cached != null && now.difference(cached.at) < _signedUrlCacheTtl) {
+      return cached.url;
+    }
+    final signed = await signedVideoUrl(url);
+    if (_signedUrlCache.length >= _signedUrlCacheMax) {
+      _signedUrlCache.remove(_signedUrlCache.keys.first);
+    }
+    _signedUrlCache[post.id] = _UrlCacheEntry(signed, now);
+    return signed;
   }
 
   // ---------------------------------------------------------------------------
@@ -452,10 +580,10 @@ class ContentService {
     final user = await SupabaseService.instance.ensureAuthenticated();
     final owner = await _postOwner(postId);
     try {
-      await _db.from('post_likes').insert({
-        'post_id': postId,
-        'user_id': user.id,
-      }).then((_) {});
+      await _db
+          .from('post_likes')
+          .insert({'post_id': postId, 'user_id': user.id})
+          .then((_) {});
       if (owner != null && owner != user.id) {
         await notify(
           toUserId: owner,
@@ -473,7 +601,11 @@ class ContentService {
 
   Future<String?> _postOwner(String postId) async {
     try {
-      final res = await _db.from('posts').select('user_id').eq('id', postId).maybeSingle();
+      final res = await _db
+          .from('posts')
+          .select('user_id')
+          .eq('id', postId)
+          .maybeSingle();
       return res?['user_id'] as String?;
     } catch (_) {
       return null;
@@ -496,17 +628,21 @@ class ContentService {
   Future<List<PostComment>> fetchComments(String postId) async {
     final res = await _db
         .from('comments')
-        .select('*, profiles:user_id(display_name, username, avatar_url, is_verified)')
+        .select(
+          '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+        )
         .eq('post_id', postId)
         .order('created_at', ascending: false)
         .limit(200);
     return res
         .whereType<Map>()
-        .map((row) => PostComment.fromJson(
-              Map<String, dynamic>.from(
-                row.map((k, v) => MapEntry(k.toString(), v)),
-              ),
-            ))
+        .map(
+          (row) => PostComment.fromJson(
+            Map<String, dynamic>.from(
+              row.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          ),
+        )
         .toList();
   }
 
@@ -525,7 +661,9 @@ class ContentService {
           if (parentId != null) 'parent_id': parentId,
           'text': text,
         })
-        .select('*, profiles:user_id(display_name, username, avatar_url, is_verified)')
+        .select(
+          '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+        )
         .single();
     if (owner != null && owner != user.id) {
       await notify(
@@ -535,6 +673,12 @@ class ContentService {
         refId: postId,
         message: text,
       );
+    }
+    // Menções reais (@username no texto) geram aviso para o usuário citado.
+    await _notifyCommentMentions(postId, text, user.id, owner);
+    // Resposta a um comentário (parent_id) avisa o autor do comentário pai.
+    if (parentId != null && parentId.isNotEmpty) {
+      await _notifyCommentReply(parentId, postId, user.id);
     }
     return PostComment.fromJson(Map<String, dynamic>.from(res as Map));
   }
@@ -547,8 +691,10 @@ class ContentService {
   /// Retorna `false` se a migração/RPC ainda não estiver aplicada no backend.
   Future<bool> editComment(String commentId, String newText) async {
     try {
-      final res = await SupabaseService.instance.client
-          .rpc('edit_comment', params: {'p_comment_id': commentId, 'p_text': newText});
+      final res = await SupabaseService.instance.client.rpc(
+        'edit_comment',
+        params: {'p_comment_id': commentId, 'p_text': newText},
+      );
       final data = res is Map ? Map<String, dynamic>.from(res) : const {};
       return data['ok'] == true && data['id'] != null;
     } on PostgrestException catch (e) {
@@ -569,10 +715,10 @@ class ContentService {
   Future<void> savePost(String postId) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('saved_posts').insert({
-        'post_id': postId,
-        'user_id': user.id,
-      }).then((_) {});
+      await _db
+          .from('saved_posts')
+          .insert({'post_id': postId, 'user_id': user.id})
+          .then((_) {});
     } on PostgrestException catch (e) {
       if (e.code != '23505') rethrow;
     }
@@ -594,10 +740,10 @@ class ContentService {
   Future<void> followUser(String followingId) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('follows').insert({
-        'follower_id': user.id,
-        'following_id': followingId,
-      }).then((_) {});
+      await _db
+          .from('follows')
+          .insert({'follower_id': user.id, 'following_id': followingId})
+          .then((_) {});
       if (followingId != user.id) {
         await notify(
           toUserId: followingId,
@@ -642,12 +788,18 @@ class ContentService {
     final profile = await SupabaseService.instance.profileFor(userId);
 
     final followersCount = await _countRows(
-      () async =>
-          await _db.from('follows').select('id').eq('following_id', userId).count(),
+      () async => await _db
+          .from('follows')
+          .select('id')
+          .eq('following_id', userId)
+          .count(),
     );
     final followingCount = await _countRows(
-      () async =>
-          await _db.from('follows').select('id').eq('follower_id', userId).count(),
+      () async => await _db
+          .from('follows')
+          .select('id')
+          .eq('follower_id', userId)
+          .count(),
     );
     final likes = await _db
         .from('posts')
@@ -665,7 +817,8 @@ class ContentService {
     }
 
     final postsCount = await _countRows(
-      () async => await _db.from('posts').select('id').eq('user_id', userId).count(),
+      () async =>
+          await _db.from('posts').select('id').eq('user_id', userId).count(),
     );
 
     return CreatorProfile(
@@ -723,17 +876,21 @@ class ContentService {
     if (me == null) return [];
     final res = await _db
         .from('notifications')
-        .select('*, actor:actor_id(display_name, username, avatar_url, is_verified)')
+        .select(
+          '*, actor:actor_id(display_name, username, avatar_url, is_verified)',
+        )
         .eq('user_id', me)
         .order('created_at', ascending: false)
         .limit(100);
     return res
         .whereType<Map>()
-        .map((row) => AppNotification.fromJson(
-              Map<String, dynamic>.from(
-                row.map((k, v) => MapEntry(k.toString(), v)),
-              ),
-            ))
+        .map(
+          (row) => AppNotification.fromJson(
+            Map<String, dynamic>.from(
+              row.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          ),
+        )
         .toList();
   }
 
@@ -771,13 +928,77 @@ class ContentService {
   }) async {
     if (toUserId.isEmpty) return;
     try {
-      await _db.from('notifications').insert({
-        'user_id': toUserId,
-        'actor_id': actorId,
-        'type': type,
-        'ref_id': refId,
-        'message': message ?? '',
-      }).then((_) {});
+      await _db
+          .from('notifications')
+          .insert({
+            'user_id': toUserId,
+            'actor_id': actorId,
+            'type': type,
+            'ref_id': refId,
+            'message': message ?? '',
+          })
+          .then((_) {});
+    } catch (_) {}
+  }
+
+  /// Detecta `@username` no comentário e notifica os usuários reais citados
+  /// (máx. 5 menções por comentário, nunca o autor ou dono do post).
+  Future<void> _notifyCommentMentions(
+    String postId,
+    String text,
+    String actorId,
+    String? ownerId,
+  ) async {
+    final names = RegExp(r'@([\w.]+)')
+        .allMatches(text)
+        .map((m) => m.group(1))
+        .whereType<String>()
+        .where((u) => u.isNotEmpty)
+        .toSet()
+        .take(5);
+    for (final username in names) {
+      try {
+        final row = await _db
+            .from('profiles')
+            .select('id')
+            .eq('username', username)
+            .maybeSingle();
+        final id = row?['id'] as String?;
+        if (id == null || id.isEmpty || id == actorId || id == ownerId) {
+          continue;
+        }
+        await notify(
+          toUserId: id,
+          actorId: actorId,
+          type: 'mention',
+          refId: postId,
+          message: text,
+        );
+      } catch (_) {}
+    }
+  }
+
+  /// Notifica o autor do comentário pai quando alguém responde.
+  Future<void> _notifyCommentReply(
+    String parentId,
+    String postId,
+    String actorId,
+  ) async {
+    try {
+      final parent = await _db
+          .from('comments')
+          .select('user_id')
+          .eq('id', parentId)
+          .maybeSingle();
+      final author = parent?['user_id'] as String?;
+      if (author == null || author.isEmpty || author == actorId) return;
+      await notify(
+        toUserId: author,
+        actorId: actorId,
+        type: 'comment_reply',
+        refId: postId,
+        message: '',
+      );
     } catch (_) {}
   }
 

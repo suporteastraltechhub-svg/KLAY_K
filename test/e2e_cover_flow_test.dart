@@ -27,6 +27,8 @@ import 'package:klay_k/services/content_service.dart';
 import 'package:klay_k/services/supabase_service.dart';
 import 'package:klay_k/theme/klayk_theme.dart';
 
+import 'helpers/l10n_test_utils.dart';
+
 const _adminEmail = 'founder.admin+test@klayk.app';
 const _password = 'KlayKTest#2026!';
 
@@ -57,8 +59,11 @@ void main() {
     test('(setup) inicializa Supabase na zona real', () async {
       SharedPreferences.setMockInitialValues(const {});
       await SupabaseService.instance.ensureReady();
-      expect(SupabaseService.instance.isConfigured, isTrue,
-          reason: 'E2E exige Supabase configurado (rede real habilitada).');
+      expect(
+        SupabaseService.instance.isConfigured,
+        isTrue,
+        reason: 'E2E exige Supabase configurado (rede real habilitada).',
+      );
     }, skip: skipUnlessE2E());
 
     testWidgets('preview, trocar e remover capa (sem rede)', (tester) async {
@@ -70,7 +75,8 @@ void main() {
       // `length` sem I/O (o construtor `XFile(path, length:)` ignora length no
       // IO e faria leitura assíncrona real, que não completa na zona fake-async).
       final tmp = File(
-          '${Directory.systemTemp.path}/klay_cover_preview_${DateTime.now().millisecondsSinceEpoch}.png');
+        '${Directory.systemTemp.path}/klay_cover_preview_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
       tmp.writeAsBytesSync(_tinyPng);
       addTearDown(() => tmp.existsSync() ? tmp.deleteSync() : null);
 
@@ -78,7 +84,10 @@ void main() {
           XFile.fromData(_tinyPng, path: tmp.path);
 
       await tester.pumpWidget(
-        MaterialApp(theme: KlaykTheme.dark(), home: StartLiveScreen(coverPicker: pickCover)),
+        l10nApp(
+          theme: KlaykTheme.dark(),
+          home: StartLiveScreen(coverPicker: pickCover),
+        ),
       );
       await tester.pump();
 
@@ -105,54 +114,60 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('valida formato e tamanho da imagem (sem rede)',
-        (tester) async {
+    testWidgets('valida formato e tamanho da imagem (sem rede)', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(600, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
       final gif = File(
-          '${Directory.systemTemp.path}/klay_cover_bad_${DateTime.now().millisecondsSinceEpoch}.gif');
+        '${Directory.systemTemp.path}/klay_cover_bad_${DateTime.now().millisecondsSinceEpoch}.gif',
+      );
       gif.writeAsBytesSync(_tinyPng);
       addTearDown(() => gif.existsSync() ? gif.deleteSync() : null);
 
       final huge = File(
-          '${Directory.systemTemp.path}/klay_cover_huge_${DateTime.now().millisecondsSinceEpoch}.png');
+        '${Directory.systemTemp.path}/klay_cover_huge_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
       final hugeBytes = Uint8List(10 * 1024 * 1024 + 1); // > 10 MB
       huge.writeAsBytesSync(hugeBytes);
       addTearDown(() => huge.existsSync() ? huge.deleteSync() : null);
 
       var next = gif.path;
       Future<XFile?> pickNext(ImageSource source) async =>
-          XFile.fromData(
-          next == gif.path ? _tinyPng : hugeBytes,
-          path: next,
-        );
+          XFile.fromData(next == gif.path ? _tinyPng : hugeBytes, path: next);
 
       await tester.pumpWidget(
-        MaterialApp(theme: KlaykTheme.dark(), home: StartLiveScreen(coverPicker: pickNext)),
+        l10nApp(
+          theme: KlaykTheme.dark(),
+          home: StartLiveScreen(coverPicker: pickNext),
+        ),
       );
       await tester.pump();
 
       // .gif → erro de formato, sem preview.
       await tester.tap(find.text('Adicionar capa (opcional)'));
       await tester.pump();
-      expect(find.text('Formato não suportado. Use PNG, JPG ou WEBP.'),
-          findsOneWidget);
+      expect(
+        find.text('Formato não suportado. Use PNG, JPG ou WEBP.'),
+        findsOneWidget,
+      );
       expect(find.byType(Image), findsNothing);
 
       // >10MB → erro de tamanho, sem preview.
       next = huge.path;
       await tester.tap(find.text('Adicionar capa (opcional)'));
       await tester.pumpAndSettle();
-      expect(find.text('Imagem muito grande (máx. 10 MB). Escolha outra.'),
-          findsOneWidget);
+      expect(
+        find.text('Imagem muito grande (máx. 10 MB). Escolha outra.'),
+        findsOneWidget,
+      );
       expect(find.byType(Image), findsNothing);
       expect(tester.takeException(), isNull);
     }, skip: kIsWeb ? true : false);
 
-    testWidgets('upload real→criar live→cover_url na listagem',
-        (tester) async {
+    testWidgets('upload real→criar live→cover_url na listagem', (tester) async {
       tester.view.physicalSize = const Size(600, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -161,36 +176,46 @@ void main() {
 
       // Login real (mesmo serviço que a tela de login usa).
       await runReal(tester, () => db.signInWithEmail(_adminEmail, _password));
-      expect(db.hasSession, isTrue,
-          reason: 'sessão real do admin para a capa E2E');
+      expect(
+        db.hasSession,
+        isTrue,
+        reason: 'sessão real do admin para a capa E2E',
+      );
 
       final tmp = File(
-          '${Directory.systemTemp.path}/klay_cover_real_${DateTime.now().millisecondsSinceEpoch}.png');
+        '${Directory.systemTemp.path}/klay_cover_real_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
       tmp.writeAsBytesSync(_tinyPng);
 
       String? createdCoverUrl;
       String? liveId;
       try {
         // Upload REAL para o bucket público `covers` (mesma chamada do app).
-        createdCoverUrl =
-            await runReal(tester, () => ContentService.instance.uploadCover(
-                  tmp,
-                  coverExtension: 'png',
-                ));
+        createdCoverUrl = await runReal(
+          tester,
+          () => ContentService.instance.uploadCover(tmp, coverExtension: 'png'),
+        );
         expect(createdCoverUrl, isNotNull);
-        expect(createdCoverUrl,
-            startsWith('https://oysyuialaelzcxxkfdsl.supabase.co/storage/v1/object/public/covers/'));
+        expect(
+          createdCoverUrl,
+          startsWith(
+            'https://oysyuialaelzcxxkfdsl.supabase.co/storage/v1/object/public/covers/',
+          ),
+        );
 
         // Cria a live REAL com a capa (createLive repassa cover_url).
         final suffix = DateTime.now().millisecondsSinceEpoch;
-        final liveResult = await runReal(tester, () => db.createLive(
-              title: 'E2E capa $suffix',
-              description: '',
-              category: 'Jogos',
-              hashtags: const ['e2e'],
-              privacy: 'public',
-              coverUrl: createdCoverUrl,
-            ));
+        final liveResult = await runReal(
+          tester,
+          () => db.createLive(
+            title: 'E2E capa $suffix',
+            description: '',
+            category: 'Jogos',
+            hashtags: const ['e2e'],
+            privacy: 'public',
+            coverUrl: createdCoverUrl,
+          ),
+        );
         final live = liveResult!;
         liveId = live.id;
         expect(live.coverUrl, createdCoverUrl);
@@ -200,10 +225,16 @@ void main() {
         final found = (rows ?? const <RealLive>[])
             .where((l) => l.id == liveId)
             .toList();
-        expect(found, hasLength(1),
-            reason: 'live recém-criada deve estar em fetchActiveLives');
-        expect(found.first.coverUrl, createdCoverUrl,
-            reason: 'cover_url persistido no registro chega à listagem');
+        expect(
+          found,
+          hasLength(1),
+          reason: 'live recém-criada deve estar em fetchActiveLives',
+        );
+        expect(
+          found.first.coverUrl,
+          createdCoverUrl,
+          reason: 'cover_url persistido no registro chega à listagem',
+        );
       } finally {
         // Cleanup real: encerra a live e remove o objeto do storage.
         if (liveId != null) {
@@ -212,8 +243,10 @@ void main() {
           } catch (_) {}
         }
         if (createdCoverUrl != null) {
-          await runReal(tester, () => ContentService.instance
-              .removeCoverObject(createdCoverUrl!));
+          await runReal(
+            tester,
+            () => ContentService.instance.removeCoverObject(createdCoverUrl!),
+          );
         }
         await runReal(tester, db.signOut);
         tmp.existsSync() ? tmp.deleteSync() : null;

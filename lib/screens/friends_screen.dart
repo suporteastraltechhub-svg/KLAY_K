@@ -6,6 +6,7 @@ import '../services/profile_service.dart';
 import '../theme/klayk_theme.dart';
 import '../widgets/klayk_ux.dart';
 import '../widgets/verified_badge.dart';
+import '../l10n/app_localizations.dart';
 import 'profile/user_profile_screen.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
@@ -88,46 +89,58 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Amizades', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.friendships,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
       body: _loading
           ? const KlaykListSkeleton(rows: 8, withAvatar: true)
           : _failed
-              ? _errorState()
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: _kAccent,
-                  child: _content(),
-                ),
+          ? _errorState()
+          : RefreshIndicator(
+              onRefresh: _load,
+              color: _kAccent,
+              child: _content(),
+            ),
     );
   }
 
   Widget _errorState() {
+    final l10n = AppLocalizations.of(context)!;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_outlined, color: Colors.white38, size: 40),
+            const Icon(
+              Icons.cloud_off_outlined,
+              color: Colors.white38,
+              size: 40,
+            ),
             const SizedBox(height: 14),
-            const Text(
-              'Erro ao carregar',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+            Text(
+              l10n.errorLoading,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Não conseguimos carregar suas amizades. Tentar novamente.',
+            Text(
+              l10n.friendsLoadFail,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white54, height: 1.4),
+              style: const TextStyle(color: Colors.white54, height: 1.4),
             ),
             const SizedBox(height: 18),
             KlayKButton(
-              label: 'Tentar novamente',
+              label: l10n.retry,
               icon: Icons.refresh_rounded,
               onPressed: _load,
             ),
@@ -138,20 +151,20 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   Widget _content() {
+    final l10n = AppLocalizations.of(context)!;
     final hasFriends = _friends.isNotEmpty;
     final hasSuggestions = _suggestions.isNotEmpty;
     final invitees = _counts['invitees'] ?? 0;
     final hasInvites = invitees > 0;
 
     if (!hasFriends && !hasSuggestions && !hasInvites) {
-      return const SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(24),
+      return SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(24),
         child: KlaykEmptyState(
           icon: Icons.people_outline,
-          title: 'Vamos fazer amizades?',
-          message:
-              'Segue criadores e comece a interagir. Sugestões e amigos em comum aparecem aqui.',
+          title: l10n.friendsEmptyTitle,
+          message: l10n.friendsEmptyBody,
         ),
       );
     }
@@ -162,17 +175,29 @@ class _FriendsScreenState extends State<FriendsScreen> {
         _countRow(),
         const SizedBox(height: 18),
         if (hasFriends) ...[
-          _sectionHeader('Amigos', count: _friends.length, icon: Icons.favorite_rounded),
+          _sectionHeader(
+            l10n.friends,
+            count: _friends.length,
+            icon: Icons.favorite_rounded,
+          ),
           _userList(_friends),
           const SizedBox(height: 18),
         ],
         if (hasInvites) ...[
-          _sectionHeader('Convites para seguir', count: invitees, icon: Icons.person_add_alt_1_rounded),
+          _sectionHeader(
+            l10n.followInvitesTitle,
+            count: invitees,
+            icon: Icons.person_add_alt_1_rounded,
+          ),
           _inviteeHint(),
           const SizedBox(height: 6),
         ],
         if (hasSuggestions) ...[
-          _sectionHeader('Sugestões para você', count: _suggestions.length, icon: Icons.wb_sunny_outlined),
+          _sectionHeader(
+            l10n.suggestionsTitle,
+            count: _suggestions.length,
+            icon: Icons.wb_sunny_outlined,
+          ),
           _userList(_suggestions),
         ],
       ],
@@ -181,19 +206,40 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
   Widget _countRow() {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     final c = _counts;
     return Row(
       children: [
-        _countCell(colors, Icons.person_outline_rounded, c['following'] ?? 0, 'Seguindo'),
+        _countCell(
+          colors,
+          Icons.person_outline_rounded,
+          c['following'] ?? 0,
+          l10n.following,
+        ),
         _vDivider(),
-        _countCell(colors, Icons.people_outline_rounded, c['followers'] ?? 0, 'Seguidores'),
+        _countCell(
+          colors,
+          Icons.people_outline_rounded,
+          c['followers'] ?? 0,
+          l10n.followers,
+        ),
         _vDivider(),
-        _countCell(colors, Icons.favorite_rounded, c['friends'] ?? 0, 'Amigos'),
+        _countCell(
+          colors,
+          Icons.favorite_rounded,
+          c['friends'] ?? 0,
+          l10n.friends,
+        ),
       ],
     );
   }
 
-  Widget _countCell(KlaykColors colors, IconData icon, int value, String label) {
+  Widget _countCell(
+    KlaykColors colors,
+    IconData icon,
+    int value,
+    String label,
+  ) {
     return Expanded(
       child: Column(
         children: [
@@ -201,15 +247,23 @@ class _FriendsScreenState extends State<FriendsScreen> {
           const SizedBox(height: 6),
           Text(
             '$value',
-            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
         ],
       ),
     );
   }
 
-  Widget _vDivider() => Container(width: 1, height: 44, color: const Color(0xFF2A2540));
+  Widget _vDivider() =>
+      Container(width: 1, height: 44, color: const Color(0xFF2A2540));
 
   Widget _sectionHeader(String title, {int? count, IconData? icon}) {
     return Padding(
@@ -223,7 +277,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
           Expanded(
             child: Text(
               count != null ? '$title  ·  $count' : title,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
             ),
           ),
         ],
@@ -232,19 +290,21 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   Widget _inviteeHint() {
-    return const Padding(
-      padding: EdgeInsets.only(bottom: 6),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
       child: Text(
-        'Pessoas que te seguem e você ainda não segue de volta.',
-        style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
+        AppLocalizations.of(context)!.inviteeHintText,
+        style: const TextStyle(
+          color: Colors.white38,
+          fontSize: 12,
+          height: 1.4,
+        ),
       ),
     );
   }
 
   Widget _userList(List<UserProfile> users) {
-    return Column(
-      children: users.map((u) => _row(u)).toList(),
-    );
+    return Column(children: users.map((u) => _row(u)).toList());
   }
 
   Widget _row(UserProfile user) {
@@ -256,10 +316,9 @@ class _FriendsScreenState extends State<FriendsScreen> {
       leading: CircleAvatar(
         radius: 22,
         backgroundColor: const Color(0xFF2A2740),
-        backgroundImage:
-            (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
-                ? NetworkImage(user.avatarUrl!)
-                : null,
+        backgroundImage: (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
+            ? NetworkImage(user.avatarUrl!)
+            : null,
         child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)
             ? const Icon(Icons.person, color: Colors.white54)
             : null,
@@ -271,7 +330,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
             child: Text(
               user.name,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           if (user.isVerified) ...[
@@ -290,14 +353,23 @@ class _FriendsScreenState extends State<FriendsScreen> {
               style: OutlinedButton.styleFrom(
                 backgroundColor: user.isFollowing ? null : _kAccent,
                 foregroundColor: Colors.white,
-                side: BorderSide(color: user.isFollowing ? const Color(0xFF3A3550) : _kAccent),
+                side: BorderSide(
+                  color: user.isFollowing ? const Color(0xFF3A3550) : _kAccent,
+                ),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 minimumSize: const Size(0, 34),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
               ),
               child: Text(
-                user.isFollowing ? 'Seguindo' : 'Seguir',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                user.isFollowing
+                    ? AppLocalizations.of(context)!.following
+                    : AppLocalizations.of(context)!.follow,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             )
           : null,

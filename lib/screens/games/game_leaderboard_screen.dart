@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/game_service.dart';
 import '../../theme/klayk_theme.dart';
 import '../../widgets/klayk_ux.dart';
@@ -39,32 +40,32 @@ class _GameLeaderboardScreenState extends State<GameLeaderboardScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: colors.bg,
-      appBar: AppBar(
-        title: Text('Ranking — ${widget.game.name}'),
-      ),
+      appBar: AppBar(title: Text(l10n.gameRankingOf(widget.game.name))),
       body: _loading
           ? const Center(child: KlaykLoader())
           : _entries.isEmpty
-              ? const KlaykEmptyState(
-                  icon: Icons.leaderboard_rounded,
-                  title: 'Ranking vazio',
-                  message: 'Seja o primeiro a pontuar neste jogo!',
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _entries.length,
-                    itemBuilder: (context, i) => _entryTile(_entries[i]),
-                  ),
-                ),
+          ? KlaykEmptyState(
+              icon: Icons.leaderboard_rounded,
+              title: l10n.gameRankEmpty,
+              message: l10n.gameRankEmptyMsg,
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: _entries.length,
+                itemBuilder: (context, i) => _entryTile(_entries[i]),
+              ),
+            ),
     );
   }
 
   Widget _entryTile(GameRankEntry e) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     final medal = switch (e.rank) {
       1 => '🥇',
       2 => '🥈',
@@ -111,10 +112,12 @@ class _GameLeaderboardScreenState extends State<GameLeaderboardScreen> {
                       Flexible(
                         child: Text(
                           e.displayName.isEmpty
-                              ? 'Participante'
+                              ? l10n.gameParticipant
                               : e.displayName,
                           style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w700),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -126,14 +129,13 @@ class _GameLeaderboardScreenState extends State<GameLeaderboardScreen> {
                   ),
                   Text(
                     e.bestScore.toString(),
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.white38),
+                    style: const TextStyle(fontSize: 12, color: Colors.white38),
                   ),
                 ],
               ),
             ),
             Text(
-              '${e.bestScore} pts',
+              l10n.gamePoints(e.bestScore),
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w800,

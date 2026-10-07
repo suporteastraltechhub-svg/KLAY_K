@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/social_service.dart';
 import 'rankings_screen.dart';
 
@@ -38,8 +39,9 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
       setState(() {
         _achievements = list;
         _progress = progress;
-        _totalXp =
-            list.where((a) => a.unlocked).fold(0, (sum, a) => sum + a.xp);
+        _totalXp = list
+            .where((a) => a.unlocked)
+            .fold(0, (sum, a) => sum + a.xp);
         _loading = false;
       });
     } catch (_) {
@@ -48,31 +50,34 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
   }
 
   void _openRankings() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const RankingsScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const RankingsScreen()));
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final unlocked = _achievements.where((a) => a.unlocked).length;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        title: const Text('Conquistas',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.achievements,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
             onPressed: _openRankings,
             icon: const Icon(Icons.leaderboard_rounded),
-            tooltip: 'Classificações',
+            tooltip: l10n.rankingsTitle,
           ),
           IconButton(
             onPressed: _load,
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Atualizar',
+            tooltip: l10n.refresh,
           ),
         ],
       ),
@@ -84,12 +89,13 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                 _levelCard(),
                 const SizedBox(height: 12),
                 if (_progress.missions.isNotEmpty) ...[
-                  const Text(
-                    'Missões',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800),
+                  Text(
+                    l10n.missionsTab,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   ..._progress.missions.map((m) => _missionTile(m)),
@@ -103,24 +109,35 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.emoji_events_rounded,
-                          color: _kAccent, size: 40),
+                      const Icon(
+                        Icons.emoji_events_rounded,
+                        color: _kAccent,
+                        size: 40,
+                      ),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '$unlocked de ${_achievements.length} desbloqueadas',
+                              l10n.achievementsProgress(
+                                unlocked,
+                                _achievements.length,
+                              ),
                               style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800),
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
                             const SizedBox(height: 4),
-                            Text('$_totalXp XP em conquistas',
-                                style: const TextStyle(
-                                    color: Colors.white54, fontSize: 13)),
+                            Text(
+                              l10n.xpInAchievements(_totalXp),
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 13,
+                              ),
+                            ),
                             const SizedBox(height: 8),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(10),
@@ -131,7 +148,8 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                                 minHeight: 8,
                                 backgroundColor: const Color(0xFF2A2740),
                                 valueColor: const AlwaysStoppedAnimation(
-                                    _kAccent),
+                                  _kAccent,
+                                ),
                               ),
                             ),
                           ],
@@ -142,11 +160,13 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                 ),
                 const SizedBox(height: 12),
                 if (_achievements.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
                     child: Center(
-                      child: Text('Nenhuma conquista disponível',
-                          style: TextStyle(color: Colors.white54)),
+                      child: Text(
+                        l10n.noAchievements,
+                        style: const TextStyle(color: Colors.white54),
+                      ),
                     ),
                   )
                 else
@@ -155,11 +175,11 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                     physics: const NeverScrollableScrollPhysics(),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 10,
-                      crossAxisSpacing: 10,
-                      childAspectRatio: 0.95,
-                    ),
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 0.95,
+                        ),
                     itemCount: _achievements.length,
                     itemBuilder: (context, i) {
                       final a = _achievements[i];
@@ -173,6 +193,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
 
   Widget _levelCard() {
     final p = _progress;
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -192,7 +213,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
               shape: BoxShape.circle,
             ),
             child: Text(
-              '$p.level',
+              '${p.level}',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 26,
@@ -206,7 +227,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Nível ${p.level} • ${p.levelTitle}',
+                  l10n.levelLine(p.level, p.levelTitle),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -216,8 +237,8 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                 const SizedBox(height: 4),
                 Text(
                   p.xpNextLevel == null
-                      ? '${p.xpTotal} XP total'
-                      : '${p.xpTotal} XP • ${p.xpToNext} XP para o próximo nível',
+                      ? l10n.xpTotalLine(p.xpTotal)
+                      : l10n.xpToNextLevel(p.xpTotal, p.xpToNext),
                   style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
                 const SizedBox(height: 8),
@@ -239,6 +260,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
   }
 
   Widget _missionTile(MissionProgress m) {
+    final l10n = AppLocalizations.of(context)!;
     final pct = m.target <= 0 ? 0.0 : (m.progress / m.target).clamp(0.0, 1.0);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -254,7 +276,10 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
       ),
       child: Row(
         children: [
-          Text(m.icon.isEmpty ? '🎯' : m.icon, style: const TextStyle(fontSize: 20)),
+          Text(
+            m.icon.isEmpty ? '🎯' : m.icon,
+            style: const TextStyle(fontSize: 20),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -273,9 +298,13 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                       ),
                     ),
                     Text(
-                      m.frequency == 'daily' ? 'Hoje' : 'Semana',
+                      m.frequency == 'daily'
+                          ? l10n.todayLabel
+                          : l10n.thisWeekLabel,
                       style: const TextStyle(
-                          color: Colors.white38, fontSize: 11),
+                        color: Colors.white38,
+                        fontSize: 11,
+                      ),
                     ),
                   ],
                 ),
@@ -287,14 +316,19 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                     minHeight: 5,
                     backgroundColor: const Color(0xFF2A2740),
                     valueColor: AlwaysStoppedAnimation(
-                        m.completed ? const Color(0xFF4CAF50) : _kAccent),
+                      m.completed ? const Color(0xFF4CAF50) : _kAccent,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   m.completed
-                      ? 'Concluída (+${m.xpReward} XP)'
-                      : '${m.progress}/${m.target} • +${m.xpReward} XP',
+                      ? l10n.missionCompletedXp(m.xpReward)
+                      : l10n.missionProgressXp(
+                          m.progress,
+                          m.target,
+                          m.xpReward,
+                        ),
                   style: TextStyle(
                     color: m.completed
                         ? const Color(0xFF4CAF50)
@@ -308,8 +342,11 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
           if (m.completed)
             const Padding(
               padding: EdgeInsets.only(left: 8),
-              child: Icon(Icons.check_circle_rounded,
-                  color: Color(0xFF4CAF50), size: 20),
+              child: Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF4CAF50),
+                size: 20,
+              ),
             ),
         ],
       ),
@@ -317,6 +354,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
   }
 
   Widget _achievementCard(Achievement a) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -346,7 +384,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '+${a.xp} XP',
+            l10n.xpAmount(a.xp),
             style: TextStyle(
               color: a.unlocked ? _kAccent : Colors.white24,
               fontSize: 12,
@@ -393,11 +431,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
             : const Color(0xFF2A2740),
         shape: BoxShape.circle,
       ),
-      child: Icon(
-        data,
-        color: unlocked ? _kAccent : Colors.white24,
-        size: 28,
-      ),
+      child: Icon(data, color: unlocked ? _kAccent : Colors.white24, size: 28),
     );
   }
 }

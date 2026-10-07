@@ -41,9 +41,9 @@ void main() {
     }
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('com.llfbandit.app_links/events'),
-      (call) async => null,
-    );
+          const MethodChannel('com.llfbandit.app_links/events'),
+          (call) async => null,
+        );
   });
 
   Future<void> resetView(WidgetTester tester) async {
@@ -70,8 +70,9 @@ void main() {
   }
 
   Future<void> openSignup(WidgetTester tester) async {
-    await tester.pumpWidget(MaterialApp(
-        theme: KlaykTheme.dark(), home: const AuthScreen()));
+    await tester.pumpWidget(
+      MaterialApp(theme: KlaykTheme.dark(), home: const AuthScreen()),
+    );
     await tester.pump(const Duration(milliseconds: 450));
     await tester.pump();
     await tester.tap(find.text('Criar conta'));
@@ -86,40 +87,61 @@ void main() {
   }
 
   group('🧪 E2E VALIDAÇÃO DE CONVITE NA TELA DE CADASTRO (KLAY_E2E)', () {
-    test('(setup) inicializa Supabase real e recupera o código do admin',
-        () async {
-      SharedPreferences.setMockInitialValues(const {});
-      await SupabaseService.instance.ensureReady();
-      expect(SupabaseService.instance.isConfigured, isTrue);
+    test(
+      '(setup) inicializa Supabase real e recupera o código do admin',
+      () async {
+        SharedPreferences.setMockInitialValues(const {});
+        await SupabaseService.instance.ensureReady();
+        expect(SupabaseService.instance.isConfigured, isTrue);
 
-      final db = SupabaseService.instance;
-      await db.signInWithEmail(_adminEmail, _password);
-      expect(db.hasSession, isTrue);
-      final r = await db.client.rpc('invite_summary', params: const {});
-      final m = (r is Map)
-          ? r.map((k, v) => MapEntry(k.toString(), v))
-          : <String, dynamic>{};
-      realAdminCode = (m['code']?.toString() ?? '').toUpperCase();
-      expect(realAdminCode, matches(RegExp(r'^KLAYK-[A-Z0-9]{6}$')),
-          reason: 'código de convite real do admin recuperado do backend');
-      await db.signOut();
-      expect(db.hasSession, isFalse);
-    }, skip: skipUnlessE2E());
+        final db = SupabaseService.instance;
+        await db.signInWithEmail(_adminEmail, _password);
+        expect(db.hasSession, isTrue);
+        final r = await db.client.rpc('invite_summary', params: const {});
+        final m = (r is Map)
+            ? r.map((k, v) => MapEntry(k.toString(), v))
+            : <String, dynamic>{};
+        realAdminCode = (m['code']?.toString() ?? '').toUpperCase();
+        expect(
+          realAdminCode,
+          matches(RegExp(r'^KLAYK-[A-Z0-9]{6}$')),
+          reason: 'código de convite real do admin recuperado do backend',
+        );
+        await db.signOut();
+        expect(db.hasSession, isFalse);
+      },
+      skip: skipUnlessE2E(),
+    );
 
     test('serviço: código real do admin valida como VÁLIDO com @username '
         '(mesmo caminho que a tela usa)', () async {
-      expect(realAdminCode, isNotNull,
-          reason: 'código real veio do teste de setup');
+      expect(
+        realAdminCode,
+        isNotNull,
+        reason: 'código real veio do teste de setup',
+      );
       final check = await InviteService.instance.validateStatus(realAdminCode!);
-      expect(check.isValid, isTrue,
-          reason: 'código real do admin resolve como válido (backend)');
+      expect(
+        check.isValid,
+        isTrue,
+        reason: 'código real do admin resolve como válido (backend)',
+      );
       expect(check.reachable, isTrue);
-      expect(check.validation?.inviterId, isNotEmpty,
-          reason: 'validação traz o inviter_id real');
-      expect(check.validation?.username, isNotEmpty,
-          reason: 'validação traz o @username real do convidante');
-      expect(check.validation?.code, realAdminCode,
-          reason: 'validação ecoa o código normalizado');
+      expect(
+        check.validation?.inviterId,
+        isNotEmpty,
+        reason: 'validação traz o inviter_id real',
+      );
+      expect(
+        check.validation?.username,
+        isNotEmpty,
+        reason: 'validação traz o @username real do convidante',
+      );
+      expect(
+        check.validation?.code,
+        realAdminCode,
+        reason: 'validação ecoa o código normalizado',
+      );
     }, skip: skipUnlessE2E());
 
     testWidgets('widget: código inexistente bloqueia o cadastro na UI com '
@@ -134,21 +156,28 @@ void main() {
       final invite = find.byKey(const ValueKey('auth_invite_code'));
       await tester.enterText(invite, 'klayk-xxxxxx');
       await loopUntil(
-          tester,
-          () => find
-              .text('Código de convite inválido. Confira com quem te convidou.')
-              .evaluate()
-              .isNotEmpty,
-          what: 'mensagem de convite inválido no campo');
+        tester,
+        () => find
+            .text('Código de convite inválido. Confira com quem te convidou.')
+            .evaluate()
+            .isNotEmpty,
+        what: 'mensagem de convite inválido no campo',
+      );
 
       // Submeter com código inválido NÃO cria conta e mantém a mensagem.
       await tester.tap(find.widgetWithText(FilledButton, 'Criar conta'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
-      expect(db.hasSession, isFalse,
-          reason: 'cadastro bloqueado: signUp NÃO foi chamado');
-      expect(find.byType(AuthScreen), findsOneWidget,
-          reason: 'ainda na tela de cadastro (sem sessão)');
+      expect(
+        db.hasSession,
+        isFalse,
+        reason: 'cadastro bloqueado: signUp NÃO foi chamado',
+      );
+      expect(
+        find.byType(AuthScreen),
+        findsOneWidget,
+        reason: 'ainda na tela de cadastro (sem sessão)',
+      );
       expect(
         find.textContaining('Código de convite inválido'),
         findsWidgets,

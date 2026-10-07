@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../design/klayk_design.dart';
+import '../l10n/app_localizations.dart';
 import '../models/post_models.dart';
 import '../models/user_profile.dart';
 import '../screens/profile/video_preview_screen.dart';
+import 'klayk_ux.dart';
 import 'profile_widgets.dart';
 import 'verified_badge.dart';
 
@@ -36,8 +38,9 @@ class KlaykProfileTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final items = <Widget>[
-      _roundButton(context, Icons.arrow_back_rounded, 'Voltar', onBack),
+      _roundButton(context, Icons.arrow_back_rounded, l10n.back, onBack),
       const Spacer(),
       if (title != null)
         Flexible(
@@ -54,22 +57,32 @@ class KlaykProfileTopBar extends StatelessWidget {
         ),
       const Spacer(),
       if (onShare != null)
-        _roundButton(context, Icons.ios_share_rounded, 'Compartilhar', onShare),
+        _roundButton(context, Icons.ios_share_rounded, l10n.share, onShare),
       if (onMenu != null)
-        _roundButton(context, Icons.more_vert_rounded, 'Mais opções', onMenu),
+        _roundButton(
+          context,
+          Icons.more_vert_rounded,
+          l10n.moreOptionsTooltip,
+          onMenu,
+        ),
     ];
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12) +
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12) +
             const EdgeInsets.only(top: 8),
         child: Row(children: items),
       ),
     );
   }
 
-  Widget _roundButton(BuildContext context, IconData icon, String label,
-      VoidCallback? onTap) {
+  Widget _roundButton(
+    BuildContext context,
+    IconData icon,
+    String label,
+    VoidCallback? onTap,
+  ) {
     return Semantics(
       label: label,
       button: onTap != null,
@@ -152,8 +165,10 @@ class KlaykProfileHeader extends StatelessWidget {
                         profile.handle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style:
-                            TextStyle(color: colors.primarySoft, fontSize: 13),
+                        style: TextStyle(
+                          color: colors.primarySoft,
+                          fontSize: 13,
+                        ),
                       ),
                       const SizedBox(height: 10),
                       KlaykProfileStatsRow(
@@ -215,14 +230,15 @@ class KlaykProfileStatsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _stat(context, 'Seguidores', followers),
+        _stat(context, l10n.followers, followers),
         const SizedBox(width: 22),
-        _stat(context, 'Seguindo', following),
+        _stat(context, l10n.following, following),
         const SizedBox(width: 22),
-        _stat(context, 'Curtidas', likes),
+        _stat(context, l10n.likesLabel, likes),
       ],
     );
   }
@@ -232,7 +248,7 @@ class KlaykProfileStatsRow extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          formatCount(value),
+          formatCount(context, value),
           style: const TextStyle(
             color: Colors.white,
             fontSize: 15,
@@ -267,6 +283,7 @@ class KlaykProfileActionsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
@@ -275,7 +292,7 @@ class KlaykProfileActionsRow extends StatelessWidget {
             flex: 5,
             child: KlayKButton(
               icon: following ? Icons.check_rounded : Icons.person_add_rounded,
-              label: following ? 'Seguindo' : 'Seguir',
+              label: following ? l10n.following : l10n.follow,
               onPressed: onFollow,
             ),
           ),
@@ -285,7 +302,7 @@ class KlaykProfileActionsRow extends StatelessWidget {
               flex: 3,
               child: KlayKSecondaryButton(
                 icon: Icons.chat_bubble_rounded,
-                label: 'Mensagem',
+                label: l10n.messageAction,
                 onPressed: onMessage,
               ),
             ),
@@ -295,7 +312,7 @@ class KlaykProfileActionsRow extends StatelessWidget {
               flex: 3,
               child: KlayKSecondaryButton(
                 icon: Icons.ios_share_rounded,
-                label: 'Compartilhar',
+                label: l10n.share,
                 onPressed: onShare,
               ),
             ),
@@ -305,8 +322,9 @@ class KlaykProfileActionsRow extends StatelessWidget {
   }
 }
 
-/// Abas do perfil (Vídeos / Curtidos / Salvos). A aba selecionada ganha
-/// destaque roxo neon — identificável também por ícone (não só cor).
+/// Abas do perfil (Vídeos / Curtidos / Salvos). A aba selecionada ganha um
+/// indicador roxo neon deslizante abaixo do texto, animado com
+/// [AnimatedAlign] — identificável também por ícone e cor (não só cor).
 class KlaykProfileTabs extends StatelessWidget {
   final int selected;
   final ValueChanged<int> onChanged;
@@ -317,104 +335,239 @@ class KlaykProfileTabs extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const List<(IconData, String)> _tabs = [
-    (Icons.videocam_rounded, 'Vídeos'),
-    (Icons.favorite_border_rounded, 'Curtidos'),
-    (Icons.bookmark_border_rounded, 'Salvos'),
-  ];
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = kc(context);
+    final tabs = <(IconData, String)>[
+      (Icons.videocam_rounded, l10n.videos),
+      (Icons.favorite_border_rounded, l10n.likedVideos),
+      (Icons.bookmark_border_rounded, l10n.savedVideos),
+    ];
+    final n = tabs.length;
+    final selectedX = selected * 2 / (n - 1) - 1;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final itemWidth = constraints.maxWidth / n;
+          return SizedBox(
+            height: 52,
+            child: Stack(
+              children: [
+                // Indicador roxo deslizante.
+                AnimatedAlign(
+                  alignment: Alignment(selectedX, 1),
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: Container(
+                      width: itemWidth * 0.42,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: colors.primary,
+                        borderRadius: BorderRadius.circular(99),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.primary.withValues(alpha: 0.45),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: List.generate(n, (i) {
+                    final sel = selected == i;
+                    final color = sel ? colors.primarySoft : Colors.white54;
+                    return Expanded(
+                      child: Semantics(
+                        selected: sel,
+                        button: true,
+                        label: tabs[i].$2,
+                        child: InkWell(
+                          onTap: () => onChanged(i),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(tabs[i].$1, size: 19, color: color),
+                              const SizedBox(height: 4),
+                              Text(
+                                tabs[i].$2,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: sel
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                  color: sel ? Colors.white : Colors.white54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Tile de vídeo do perfil: miniatura REAL via `cover_url` (nunca gradiente
+/// fake), placeholder neutro grafite enquanto carrega/erro, indicador de
+/// reprodução discreto e abertura da prévia existente ([VideoPreviewScreen]).
+class KlaykProfileVideoTile extends StatelessWidget {
+  final FeedPost post;
+  final VoidCallback? onDeleted;
+
+  const KlaykProfileVideoTile({super.key, required this.post, this.onDeleted});
 
   @override
   Widget build(BuildContext context) {
     final colors = kc(context);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        children: List.generate(_tabs.length, (i) {
-          final sel = selected == i;
-          return Expanded(
-            child: Semantics(
-              selected: sel,
-              button: true,
-              label: _tabs[i].$2,
-              child: GestureDetector(
-                onTap: () => onChanged(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: sel
-                        ? colors.primary.withValues(alpha: 0.22)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                    border: sel
-                        ? Border.all(color: colors.primary.withValues(alpha: 0.6))
-                        : null,
+    final hasCover = post.coverUrl != null && post.coverUrl!.isNotEmpty;
+    return GestureDetector(
+      onTap: () async {
+        final deleted = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => VideoPreviewScreen(post: post)),
+        );
+        if (deleted == true) onDeleted?.call();
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(color: colors.surfaceAlt),
+            if (hasCover)
+              Image.network(
+                post.coverUrl!,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                cacheWidth: imageDecodeWidth(context, 140),
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : _placeholder(context, loading: true),
+                errorBuilder: (_, __, ___) =>
+                    _placeholder(context, loading: false),
+              )
+            else
+              _placeholder(context, loading: false),
+            // Indicador de reprodução discreto.
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.55),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.35),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _tabs[i].$1,
-                        size: 17,
-                        color: sel ? colors.primarySoft : Colors.white54,
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          _tabs[i].$2,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: sel ? Colors.white : Colors.white54,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 15,
                 ),
               ),
             ),
-          );
-        }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Placeholder neutro (grafite) com loading discreto ou ícone de vídeo —
+  /// usado para carregando, erro de imagem e posts sem capa. Uma falha de
+  /// imagem NUNCA quebra a grade.
+  Widget _placeholder(BuildContext context, {required bool loading}) {
+    final colors = kc(context);
+    return ColoredBox(
+      color: colors.surfaceAlt,
+      child: Center(
+        child: loading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white24,
+                ),
+              )
+            : const Icon(
+                Icons.videocam_outlined,
+                color: Colors.white24,
+                size: 24,
+              ),
       ),
     );
   }
 }
 
 /// Grade de vídeos reais do usuário (abre a prévia de reprodução).
+/// Grid fixo de 3 colunas com proporção vertical e miniatura real via
+/// `cover_url` ([KlaykProfileVideoTile]).
 class KlaykProfileVideoGrid extends StatelessWidget {
   final List<FeedPost> videos;
   final VoidCallback? onEmpty;
+  final VoidCallback? onDeleted;
 
-  const KlaykProfileVideoGrid({super.key, required this.videos, this.onEmpty});
+  const KlaykProfileVideoGrid({
+    super.key,
+    required this.videos,
+    this.onEmpty,
+    this.onDeleted,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     if (videos.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.fromLTRB(28, 28, 28, 36),
         child: Column(
           children: [
-            const Icon(Icons.videocam_off_outlined,
-                color: Colors.white38, size: 40),
+            const Icon(
+              Icons.videocam_off_outlined,
+              color: Colors.white38,
+              size: 40,
+            ),
             const SizedBox(height: 10),
-            const Text(
-              'Nenhum vídeo publicado ainda',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
+            Text(
+              l10n.noVideosYet,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              l10n.noVideosYetBody,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54, fontSize: 13),
             ),
             if (onEmpty != null) ...[
-              const SizedBox(height: 14),
-              KlayKButton(label: 'Criar vídeo', onPressed: onEmpty),
+              const SizedBox(height: 16),
+              KlayKButton(
+                icon: Icons.add_rounded,
+                label: l10n.createVideo,
+                onPressed: onEmpty,
+              ),
             ],
           ],
         ),
@@ -423,58 +576,16 @@ class KlaykProfileVideoGrid extends StatelessWidget {
     return GridView.builder(
       physics: const NeverScrollableScrollPhysics(),
       shrinkWrap: true,
-      padding: const EdgeInsets.all(12),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: MediaQuery.sizeOf(context).width >= 430 ? 3 : 2,
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
         mainAxisSpacing: 8,
         crossAxisSpacing: 8,
+        childAspectRatio: 0.72,
       ),
       itemCount: videos.length,
-      itemBuilder: (context, index) {
-        final post = videos[index];
-        final hasCover = post.coverUrl != null && post.coverUrl!.isNotEmpty;
-        return GestureDetector(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => VideoPreviewScreen(post: post),
-              ),
-            );
-          },
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: ColoredBox(
-              color: kc(context).surfaceAlt,
-              child: !hasCover
-                  ? const Icon(Icons.play_circle_fill_rounded,
-                      color: Color(0xFF8B5CF6), size: 36)
-                  : Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.network(
-                          post.coverUrl!,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder: (_, __, ___) => const Icon(
-                            Icons.play_circle_fill_rounded,
-                            color: Color(0xFF8B5CF6),
-                            size: 36,
-                          ),
-                        ),
-                        const Center(
-                          child: Icon(
-                            Icons.play_circle_fill_rounded,
-                            color: Colors.white,
-                            size: 38,
-                            shadows: [Shadow(blurRadius: 12)],
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-          ),
-        );
-      },
+      itemBuilder: (context, index) =>
+          KlaykProfileVideoTile(post: videos[index], onDeleted: onDeleted),
     );
   }
 }

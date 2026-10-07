@@ -9,6 +9,7 @@ import '../services/supabase_service.dart';
 import '../widgets/klayk_ux.dart';
 import '../widgets/verified_badge.dart';
 import '../design/klayk_design.dart';
+import '../l10n/app_localizations.dart';
 
 const Color _purple = Color(0xFF8B5CF6);
 const Color _pink = Color(0xFFFF4D6A);
@@ -16,18 +17,45 @@ const Color _pink = Color(0xFFFF4D6A);
 /// Lista real de conversas (DMs). Sem mocks: dados vêm do backend via
 /// [MessageService]. Realtime atualiza a lista quando há novas conversas.
 class RealMessagesScreen extends StatefulWidget {
-  const RealMessagesScreen({super.key});
+  /// Quando `true`, renderiza apenas o conteúdo (sem Scaffold/AppBar) para
+  /// ser embutido no hub de Mensagens (aba BATE-PAPOS).
+  final bool embedded;
+
+  /// Notifica quantas conversas têm mensagens não lidas (dado real do
+  /// backend). Usado pelo hub para o badge das abas e navegação inferior.
+  final ValueChanged<int>? onUnreadChanged;
+
+  const RealMessagesScreen({
+    super.key,
+    this.embedded = false,
+    this.onUnreadChanged,
+  });
 
   @override
-  State<RealMessagesScreen> createState() => _RealMessagesScreenState();
+  State<RealMessagesScreen> createState() => RealMessagesScreenState();
 }
 
-class _RealMessagesScreenState extends State<RealMessagesScreen> {
+class RealMessagesScreenState extends State<RealMessagesScreen> {
   final MessageService _svc = MessageService.instance;
   final List<Conversation> _convs = [];
   bool _loading = true;
   String? _error;
   RealtimeChannel? _channel;
+
+  /// Soma real de não lidas nas conversas, repassada para o hub quando muda.
+  void _emitUnread() {
+    var c = 0;
+    for (final cv in _convs) {
+      c += cv.unread;
+    }
+    widget.onUnreadChanged?.call(c);
+  }
+
+  /// Recarrega a lista do backend (usado pelo hub após ações globais).
+  Future<void> refresh() => _load();
+
+  /// Fluxo de nova conversa (não lidas reais são atualizadas via realtime).
+  Future<void> startNewConversation() => _startNew();
 
   @override
   void initState() {
@@ -60,6 +88,7 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
           ..addAll(list);
         _loading = false;
       });
+      _emitUnread();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -75,28 +104,30 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
   }
 
   Future<void> _open(Conversation c) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatScreen(conversation: c),
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => ChatScreen(conversation: c)));
     _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = kc(context);
+    final l10n = AppLocalizations.of(context)!;
+    if (widget.embedded) return _buildBody();
     return Scaffold(
       backgroundColor: colors.bg,
       appBar: AppBar(
         backgroundColor: colors.bg,
-        title: const Text('Mensagens',
-            style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.messagesTab,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.edit_rounded, color: _purple),
-            tooltip: 'Nova conversa',
+            tooltip: l10n.newConversation,
             onPressed: _startNew,
           ),
         ],
@@ -118,8 +149,9 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
           await _open(c);
         } catch (e) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(e.toString())));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
         }
       }
     } else {
@@ -128,11 +160,14 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_error != null && _convs.isEmpty) {
       return Center(
-        child: Text(_error!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54)),
+        child: Text(
+          _error!,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white54),
+        ),
       );
     }
     if (_loading && _convs.isEmpty) {
@@ -141,9 +176,9 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
     if (_convs.isEmpty) {
       return KlaykEmptyState(
         icon: Icons.chat_bubble_outline,
-        title: 'Nenhuma conversa ainda',
-        message: 'Toque em + para começar',
-        actionLabel: 'Nova conversa',
+        title: l10n.messagesEmptyTitle,
+        message: l10n.messagesEmptyBody,
+        actionLabel: l10n.newConversation,
         onAction: _startNew,
       );
     }
@@ -160,8 +195,10 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
           final c = _convs[index];
           final unread = c.unread > 0;
           return ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 4,
+            ),
             leading: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -181,14 +218,20 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
                     top: -2,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 2),
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
-                          color: kc(context).like,
-                          borderRadius: BorderRadius.circular(10)),
+                        color: kc(context).like,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       child: Text(
                         c.unread > 9 ? '9+' : '${c.unread}',
                         style: const TextStyle(
-                            color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
@@ -199,13 +242,13 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
               children: [
                 Flexible(
                   child: Text(
-                    c.peerName ?? 'Usuário',
+                    c.peerName ?? l10n.user,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight:
-                            unread ? FontWeight.w700 : FontWeight.w500),
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: unread ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
                 ),
                 if (c.peerVerified) ...[
@@ -219,9 +262,10 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  color: unread ? Colors.white70 : Colors.white38,
-                  fontSize: 13,
-                  fontWeight: unread ? FontWeight.w600 : FontWeight.w400),
+                color: unread ? Colors.white70 : Colors.white38,
+                fontSize: 13,
+                fontWeight: unread ? FontWeight.w600 : FontWeight.w400,
+              ),
             ),
             trailing: Text(
               _time(c.lastMessageAt),
@@ -236,13 +280,14 @@ class _RealMessagesScreenState extends State<RealMessagesScreen> {
 
   String _time(DateTime? t) {
     if (t == null) return '';
+    final l10n = AppLocalizations.of(context)!;
     final now = DateTime.now();
     final d = now.difference(t);
-    if (d.inMinutes < 1) return 'agora';
-    if (d.inMinutes < 60) return '${d.inMinutes}m';
-    if (d.inHours < 24) return '${d.inHours}h';
-    if (d.inDays == 1) return 'ontem';
-    if (d.inDays < 7) return '${d.inDays}d';
+    if (d.inMinutes < 1) return l10n.notifTimeNow;
+    if (d.inMinutes < 60) return l10n.msTimeMin(d.inMinutes);
+    if (d.inHours < 24) return l10n.msTimeH(d.inHours);
+    if (d.inDays == 1) return l10n.notifYesterday;
+    if (d.inDays < 7) return l10n.msTimeD(d.inDays);
     return '${t.day.toString().padLeft(2, '0')}/${t.month.toString().padLeft(2, '0')}';
   }
 }
@@ -354,17 +399,20 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
   void _openModeration() {
+    final l10n = AppLocalizations.of(context)!;
     showModalBottomSheet(
       context: context,
       backgroundColor: kc(context).surfaceAlt,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -372,8 +420,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ListTile(
               leading: Icon(_blocked ? Icons.block : Icons.block, color: _pink),
               title: Text(
-                  _blocked ? 'Desbloquear usuário' : 'Bloquear usuário',
-                  style: const TextStyle(color: Colors.white)),
+                _blocked ? l10n.unblockUser : l10n.blockUser,
+                style: const TextStyle(color: Colors.white),
+              ),
               onTap: () async {
                 Navigator.pop(ctx);
                 if (_blocked) {
@@ -382,24 +431,29 @@ class _ChatScreenState extends State<ChatScreen> {
                   await _svc.blockUser(widget.conversation.peerId!);
                 }
                 if (mounted) {
-                  setState(
-                      () => _blocked = !_blocked);
+                  setState(() => _blocked = !_blocked);
                 }
               },
             ),
             ListTile(
               leading: Icon(Icons.flag_rounded, color: kc(context).primarySoft),
-              title: const Text('Denunciar conversa',
-                  style: TextStyle(color: Colors.white)),
+              title: Text(
+                l10n.reportConversation,
+                style: const TextStyle(color: Colors.white),
+              ),
               onTap: () async {
                 Navigator.pop(ctx);
                 final reason = await _pickReportReason(ctx);
                 if (reason != null) {
                   await _svc.reportConversation(
-                      widget.conversation.id, reason, '');
+                    widget.conversation.id,
+                    reason,
+                    '',
+                  );
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Denúncia enviada. Obrigado!')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(l10n.reportConversationSent)),
+                    );
                   }
                 }
               },
@@ -412,13 +466,14 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<String?> _pickReportReason(BuildContext ctx) {
-    const reasons = [
-      'Spam',
-      'Assédio',
-      'Conteúdo ofensivo',
-      'Impostor',
-      'Fraude',
-      'Outro',
+    final l10n = AppLocalizations.of(ctx)!;
+    final reasons = [
+      l10n.reportSpam,
+      l10n.reportHarassment,
+      l10n.reportOffensiveContent,
+      l10n.reportImpostor,
+      l10n.reportFraud,
+      l10n.reportOther,
     ];
     return showModalBottomSheet<String>(
       context: ctx,
@@ -441,6 +496,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = kc(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: colors.bg,
       appBar: AppBar(
@@ -467,11 +523,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Flexible(
-                        child: Text(widget.conversation.peerName ?? 'Usuário',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700)),
+                        child: Text(
+                          widget.conversation.peerName ?? l10n.user,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                       if (widget.conversation.peerVerified) ...[
                         const SizedBox(width: 4),
@@ -480,10 +539,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     ],
                   ),
                   Text(
-                      '@${widget.conversation.peerUsername ?? ''}'
-                      '${_blocked ? ' • bloqueado' : ''}',
-                      style:
-                          const TextStyle(color: Colors.white38, fontSize: 11)),
+                    '@${widget.conversation.peerUsername ?? ''}'
+                    '${_blocked ? ' • ${l10n.blockedSuffix}' : ''}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
                 ],
               ),
             ),
@@ -501,17 +560,18 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_blocked) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.block,
-        title: 'Você bloqueou este usuário.',
-        message: 'Desbloqueie nas opções da conversa.',
+        title: l10n.blockedThisUserTitle,
+        message: l10n.blockedThisUserBody,
       );
     }
     if (_error != null && _messages.isEmpty) {
       return Center(
-          child: Text(_error!,
-              style: const TextStyle(color: Colors.white54)));
+        child: Text(_error!, style: const TextStyle(color: Colors.white54)),
+      );
     }
     if (_loading && _messages.isEmpty) {
       return const KlaykLoader();
@@ -527,14 +587,16 @@ class _ChatScreenState extends State<ChatScreen> {
               final m = _messages[index];
               final mine = m.senderId == _myId;
               return Align(
-                alignment:
-                    mine ? Alignment.centerRight : Alignment.centerLeft,
+                alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                 child: Container(
                   margin: const EdgeInsets.symmetric(vertical: 3),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 9,
+                  ),
                   constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.75),
+                    maxWidth: MediaQuery.of(context).size.width * 0.75,
+                  ),
                   decoration: BoxDecoration(
                     color: mine ? _purple : kc(context).surfaceAlt,
                     borderRadius: BorderRadius.only(
@@ -547,16 +609,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(m.text,
-                          style: const TextStyle(color: Colors.white)),
+                      Text(m.text, style: const TextStyle(color: Colors.white)),
                       const SizedBox(height: 3),
                       Text(
                         _hm(m.createdAt),
                         style: TextStyle(
-                            color: mine
-                                ? Colors.white70
-                                : Colors.white38,
-                            fontSize: 10),
+                          color: mine ? Colors.white70 : Colors.white38,
+                          fontSize: 10,
+                        ),
                       ),
                     ],
                   ),
@@ -568,8 +628,12 @@ class _ChatScreenState extends State<ChatScreen> {
         SafeArea(
           top: false,
           child: Padding(
-            padding:
-                const EdgeInsets.only(left: 12, right: 12, top: 6, bottom: 8),
+            padding: const EdgeInsets.only(
+              left: 12,
+              right: 12,
+              top: 6,
+              bottom: 8,
+            ),
             child: Row(
               children: [
                 Expanded(
@@ -581,12 +645,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     maxLines: 4,
                     textInputAction: TextInputAction.newline,
                     decoration: InputDecoration(
-                      hintText: 'Mensagem...',
+                      hintText: l10n.typeMessageHint,
                       hintStyle: const TextStyle(color: Colors.white38),
                       filled: true,
                       fillColor: kc(context).surfaceAlt,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide: BorderSide.none,
@@ -650,8 +716,11 @@ class _NewConversationScreenState extends State<NewConversationScreen> {
       setState(() {
         _results = (res as List)
             .whereType<Map<dynamic, dynamic>>()
-            .map((r) => Map<String, dynamic>.from(
-                r.map((k, v) => MapEntry(k.toString(), v))))
+            .map(
+              (r) => Map<String, dynamic>.from(
+                r.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            )
             .toList();
         _loading = false;
       });
@@ -671,12 +740,15 @@ class _NewConversationScreenState extends State<NewConversationScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = kc(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: colors.bg,
       appBar: AppBar(
         backgroundColor: colors.bgElevated,
-        title: const Text('Nova conversa',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(
+          l10n.newConversation,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
       ),
       body: Column(
         children: [
@@ -689,7 +761,7 @@ class _NewConversationScreenState extends State<NewConversationScreen> {
               onChanged: _onSearchChanged,
               autofocus: true,
               decoration: InputDecoration(
-                hintText: 'Buscar usuário (nome ou @usuário)',
+                hintText: l10n.searchUserHint,
                 hintStyle: const TextStyle(color: Colors.white38),
                 prefixIcon: const Icon(Icons.search, color: Colors.white38),
                 filled: true,
@@ -706,51 +778,49 @@ class _NewConversationScreenState extends State<NewConversationScreen> {
             child: _loading
                 ? const KlaykLoader()
                 : _results.isEmpty
-                    ? const KlaykEmptyState(
-                        icon: Icons.search_off_rounded,
-                        title: 'Nenhum resultado',
-                        message: 'Digite ao menos 2 letras para buscar.',
-                      )
-                    : ListView.builder(
-                        itemCount: _results.length,
-                        itemBuilder: (context, i) {
-                          final r = _results[i];
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: colors.surfaceAlt,
-                              backgroundImage: r['avatar_url'] != null
-                                  ? NetworkImage(r['avatar_url'] as String)
-                                  : null,
-                              child: r['avatar_url'] == null
-                                  ? const Icon(Icons.person,
-                                      color: Colors.white38)
-                                  : null,
+                ? KlaykEmptyState(
+                    icon: Icons.search_off_rounded,
+                    title: l10n.noResults,
+                    message: l10n.noResultsBody,
+                  )
+                : ListView.builder(
+                    itemCount: _results.length,
+                    itemBuilder: (context, i) {
+                      final r = _results[i];
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: colors.surfaceAlt,
+                          backgroundImage: r['avatar_url'] != null
+                              ? NetworkImage(r['avatar_url'] as String)
+                              : null,
+                          child: r['avatar_url'] == null
+                              ? const Icon(Icons.person, color: Colors.white38)
+                              : null,
+                        ),
+                        title: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                r['display_name'] as String? ?? l10n.user,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
+                              ),
                             ),
-                            title: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                      r['display_name'] as String? ??
-                                          'Usuário',
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          color: Colors.white)),
-                                ),
-                                if (r['is_verified'] == true) ...[
-                                  const SizedBox(width: 4),
-                                  const VerifiedBadge(size: 14),
-                                ],
-                              ],
-                            ),
-                            subtitle: Text(
-                                '@${r['username'] ?? ''}',
-                                style: const TextStyle(color: Colors.white54)),
-                            onTap: () =>
-                                Navigator.of(context).pop(r),
-                          );
-                        },
-                      ),
+                            if (r['is_verified'] == true) ...[
+                              const SizedBox(width: 4),
+                              const VerifiedBadge(size: 14),
+                            ],
+                          ],
+                        ),
+                        subtitle: Text(
+                          '@${r['username'] ?? ''}',
+                          style: const TextStyle(color: Colors.white54),
+                        ),
+                        onTap: () => Navigator.of(context).pop(r),
+                      );
+                    },
+                  ),
           ),
         ],
       ),

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../theme/klayk_theme.dart';
 import '../services/supabase_service.dart';
 
@@ -41,9 +42,10 @@ class _KlaykSkeletonState extends State<KlaykSkeleton>
       vsync: this,
       duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
-    _a = Tween<double>(begin: 0.45, end: 0.85).animate(
-      CurvedAnimation(parent: _c, curve: Curves.easeInOut),
-    );
+    _a = Tween<double>(
+      begin: 0.45,
+      end: 0.85,
+    ).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
   }
 
   @override
@@ -92,15 +94,15 @@ class KlaykListSkeleton extends StatelessWidget {
               const SizedBox(width: 12),
             ],
             const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    KlaykSkeleton(width: 150),
-                    SizedBox(height: 7),
-                    KlaykSkeleton(width: double.infinity, height: 11),
-                  ],
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  KlaykSkeleton(width: 150),
+                  SizedBox(height: 7),
+                  KlaykSkeleton(width: double.infinity, height: 11),
+                ],
               ),
+            ),
           ],
         ),
       ),
@@ -205,7 +207,11 @@ class KlaykEmptyState extends StatelessWidget {
               Text(
                 message!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
               ),
             ],
             if (actionLabel != null && onAction != null) ...[
@@ -229,8 +235,8 @@ class KlaykErrorState extends StatelessWidget {
   const KlaykErrorState({
     super.key,
     required this.onRetry,
-    this.title = 'Ops! Não foi possível carregar.',
-    this.message = 'Algo deu errado. Tente novamente em instantes.',
+    this.title = '',
+    this.message = '',
     this.padding,
   });
 
@@ -241,7 +247,12 @@ class KlaykErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final colors = kcolors(context);
+    final resolvedTitle = title.isNotEmpty ? title : l10n.errorStateTitle;
+    final resolvedMessage = message.isNotEmpty
+        ? message
+        : l10n.errorStateMessage;
     return Center(
       child: Padding(
         padding: padding ?? const EdgeInsets.all(28),
@@ -256,12 +267,15 @@ class KlaykErrorState extends StatelessWidget {
                 color: colors.danger.withValues(alpha: 0.1),
                 border: Border.all(color: colors.danger.withValues(alpha: 0.5)),
               ),
-              child: Icon(Icons.wifi_tethering_off_rounded,
-                  color: colors.danger, size: 34),
+              child: Icon(
+                Icons.wifi_tethering_off_rounded,
+                color: colors.danger,
+                size: 34,
+              ),
             ),
             const SizedBox(height: 18),
             Text(
-              title,
+              resolvedTitle,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white,
@@ -271,9 +285,13 @@ class KlaykErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              message,
+              resolvedMessage,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 13,
+                height: 1.4,
+              ),
             ),
             const SizedBox(height: 18),
             OutlinedButton.icon(
@@ -281,10 +299,13 @@ class KlaykErrorState extends StatelessWidget {
               style: OutlinedButton.styleFrom(
                 foregroundColor: colors.primarySoft,
                 side: BorderSide(color: colors.primary),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 10,
+                ),
               ),
               icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Tentar novamente'),
+              label: Text(l10n.retry),
             ),
           ],
         ),
@@ -335,7 +356,8 @@ class KlaykCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = kcolors(context);
     final decoration = BoxDecoration(
-      gradient: gradient ??
+      gradient:
+          gradient ??
           LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -428,11 +450,7 @@ class KlaykScreenBackground extends StatelessWidget {
 
 /// Anima um número ao mudar (`AnimatedSwitcher` leve) para contadores premium.
 class KlaykAnimatedNumber extends StatelessWidget {
-  const KlaykAnimatedNumber(
-    this.value, {
-    super.key,
-    this.style,
-  });
+  const KlaykAnimatedNumber(this.value, {super.key, this.style});
 
   final int value;
   final TextStyle? style;
@@ -448,11 +466,7 @@ class KlaykAnimatedNumber extends StatelessWidget {
           child: child,
         ),
       ),
-      child: Text(
-        '$value',
-        key: ValueKey(value),
-        style: style,
-      ),
+      child: Text('$value', key: ValueKey(value), style: style),
     );
   }
 }

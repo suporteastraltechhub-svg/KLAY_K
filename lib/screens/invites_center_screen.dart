@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/invite_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/klayk_theme.dart';
@@ -46,7 +47,7 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
     await Clipboard.setData(ClipboardData(text: _summary.code));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Código copiado!')),
+      SnackBar(content: Text(AppLocalizations.of(context)!.inviteCodeCopied)),
     );
   }
 
@@ -58,11 +59,14 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Mensagem de convite copiada!')),
+      SnackBar(
+        content: Text(AppLocalizations.of(context)!.inviteMessageCopied),
+      ),
     );
   }
 
   Future<void> _claim() async {
+    final l10n = AppLocalizations.of(context)!;
     if (_claiming) return;
     setState(() => _claiming = true);
     final result = await _svc.claimRewards();
@@ -73,23 +77,24 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
         SnackBar(
           content: Text(
             result.claimed > 0
-                ? '🎉 +${result.crystals} 🔮 cristais!'
-                : 'Nenhuma recompensa pendente no momento.',
+                ? l10n.inviteClaimSuccess(result.crystals)
+                : l10n.inviteNoPendingRewards,
           ),
         ),
       );
       await _load();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Não foi possível reivindicar agora.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.inviteClaimFail)));
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(title: const Text('Convites')),
+      appBar: AppBar(title: Text(l10n.invites)),
       body: KlaykScreenBackground(
         child: _loading
             ? const Center(child: KlaykLoader())
@@ -112,6 +117,7 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
 
   Widget _buildHero() {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return KlaykCard(
       gradient: LinearGradient(
         begin: Alignment.topLeft,
@@ -121,15 +127,14 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '🎉 Convide amigos, ganhe cristais',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          Text(
+            l10n.inviteHeroTitle,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Compartilhe seu código. Quando alguém se cadastrar com ele, você '
-            'ganha 🔮 cristais para usar na loja e nos jogos.',
-            style: TextStyle(fontSize: 13, height: 1.4),
+          Text(
+            l10n.inviteHeroBody,
+            style: const TextStyle(fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 16),
           Row(
@@ -139,7 +144,9 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
                   onTap: _copyCode,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
                       color: colors.surface,
                       borderRadius: BorderRadius.circular(14),
@@ -168,7 +175,7 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
               IconButton.filled(
                 onPressed: _share,
                 icon: const Icon(Icons.share_rounded),
-                tooltip: 'Copiar convite',
+                tooltip: l10n.inviteCopyTooltip,
               ),
             ],
           ),
@@ -179,11 +186,17 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
 
   Widget _buildStats() {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Row(
       children: [
-        _statCard(colors, '👥', '${_summary.invited}', 'Convidados'),
+        _statCard(colors, '👥', '${_summary.invited}', l10n.inviteInvitedStat),
         const SizedBox(width: 12),
-        _statCard(colors, '✅', '${_summary.pendingRewards}', 'Pendentes'),
+        _statCard(
+          colors,
+          '✅',
+          '${_summary.pendingRewards}',
+          l10n.invitePendingStat,
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: KlaykCard(
@@ -196,15 +209,17 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
                   color: colors.gold,
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'Reivindicar',
-                  style: TextStyle(fontSize: 12),
+                Text(
+                  l10n.inviteClaimButton,
+                  style: const TextStyle(fontSize: 12),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   '🔮 ${_summary.pendingRewards * 5}',
                   style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.bold),
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
@@ -214,7 +229,12 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
     );
   }
 
-  Widget _statCard(KlaykColors colors, String emoji, String value, String label) {
+  Widget _statCard(
+    KlaykColors colors,
+    String emoji,
+    String value,
+    String label,
+  ) {
     return Expanded(
       child: KlaykCard(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
@@ -235,17 +255,18 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
   }
 
   Widget _buildInviteList() {
+    final l10n = AppLocalizations.of(context)!;
     if (_invites.isEmpty) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.group_add_rounded,
-        title: 'Ninguém entrou ainda',
-        message: 'Compartilhe seu código para começar a ganhar cristais.',
+        title: l10n.inviteEmptyTitle,
+        message: l10n.inviteEmptyBody,
       );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const KlaykSectionTitle('Convidados'),
+        KlaykSectionTitle(l10n.inviteInvitedStat),
         const SizedBox(height: 8),
         ..._invites.map(
           (inv) => Padding(
@@ -264,14 +285,16 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _statusLabel(inv.status, inv.validatedAt),
+                          _statusLabel(inv.status, l10n),
                           style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  _statusChip(inv.status),
+                  _statusChip(inv.status, l10n),
                 ],
               ),
             ),
@@ -281,26 +304,42 @@ class _InvitesCenterScreenState extends State<InvitesCenterScreen> {
     );
   }
 
-  String _statusLabel(String status, DateTime? validatedAt) {
+  String _statusLabel(String status, AppLocalizations l10n) {
     switch (status) {
       case 'validated':
-        return 'Convidado validado';
+        return l10n.inviteStatusValidated;
       case 'rewarded':
-        return 'Recompensa liberada 🔮 +5';
+        return l10n.inviteStatusRewarded;
       case 'blocked':
-        return 'Convite bloqueado';
+        return l10n.inviteStatusBlocked;
       default:
-        return 'Convite registrado';
+        return l10n.inviteStatusRegistered;
     }
   }
 
-  Widget _statusChip(String status) {
+  Widget _statusChip(String status, AppLocalizations l10n) {
     final colors = kcolors(context);
     final (label, bg, fg) = switch (status) {
-      'rewarded' => ('+5 🔮', colors.success.withValues(alpha: .15), colors.success),
-      'validated' => ('validado', colors.info.withValues(alpha: .15), colors.info),
-      'blocked' => ('bloqueado', colors.danger.withValues(alpha: .15), colors.danger),
-      _ => ('pendente', colors.warning.withValues(alpha: .15), colors.warning),
+      'rewarded' => (
+        l10n.inviteChipRewarded,
+        colors.success.withValues(alpha: .15),
+        colors.success,
+      ),
+      'validated' => (
+        l10n.inviteChipValidated,
+        colors.info.withValues(alpha: .15),
+        colors.info,
+      ),
+      'blocked' => (
+        l10n.blockedSuffix,
+        colors.danger.withValues(alpha: .15),
+        colors.danger,
+      ),
+      _ => (
+        l10n.inviteChipPending,
+        colors.warning.withValues(alpha: .15),
+        colors.warning,
+      ),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

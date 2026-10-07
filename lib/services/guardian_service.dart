@@ -58,8 +58,10 @@ class GuardianService {
       final r = await _rpc('guardian_status');
       if (r is List) {
         return r
-            .map((e) => GuardianWindow.fromJson(
-                Map<String, dynamic>.from(e as Map)))
+            .map(
+              (e) =>
+                  GuardianWindow.fromJson(Map<String, dynamic>.from(e as Map)),
+            )
             .toList();
       }
     } catch (_) {
@@ -75,10 +77,7 @@ class GuardianService {
   Future<List<Map<String, dynamic>>> listMaintenance() async {
     final r = await _rpc('guardian_list_maintenance');
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -131,10 +130,7 @@ class GuardianService {
       'p_limit': limit,
     });
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -156,10 +152,7 @@ class GuardianService {
   Future<List<Map<String, dynamic>>> listRules() async {
     final r = await _rpc('guardian_list_rules');
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -177,10 +170,7 @@ class GuardianService {
   Future<List<Map<String, dynamic>>> listRecommendations() async {
     final r = await _rpc('guardian_list_recommendations');
     return r is List
-        ? r
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+        ? r.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
         : const [];
   }
 
@@ -196,9 +186,15 @@ class GuardianService {
   /// Mensagem amigável de erro de autorização do backend.
   String friendlyError(Object? error) {
     final raw = error?.toString() ?? '';
-    if (raw.contains('founder_only')) return 'Apenas o fundador pode fazer isso.';
-    if (raw.contains('already_active')) return 'Já existe manutenção global ativa.';
-    if (raw.contains('not_active')) return 'Janela de manutenção não está ativa.';
+    if (raw.contains('founder_only')) {
+      return 'Apenas o fundador pode fazer isso.';
+    }
+    if (raw.contains('already_active')) {
+      return 'Já existe manutenção global ativa.';
+    }
+    if (raw.contains('not_active')) {
+      return 'Janela de manutenção não está ativa.';
+    }
     if (raw.contains('rule_not_found')) return 'Regra não encontrada.';
     if (raw.contains('not_open')) return 'Este alerta já foi tratado.';
     if (raw.contains('not_admin') || raw.contains('forbidden')) {

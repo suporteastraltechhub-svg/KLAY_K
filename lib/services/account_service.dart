@@ -65,7 +65,8 @@ class AccountSettings {
     return AccountSettings(
       notifyCurtidas: notifyCurtidas ?? this.notifyCurtidas,
       notifyComentarios: notifyComentarios ?? this.notifyComentarios,
-      notifyNovosSeguidores: notifyNovosSeguidores ?? this.notifyNovosSeguidores,
+      notifyNovosSeguidores:
+          notifyNovosSeguidores ?? this.notifyNovosSeguidores,
       notifyMensagens: notifyMensagens ?? this.notifyMensagens,
       notifyLive: notifyLive ?? this.notifyLive,
       notifyOutras: notifyOutras ?? this.notifyOutras,
@@ -84,31 +85,31 @@ class AccountSettings {
   }
 
   Map<String, dynamic> toRow() => {
-        'notify_curtidas': notifyCurtidas,
-        'notify_comentarios': notifyComentarios,
-        'notify_novos_seguidores': notifyNovosSeguidores,
-        'notify_mensagens': notifyMensagens,
-        'notify_live': notifyLive,
-        'notify_outras': notifyOutras,
-        'auto_play': autoPlay,
-        'wifi_only': wifiOnly,
-        'video_quality': videoQuality,
-        'save_data': saveData,
-        'background_play': backgroundPlay,
-        'account_private': accountPrivate,
-        'allow_comments': allowComments,
-        'allow_messages': allowMessages,
-        'security_confirm_actions': securityConfirmActions,
-        'onboarding_done': onboardingDone,
-      };
+    'notify_curtidas': notifyCurtidas,
+    'notify_comentarios': notifyComentarios,
+    'notify_novos_seguidores': notifyNovosSeguidores,
+    'notify_mensagens': notifyMensagens,
+    'notify_live': notifyLive,
+    'notify_outras': notifyOutras,
+    'auto_play': autoPlay,
+    'wifi_only': wifiOnly,
+    'video_quality': videoQuality,
+    'save_data': saveData,
+    'background_play': backgroundPlay,
+    'account_private': accountPrivate,
+    'allow_comments': allowComments,
+    'allow_messages': allowMessages,
+    'security_confirm_actions': securityConfirmActions,
+    'onboarding_done': onboardingDone,
+  };
 
   /// Espelho das preferências de reprodução → experiência real do app.
   KlaykExperience toExperience() => KlaykExperience(
-        autoPlay: autoPlay,
-        wifiOnly: wifiOnly,
-        saveData: saveData,
-        videoQuality: videoQuality,
-      );
+    autoPlay: autoPlay,
+    wifiOnly: wifiOnly,
+    saveData: saveData,
+    videoQuality: videoQuality,
+  );
 }
 
 class VerificationRequest {
@@ -136,8 +137,10 @@ class VerificationRequest {
         userId: json['user_id'] as String? ?? '',
         status: json['status'] as String? ?? 'pending',
         reason: json['reason'] as String? ?? '',
-        submittedAt: DateTime.tryParse(json['submitted_at']?.toString() ?? '')
-                ?.toLocal() ??
+        submittedAt:
+            DateTime.tryParse(
+              json['submitted_at']?.toString() ?? '',
+            )?.toLocal() ??
             DateTime.now(),
         reviewedAt: json['reviewed_at'] != null
             ? DateTime.tryParse(json['reviewed_at'].toString())?.toLocal()
@@ -170,20 +173,20 @@ class SupportTicket {
   });
 
   factory SupportTicket.fromJson(Map<String, dynamic> json) => SupportTicket(
-        id: json['id'] as String? ?? '',
-        userId: json['user_id'] as String? ?? '',
-        category: json['category'] as String? ?? '',
-        subject: json['subject'] as String? ?? '',
-        message: json['message'] as String? ?? '',
-        status: json['status'] as String? ?? 'open',
-        adminReply: json['admin_reply'] as String? ?? '',
-        createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '')
-                ?.toLocal() ??
-            DateTime.now(),
-        updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? '')
-                ?.toLocal() ??
-            DateTime.now(),
-      );
+    id: json['id'] as String? ?? '',
+    userId: json['user_id'] as String? ?? '',
+    category: json['category'] as String? ?? '',
+    subject: json['subject'] as String? ?? '',
+    message: json['message'] as String? ?? '',
+    status: json['status'] as String? ?? 'open',
+    adminReply: json['admin_reply'] as String? ?? '',
+    createdAt:
+        DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
+        DateTime.now(),
+    updatedAt:
+        DateTime.tryParse(json['updated_at']?.toString() ?? '')?.toLocal() ??
+        DateTime.now(),
+  );
 }
 
 /// Camada de acesso real para Configurações, Central de Ajuda e Verificação.
@@ -207,7 +210,9 @@ class AccountService {
     final user = await SupabaseService.instance.ensureAuthenticated();
     final res = await _db
         .from('profiles')
-        .select('id, username, display_name, avatar_url, bio, is_private, is_verified, is_admin')
+        .select(
+          'id, username, display_name, avatar_url, bio, is_private, is_verified, is_admin',
+        )
         .eq('id', user.id)
         .maybeSingle();
     return res == null ? null : Map<String, dynamic>.from(res as Map);
@@ -238,8 +243,11 @@ class AccountService {
   Future<String> uploadAvatar(File file, {String? mime}) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     final ext = _ext(file.path);
-    final path = '${user.id}/avatar-${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _db.storage.from('avatars').upload(
+    final path =
+        '${user.id}/avatar-${DateTime.now().millisecondsSinceEpoch}.$ext';
+    await _db.storage
+        .from('avatars')
+        .upload(
           path,
           file,
           fileOptions: FileOptions(
@@ -249,10 +257,7 @@ class AccountService {
           ),
         );
     final url = _db.storage.from('avatars').getPublicUrl(path);
-    await _db
-        .from('profiles')
-        .update({'avatar_url': url})
-        .eq('id', user.id);
+    await _db.from('profiles').update({'avatar_url': url}).eq('id', user.id);
     // Mantém a identidade em memória sincronizada.
     kAppIdentity.avatarUrl = url;
     return url;
@@ -337,12 +342,14 @@ class AccountService {
     for (final id in ids) {
       final p = await SupabaseService.instance.profileFor(id);
       if (p != null) {
-        out.add(PostAuthor(
-          id: id,
-          username: p['username'] as String?,
-          displayName: p['display_name'] as String?,
-          avatarUrl: p['avatar_url'] as String?,
-        ));
+        out.add(
+          PostAuthor(
+            id: id,
+            username: p['username'] as String?,
+            displayName: p['display_name'] as String?,
+            avatarUrl: p['avatar_url'] as String?,
+          ),
+        );
       }
     }
     return out;
@@ -351,10 +358,10 @@ class AccountService {
   Future<void> blockUser(String blockedId) async {
     final user = await SupabaseService.instance.ensureAuthenticated();
     try {
-      await _db.from('blocked_users').insert({
-        'blocker_id': user.id,
-        'blocked_id': blockedId,
-      }).then((_) {});
+      await _db
+          .from('blocked_users')
+          .insert({'blocker_id': user.id, 'blocked_id': blockedId})
+          .then((_) {});
     } on PostgrestException catch (e) {
       if (e.code != '23505') rethrow;
     }
@@ -401,9 +408,13 @@ class AccountService {
         .order('created_at', ascending: false);
     return (res as List)
         .whereType<Map>()
-        .map((r) => SupportTicket.fromJson(
-              Map<String, dynamic>.from(r.map((k, v) => MapEntry(k.toString(), v))),
-            ))
+        .map(
+          (r) => SupportTicket.fromJson(
+            Map<String, dynamic>.from(
+              r.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          ),
+        )
         .toList();
   }
 
@@ -436,7 +447,8 @@ class AccountService {
           .maybeSingle();
       if (res == null) return null;
       return VerificationRequest.fromJson(
-          Map<String, dynamic>.from(res as Map));
+        Map<String, dynamic>.from(res as Map),
+      );
     } catch (_) {
       return null;
     }
@@ -449,11 +461,7 @@ class AccountService {
     final user = await SupabaseService.instance.ensureAuthenticated();
     final res = await _db
         .from('verification_requests')
-        .insert({
-          'user_id': user.id,
-          'reason': reason,
-          'status': 'pending',
-        })
+        .insert({'user_id': user.id, 'reason': reason, 'status': 'pending'})
         .select()
         .single();
     return VerificationRequest.fromJson(Map<String, dynamic>.from(res as Map));

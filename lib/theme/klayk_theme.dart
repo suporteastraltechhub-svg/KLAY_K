@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 /// ============================================================================
 /// KLAY K — Design Tokens Premium
-/// Identidade: preto profundo, roxo premium, neon equilibrado, futurista.
+/// Identidade: preto profundo, grafite, branco e roxo como detalhe de marca.
+/// O roxo é acento — nunca a cor dominante da interface.
 /// ============================================================================
 
 class KlaykColors extends ThemeExtension<KlaykColors> {
@@ -48,15 +49,15 @@ class KlaykColors extends ThemeExtension<KlaykColors> {
   });
 
   static const KlaykColors dark = KlaykColors(
-    bg: Color(0xFF08070D),
-    bgElevated: Color(0xFF0E0C16),
-    surface: Color(0xFF17141F),
-    surfaceAlt: Color(0xFF1E1A2B),
-    border: Color(0xFF2A2540),
+    bg: Color(0xFF000000),
+    bgElevated: Color(0xFF111111),
+    surface: Color(0xFF171717),
+    surfaceAlt: Color(0xFF1D1D1D),
+    border: Color(0xFF2E2E2E),
     primary: Color(0xFF8B5CF6),
-    primarySoft: Color(0xFFB794FF),
+    primarySoft: Color(0xFFA78BFA),
     primaryFaint: Color(0xFF6D28D9),
-    accent: Color(0xFFC084F0),
+    accent: Color(0xFF9D7BEA),
     glow: Color(0xFF8B5CF6),
     success: Color(0xFF34D399),
     warning: Color(0xFFF59E0B),
@@ -66,11 +67,11 @@ class KlaykColors extends ThemeExtension<KlaykColors> {
     like: Color(0xFFFF4D6A),
   );
 
-  /// Gradiente premium base (roxo profundo → preto).
+  /// Gradiente base discreto (preto profundo → grafite). Sem roxo dominante.
   static const LinearGradient baseGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    colors: [Color(0xFF171127), Color(0xFF0B0913), Color(0xFF08070D)],
+    colors: [Color(0xFF0A0A0A), Color(0xFF050505), Color(0xFF000000)],
   );
 
   /// Gradiente "purple glow" para destaques (logo/badges).
@@ -160,29 +161,35 @@ class KlaykTheme {
   KlaykTheme._();
 
   /// `reduceMotion` desliga transições longas (acessibilidade / economia).
-  static ThemeData dark({bool reduceMotion = false}) {
+  /// `highContrast` reforça contraste de texto e bordas (acessibilidade).
+  /// Ambos são opcionais e o padrão preserva exatamente o visual atual.
+  static ThemeData dark({
+    bool reduceMotion = false,
+    bool highContrast = false,
+  }) {
     const palette = KlaykColors.dark;
     // Em `flutter test` o asset do shader Sparkle não existe no bundle de
     // teste → usa `InkRipple` (determinístico, mesmo padrão de `_inTests` que
     // o resto do app já usa). Em produção mantém o efeito Sparkle.
     final inTests = Platform.environment['FLUTTER_TEST'] == 'true';
-    final scheme = ColorScheme.fromSeed(
-      seedColor: palette.primary,
-      brightness: Brightness.dark,
-      surface: palette.bg,
-    ).copyWith(
-      primary: palette.primary,
-      secondary: palette.primarySoft,
-      tertiary: palette.accent,
-      error: palette.danger,
-      onPrimary: Colors.white,
-      onSurface: Colors.white,
-      surface: palette.bg,
-      surfaceContainer: palette.surface,
-      surfaceContainerLow: palette.bgElevated,
-      surfaceContainerHigh: palette.surfaceAlt,
-      outline: palette.border,
-    );
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: palette.primary,
+          brightness: Brightness.dark,
+          surface: palette.bg,
+        ).copyWith(
+          primary: palette.primary,
+          secondary: palette.primarySoft,
+          tertiary: palette.accent,
+          error: palette.danger,
+          onPrimary: Colors.white,
+          onSurface: Colors.white,
+          surface: palette.bg,
+          surfaceContainer: palette.surface,
+          surfaceContainerLow: palette.bgElevated,
+          surfaceContainerHigh: palette.surfaceAlt,
+          outline: palette.border,
+        );
 
     final base = ThemeData(
       useMaterial3: true,
@@ -194,13 +201,16 @@ class KlaykTheme {
     return base.copyWith(
       textTheme: base.textTheme
           .apply(
-            bodyColor: Colors.white,
-            displayColor: Colors.white,
+            bodyColor: highContrast ? Colors.white : Colors.white,
+            displayColor: highContrast ? Colors.white : Colors.white,
           )
           .copyWith(
-            bodySmall: const TextStyle(fontSize: 12, color: Colors.white70),
+            bodySmall: TextStyle(
+              fontSize: 12,
+              color: highContrast ? Colors.white : Colors.white70,
+            ),
           ),
-      extensions: const [palette],
+      extensions: [palette],
       appBarTheme: AppBarTheme(
         backgroundColor: palette.bg,
         foregroundColor: Colors.white,
@@ -218,21 +228,32 @@ class KlaykTheme {
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: palette.border),
+          side: BorderSide(
+            color: highContrast
+                ? palette.primarySoft.withValues(alpha: 0.55)
+                : palette.border,
+          ),
         ),
       ),
-      dividerTheme: DividerThemeData(color: palette.border, thickness: 0.5),
+      dividerTheme: DividerThemeData(
+        color: highContrast
+            ? palette.primarySoft.withValues(alpha: 0.45)
+            : palette.border,
+        thickness: 0.5,
+      ),
       iconTheme: const IconThemeData(color: Colors.white),
       snackBarTheme: const SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: Color(0xFF17141F),
+        backgroundColor: Color(0xFF1D1D1D),
         contentTextStyle: TextStyle(color: Colors.white, fontSize: 13),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStatePropertyAll(palette.primary),
-        trackColor: const WidgetStatePropertyAll(Color(0xFF2A2340)),
+        trackColor: const WidgetStatePropertyAll(Color(0xFF333333)),
       ),
-      progressIndicatorTheme: ProgressIndicatorThemeData(color: palette.primary),
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: palette.primary,
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: palette.surface,
@@ -248,7 +269,10 @@ class KlaykTheme {
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: palette.primary, width: 1.4),
         ),
-        hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+        hintStyle: TextStyle(
+          color: highContrast ? Colors.white70 : Colors.white38,
+          fontSize: 13,
+        ),
       ),
       pageTransitionsTheme: PageTransitionsTheme(
         builders: {

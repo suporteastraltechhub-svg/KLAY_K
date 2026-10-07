@@ -11,6 +11,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 /**
  * Service em primeiro plano dedicado à captura de tela (compartilhamento de
@@ -46,10 +47,23 @@ class ScreenCaptureService : Service() {
     private var startedForeground = false
 
     companion object {
+        private const val TAG = "KLAY_SCREEN_CAPTURE"
         private const val NOTIFICATION_ID = 9001
         const val ACTION_MEDIA_PROJECTION = "com.klayk.klay_k.action.MEDIA_PROJECTION"
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_RESULT_DATA = "resultData"
+
+        /** Canal do Flutter para avisar o Dart quando este service é encerrado
+         *  pelo sistema/usuário (fora do fluxo normal do app). Setado pela
+         *  MainActivity antes de iniciar o service. */
+        @Volatile
+        var pendingFlutterChannel: io.flutter.plugin.common.MethodChannel? = null
+
+        /** Quando `true`, o próximo onDestroy foi pedido pelo próprio app
+         *  (Dart chamou stopCaptureService) — nesse caso NÃO avisamos o Dart
+         *  de volta para evitar um falso "compartilhamento parou". */
+        @Volatile
+        var silenceNextStop = false
     }
 
     override fun onCreate() {
@@ -126,13 +140,35 @@ class ScreenCaptureService : Service() {
                 // Consentimento ausente (raro): cai para o FGS simples abaixo.
             }
         }
-        startForeground(NOTIFICATION_ID, notification)
-        startedForeground = true
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+            startedForeground = true
+        } catch (t: Throwable) {
+            // No Android 14+ (manifest com foregroundServiceType=mediaProjection)
+            // até o FGS simples pode repetir a SecurityException quando o
+            // consentimento de captura não foi concedido. Encerra o service de
+            // forma limpa em vez de deixar o crash/looping (START_STICKY).
+            Log.w(TAG, "startForegroundSafe: falha ao iniciar o FGS simples", t)
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {
+        // Se o Android/usuário encerrou este service sem o app pedir (ex.:
+        // swipe na notificação), a projeção ativa cai junto — o Dart precisa
+        // saber para tirar o "compartilhando tela" do ar e oferecer reativar.
+        val notifyDart = !silenceNextStop
         projection?.stop()
         projection = null
+        silenceNextStop = false
+        if (notifyDart) {
+            try {
+                pendingFlutterChannel?.invokeMethod("screenShareStopped", null)
+            } catch (t: Throwable) {
+                Log.w(TAG, "onDestroy: falha ao notificar o Dart", t)
+            }
+        }
+        pendingFlutterChannel = null
         super.onDestroy()
     }
 

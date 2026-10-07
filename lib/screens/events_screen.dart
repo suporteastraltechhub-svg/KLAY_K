@@ -6,6 +6,7 @@ import '../services/event_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/klayk_theme.dart';
 import '../widgets/klayk_ux.dart';
+import '../l10n/app_localizations.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
 
@@ -63,8 +64,7 @@ class _EventsScreenState extends State<EventsScreen> {
       if (!mounted) return;
       setState(() {
         _all = [
-          for (final e in events)
-            e.copyWith(iAmGoing: goingIds.contains(e.id)),
+          for (final e in events) e.copyWith(iAmGoing: goingIds.contains(e.id)),
         ];
         _mine = mine;
         _categories = categories;
@@ -118,11 +118,15 @@ class _EventsScreenState extends State<EventsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text('Eventos', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(
+          l10n.events,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
       body: Column(
         children: [
@@ -133,9 +137,7 @@ class _EventsScreenState extends State<EventsScreen> {
           _categoryStrip(),
           const SizedBox(height: 4),
           Expanded(
-            child: _loading
-                ? const KlaykListSkeleton(rows: 6)
-                : _buildBody(),
+            child: _loading ? const KlaykListSkeleton(rows: 6) : _buildBody(),
           ),
         ],
       ),
@@ -148,7 +150,7 @@ class _EventsScreenState extends State<EventsScreen> {
       onChanged: _onSearch,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
-        hintText: 'Buscar eventos…',
+        hintText: AppLocalizations.of(context)!.searchEventsHint,
         hintStyle: const TextStyle(color: Colors.white38),
         prefixIcon: const Icon(Icons.search, color: Colors.white38),
         suffixIcon: _searchCtrl.text.trim().isEmpty
@@ -176,6 +178,7 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Widget _categoryStrip() {
+    final l10n = AppLocalizations.of(context)!;
     final cats = [..._categories];
     return SizedBox(
       height: 46,
@@ -187,7 +190,7 @@ class _EventsScreenState extends State<EventsScreen> {
         itemBuilder: (context, i) {
           if (i == 0) {
             return KlayKChip(
-              label: 'Todos',
+              label: l10n.exploreAll,
               selected: _selectedCategory == null,
               onTap: () => _selectCategory(null),
             );
@@ -209,22 +212,22 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     if (_loadFailed) {
       return KlaykEmptyState(
         icon: Icons.cloud_off_outlined,
-        title: 'Erro ao carregar',
-        message: 'Não conseguimos carregar os eventos. Tentar novamente.',
-        actionLabel: 'Tentar novamente',
+        title: l10n.errorLoading,
+        message: l10n.eventsLoadFail,
+        actionLabel: l10n.retry,
         actionIcon: Icons.refresh_rounded,
         onAction: () => _load(category: _selectedCategory),
       );
     }
     if (_all.isEmpty) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.event_outlined,
-        title: 'Nenhum evento por aqui',
-        message:
-            'Quando um show, maratona ou encontro for criado, ele aparece aqui.',
+        title: l10n.eventsEmptyTitle,
+        message: l10n.eventsEmptyBody,
       );
     }
     return RefreshIndicator(
@@ -234,16 +237,24 @@ class _EventsScreenState extends State<EventsScreen> {
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
           if (_mine.isNotEmpty) ...[
-            _sectionHeader('Suas confirmações', icon: Icons.check_circle_outline_rounded),
+            _sectionHeader(
+              l10n.yourRSVPs,
+              icon: Icons.check_circle_outline_rounded,
+            ),
             ..._mine.map((e) => _eventCard(e)),
             const SizedBox(height: 14),
           ],
-          _sectionHeader('Próximos eventos', icon: Icons.calendar_month_outlined),
+          _sectionHeader(
+            l10n.upcomingEvents,
+            icon: Icons.calendar_month_outlined,
+          ),
           const SizedBox(height: 4),
-          ..._all.map((e) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _eventCard(e),
-              )),
+          ..._all.map(
+            (e) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _eventCard(e),
+            ),
+          ),
         ],
       ),
     );
@@ -260,7 +271,11 @@ class _EventsScreenState extends State<EventsScreen> {
           ],
           Text(
             title,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
           ),
         ],
       ),
@@ -269,6 +284,7 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Widget _eventCard(KlayKEvent e) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     final busy = _goingBusy.contains(e.id);
     return KlayKCard(
       padding: const EdgeInsets.all(14),
@@ -301,18 +317,33 @@ class _EventsScreenState extends State<EventsScreen> {
                     Text(
                       e.title,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       e.whenLabel,
-                      style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      e.location.isEmpty ? (e.category.isEmpty ? 'Em todo o app' : e.category) : e.location,
+                      e.location.isEmpty
+                          ? (e.category.isEmpty
+                                ? l10n.everywhereInApp
+                                : e.category)
+                          : e.location,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white38, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -320,7 +351,10 @@ class _EventsScreenState extends State<EventsScreen> {
               GestureDetector(
                 onTap: busy ? null : () => _toggleGoing(e),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
                     color: e.iAmGoing ? const Color(0xFF2A2350) : _kAccent,
@@ -338,8 +372,12 @@ class _EventsScreenState extends State<EventsScreen> {
                           ),
                         )
                       : Text(
-                          e.iAmGoing ? 'Vou' : 'Vou!',
-                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                          e.iAmGoing ? l10n.goingActive : l10n.goingAction,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                 ),
               ),
@@ -351,16 +389,24 @@ class _EventsScreenState extends State<EventsScreen> {
               e.description,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 13,
+                height: 1.4,
+              ),
             ),
             const SizedBox(height: 8),
           ],
           Row(
             children: [
-              Icon(Icons.people_outline_rounded, color: colors.primarySoft, size: 15),
+              Icon(
+                Icons.people_outline_rounded,
+                color: colors.primarySoft,
+                size: 15,
+              ),
               const SizedBox(width: 4),
               Text(
-                '${e.participantCount} ${e.participantCount == 1 ? 'pessoa' : 'pessoas'} confirmadas',
+                l10n.participantsConfirm(e.participantCount),
                 style: const TextStyle(color: Colors.white38, fontSize: 12),
               ),
             ],

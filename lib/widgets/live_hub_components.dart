@@ -36,11 +36,7 @@ class LiveTypeCard extends StatelessWidget {
   final LiveFormat format;
   final VoidCallback onTap;
 
-  const LiveTypeCard({
-    super.key,
-    required this.format,
-    required this.onTap,
-  });
+  const LiveTypeCard({super.key, required this.format, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -55,15 +51,10 @@ class LiveTypeCard extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                format.accent.withValues(alpha: 0.22),
-                kkLiveCard,
-              ],
+              colors: [format.accent.withValues(alpha: 0.22), kkLiveCard],
             ),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: format.accent.withValues(alpha: 0.45),
-            ),
+            border: Border.all(color: format.accent.withValues(alpha: 0.45)),
             boxShadow: [
               BoxShadow(
                 color: format.accent.withValues(alpha: 0.14),
@@ -211,7 +202,9 @@ class LiveNowCard extends StatelessWidget {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: kkLiveRed,
                           borderRadius: BorderRadius.circular(12),
@@ -227,11 +220,14 @@ class LiveNowCard extends StatelessWidget {
                           children: [
                             Icon(Icons.circle, color: Colors.white, size: 7),
                             SizedBox(width: 4),
-                            Text('AO VIVO',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800)),
+                            Text(
+                              'AO VIVO',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -247,8 +243,10 @@ class LiveNowCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(10),
@@ -256,14 +254,20 @@ class LiveNowCard extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.remove_red_eye_rounded,
-                            color: Colors.white70, size: 13),
+                        const Icon(
+                          Icons.remove_red_eye_rounded,
+                          color: Colors.white70,
+                          size: 13,
+                        ),
                         const SizedBox(width: 4),
-                        Text('$viewers',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700)),
+                        Text(
+                          '$viewers',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -273,15 +277,19 @@ class LiveNowCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700),
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 3),
                   Row(
                     children: [
-                      const Icon(Icons.person_rounded,
-                          color: Colors.white54, size: 14),
+                      const Icon(
+                        Icons.person_rounded,
+                        color: Colors.white54,
+                        size: 14,
+                      ),
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
@@ -289,13 +297,18 @@ class LiveNowCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              color: Colors.white70, fontSize: 11),
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
                         ),
                       ),
                       if (verified) ...[
                         const SizedBox(width: 4),
-                        const Icon(Icons.verified_rounded,
-                            color: kkLivePurple, size: 13),
+                        const Icon(
+                          Icons.verified_rounded,
+                          color: kkLivePurple,
+                          size: 13,
+                        ),
                       ],
                     ],
                   ),
@@ -352,8 +365,10 @@ class TrendingLiveCard extends StatelessWidget {
                 Icon(icon, color: accent, size: 22),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(10),
@@ -361,14 +376,20 @@ class TrendingLiveCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.remove_red_eye_rounded,
-                          color: Colors.white70, size: 12),
+                      const Icon(
+                        Icons.remove_red_eye_rounded,
+                        color: Colors.white70,
+                        size: 12,
+                      ),
                       const SizedBox(width: 3),
-                      Text('$viewers',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700)),
+                      Text(
+                        '$viewers',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -380,9 +401,10 @@ class TrendingLiveCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800),
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 3),
             Text(
@@ -422,13 +444,9 @@ class LiveCategoryChip extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           decoration: BoxDecoration(
-            color: selected
-                ? kkLivePurple.withValues(alpha: 0.85)
-                : kkLiveCard,
+            color: selected ? kkLivePurple.withValues(alpha: 0.85) : kkLiveCard,
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: selected ? kkLivePurple : kkLiveBorder,
-            ),
+            border: Border.all(color: selected ? kkLivePurple : kkLiveBorder),
             boxShadow: selected
                 ? [
                     BoxShadow(
@@ -481,7 +499,9 @@ class LiveSectionTitle extends StatelessWidget {
             fontSize: 17,
             fontWeight: FontWeight.w900,
             letterSpacing: 0.3,
-            shadows: [Shadow(color: col.withValues(alpha: 0.5), blurRadius: 12)],
+            shadows: [
+              Shadow(color: col.withValues(alpha: 0.5), blurRadius: 12),
+            ],
           ),
         ),
       ],

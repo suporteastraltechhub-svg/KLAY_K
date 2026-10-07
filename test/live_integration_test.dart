@@ -14,10 +14,7 @@ void main() {
   group('AppConfig', () {
     test('credenciais públicas padrão configuram o Supabase', () {
       expect(AppConfig.isSupabaseConfigured, isTrue);
-      expect(
-        AppConfig.supabaseUrl,
-        'https://oysyuialaelzcxxkfdsl.supabase.co',
-      );
+      expect(AppConfig.supabaseUrl, 'https://oysyuialaelzcxxkfdsl.supabase.co');
       expect(AppConfig.supabaseKey, startsWith('sb_publishable_'));
       expect(AppConfig.projectRef.isNotEmpty, isTrue);
     });
@@ -157,8 +154,9 @@ void main() {
 
       final skLive = RegExp(r'sk_live_[A-Za-z0-9_\-/=+]{8,}');
       final jwt = RegExp(r'eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+');
-      final secretAssign =
-          RegExp(r'(LIVEKIT_API_KEY|LIVEKIT_API_SECRET)\s*=\s*\S+');
+      final secretAssign = RegExp(
+        r'(LIVEKIT_API_KEY|LIVEKIT_API_SECRET)\s*=\s*\S+',
+      );
       final serviceRole = RegExp(r'SUPABASE_SERVICE_ROLE_KEY\s*=\s*\S+');
 
       final suspects = <String>[];
@@ -175,7 +173,11 @@ void main() {
           }
         }
       }
-      expect(suspects, isEmpty, reason: 'Encontrado potencial segredo: $suspects');
+      expect(
+        suspects,
+        isEmpty,
+        reason: 'Encontrado potencial segredo: $suspects',
+      );
     });
 
     test('livekit-token responde apenas server_url + participant_token', () {
@@ -194,39 +196,46 @@ void main() {
   });
 
   group('Menu de publicação (+)', () {
-    testWidgets('abre com Vídeo/Live/Áudio/Amigos e Live navega para StartLiveScreen',
-        (tester) async {
-      tester.view.physicalSize = const Size(400, 900);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
+    testWidgets(
+      'abre com Vídeo/Live/Áudio/Amigos e Live navega para StartLiveScreen',
+      (tester) async {
+        tester.view.physicalSize = const Size(400, 900);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(const KlayKApp());
-      await tester.pump();
-      // AppGate: splash animado (~4s) + transição do switcher.
-      await tester.pump(const Duration(milliseconds: 4000));
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.pump();
+        await tester.pumpWidget(const KlayKApp());
+        await tester.pump();
+        // AppGate: splash animado (~4s) + transição do switcher.
+        await tester.pump(const Duration(milliseconds: 4000));
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump();
 
-      await tester.tap(find.byIcon(Icons.add));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Criar no KLAY K'), findsOneWidget);
-      expect(find.text('Vídeo curto'), findsOneWidget);
-      expect(find.text('Live ao vivo'), findsOneWidget);
+        expect(find.text('Criar no KLAY K'), findsOneWidget);
+        expect(find.text('+ Vídeo'), findsOneWidget);
+        expect(find.text('+ Live'), findsOneWidget);
+        expect(find.text('+ Jogo'), findsOneWidget);
 
-      final sheet = find.byType(BottomSheet);
-      expect(find.descendant(of: sheet, matching: find.text('Áudio')),
-          findsOneWidget);
-      expect(find.descendant(of: sheet, matching: find.text('Amigos')),
-          findsOneWidget);
+        final sheet = find.byType(BottomSheet);
+        expect(
+          find.descendant(of: sheet, matching: find.text('Áudio')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: sheet, matching: find.text('Amigos')),
+          findsOneWidget,
+        );
 
-      await tester.tap(find.text('Live ao vivo'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(find.text('+ Live'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.byType(StartLiveScreen), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
+        expect(find.byType(StartLiveScreen), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

@@ -24,6 +24,8 @@ import 'package:klay_k/screens/drafts_screen.dart';
 import 'package:klay_k/services/drafts_service.dart';
 import 'package:klay_k/theme/klayk_theme.dart';
 
+import 'helpers/l10n_test_utils.dart';
+
 /// Armazenamento fake em memória: registra chamadas e "persiste" edições,
 /// sem tocar na rede (mesmo contrato do [DraftsService] real).
 class FakeDraftStore implements DraftStore {
@@ -118,8 +120,7 @@ class FakeDraftStore implements DraftStore {
     String path,
     Uint8List bytes, {
     String contentType = 'video/mp4',
-  }) async =>
-      'fake/videos/$path';
+  }) async => 'fake/videos/$path';
 
   @override
   Future<String> uploadVideoFile(
@@ -139,8 +140,7 @@ class FakeDraftStore implements DraftStore {
     String path,
     Uint8List bytes, {
     String contentType = 'image/jpeg',
-  }) async =>
-      'fake/covers/$path';
+  }) async => 'fake/covers/$path';
 
   @override
   Future<String?> temporaryUrl(Draft d) async => null;
@@ -149,8 +149,11 @@ class FakeDraftStore implements DraftStore {
   Future<FeedPost?> publish(String draftId) async => null;
 }
 
-Draft sampleDraft(String id,
-    {String description = '', List<String> hashtags = const []}) {
+Draft sampleDraft(
+  String id, {
+  String description = '',
+  List<String> hashtags = const [],
+}) {
   final now = DateTime.now();
   return Draft(
     id: id,
@@ -164,7 +167,10 @@ Draft sampleDraft(String id,
 void main() {
   testWidgets('rascunhos: lista vazia mostra o estado vazio', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(theme: KlaykTheme.dark(), home: DraftsScreen(store: FakeDraftStore([]))),
+      l10nApp(
+        theme: KlaykTheme.dark(),
+        home: DraftsScreen(store: FakeDraftStore([])),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -175,9 +181,18 @@ void main() {
   testWidgets('_edit: abre diálogo pré-preenchido, salva descrição e #tags e '
       'recarrega a lista', (tester) async {
     final store = FakeDraftStore([
-      sampleDraft('d1', description: 'viagem', hashtags: const ['klayk', 'amigo']),
+      sampleDraft(
+        'd1',
+        description: 'viagem',
+        hashtags: const ['klayk', 'amigo'],
+      ),
     ]);
-    await tester.pumpWidget(MaterialApp(theme: KlaykTheme.dark(), home: DraftsScreen(store: store)));
+    await tester.pumpWidget(
+      l10nApp(
+        theme: KlaykTheme.dark(),
+        home: DraftsScreen(store: store),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('viagem'), findsOneWidget);
 
@@ -193,7 +208,9 @@ void main() {
     expect(fields, findsNWidgets(2));
     expect(tester.widget<TextField>(fields.at(0)).controller!.text, 'viagem');
     expect(
-        tester.widget<TextField>(fields.at(1)).controller!.text, '#klayk #amigo');
+      tester.widget<TextField>(fields.at(1)).controller!.text,
+      '#klayk #amigo',
+    );
 
     await tester.enterText(fields.at(0), 'viagem à praia');
     await tester.enterText(fields.at(1), '#klayk #nova');
@@ -203,17 +220,29 @@ void main() {
     expect(store.updates, hasLength(1), reason: 'Salvar chama _svc.update');
     expect(store.updates.single['description'], 'viagem à praia');
     expect(store.updates.single['hashtags'], ['klayk', 'nova']);
-    expect(store.listCalls, greaterThanOrEqualTo(2),
-        reason: '_edit recarrega a lista depois de salvar');
-    expect(find.text('viagem à praia'), findsOneWidget,
-        reason: 'tile reflete a edição após o reload');
+    expect(
+      store.listCalls,
+      greaterThanOrEqualTo(2),
+      reason: '_edit recarrega a lista depois de salvar',
+    );
+    expect(
+      find.text('viagem à praia'),
+      findsOneWidget,
+      reason: 'tile reflete a edição após o reload',
+    );
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('_edit: palavra sem # é descartada no parse de hashtags',
-      (tester) async {
+  testWidgets('_edit: palavra sem # é descartada no parse de hashtags', (
+    tester,
+  ) async {
     final store = FakeDraftStore([sampleDraft('d1')]);
-    await tester.pumpWidget(MaterialApp(theme: KlaykTheme.dark(), home: DraftsScreen(store: store)));
+    await tester.pumpWidget(
+      l10nApp(
+        theme: KlaykTheme.dark(),
+        home: DraftsScreen(store: store),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Editar'));
@@ -227,8 +256,11 @@ void main() {
     await tester.tap(find.text('Salvar'));
     await tester.pumpAndSettle();
 
-    expect(store.updates.single['hashtags'], ['klayk', 'e2e'],
-        reason: 'só tokens que começam com # viram hashtag');
+    expect(
+      store.updates.single['hashtags'],
+      ['klayk', 'e2e'],
+      reason: 'só tokens que começam com # viram hashtag',
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -238,8 +270,9 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(MaterialApp(
-        theme: KlaykTheme.dark(), home: const UploadScreen()));
+    await tester.pumpWidget(
+      l10nApp(theme: KlaykTheme.dark(), home: const UploadScreen()),
+    );
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'meu vídeo #teste');
@@ -269,7 +302,8 @@ void main() {
     addTearDown(tester.view.reset);
 
     final tmp = File(
-        '${Directory.systemTemp.path}/klay_draft_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
+      '${Directory.systemTemp.path}/klay_draft_video_${DateTime.now().millisecondsSinceEpoch}.mp4',
+    );
     tmp.writeAsBytesSync([0x00, 0x01, 0x02, 0x03]);
     addTearDown(() => tmp.existsSync() ? tmp.deleteSync() : null);
 
@@ -279,11 +313,15 @@ void main() {
       (call) async => call.method == 'pickVideo' ? tmp.path : null,
     );
     addTearDown(
-        () => tester.binding.defaultBinaryMessenger
-            .setMockMethodCallHandler(channel, null));
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
 
-    await tester.pumpWidget(MaterialApp(
-        theme: KlaykTheme.dark(), home: const UploadScreen()));
+    await tester.pumpWidget(
+      l10nApp(theme: KlaykTheme.dark(), home: const UploadScreen()),
+    );
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'meu vídeo #teste');
@@ -299,8 +337,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('Rascunho salvo!'), findsOneWidget,
-        reason: 'modo local simula o salvamento sem backend');
+    expect(
+      find.text('Rascunho salvo!'),
+      findsOneWidget,
+      reason: 'modo local simula o salvamento sem backend',
+    );
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       isEmpty,
@@ -320,7 +361,8 @@ void main() {
 
     final store = FakeDraftStore([]);
     final tmp = File(
-        '${Directory.systemTemp.path}/klay_draft_inject_${DateTime.now().millisecondsSinceEpoch}.mp4');
+      '${Directory.systemTemp.path}/klay_draft_inject_${DateTime.now().millisecondsSinceEpoch}.mp4',
+    );
     tmp.writeAsBytesSync([0x00, 0x01, 0x02, 0x03]);
     addTearDown(() => tmp.existsSync() ? tmp.deleteSync() : null);
 
@@ -330,12 +372,18 @@ void main() {
       (call) async => call.method == 'pickVideo' ? tmp.path : null,
     );
     addTearDown(
-        () => tester.binding.defaultBinaryMessenger
-            .setMockMethodCallHandler(channel, null));
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
 
-    await tester
-        .pumpWidget(MaterialApp(
-            theme: KlaykTheme.dark(), home: UploadScreen(draftsStore: store)));
+    await tester.pumpWidget(
+      l10nApp(
+        theme: KlaykTheme.dark(),
+        home: UploadScreen(draftsStore: store),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'meu vídeo #e2e #teste');
@@ -348,18 +396,29 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('Rascunho salvo! Você pode finalizar em Rascunhos.'),
-        findsOneWidget,
-        reason: '_saveDraft do ramo real mostra a snackbar de sucesso');
+    expect(
+      find.text('Rascunho salvo! Você pode finalizar em Rascunhos.'),
+      findsOneWidget,
+      reason: '_saveDraft do ramo real mostra a snackbar de sucesso',
+    );
 
-    expect(store.drafts, hasLength(1),
-        reason: 'injected store criou exatamente 1 rascunho');
+    expect(
+      store.drafts,
+      hasLength(1),
+      reason: 'injected store criou exatamente 1 rascunho',
+    );
     final created = store.drafts.single;
-    expect(created.videoPath, startsWith('fake/videos/'),
-        reason: '_saveDraft envia o vídeo ao bucket privado (via store)');
+    expect(
+      created.videoPath,
+      startsWith('fake/videos/'),
+      reason: '_saveDraft envia o vídeo ao bucket privado (via store)',
+    );
     expect(created.description, 'meu vídeo #e2e #teste');
-    expect(created.hashtags, ['klayk', 'e2e', 'teste'],
-        reason: '_saveDraft parseia as #tags da descrição (com klayk padrão)');
+    expect(
+      created.hashtags,
+      ['klayk', 'e2e', 'teste'],
+      reason: '_saveDraft parseia as #tags da descrição (com klayk padrão)',
+    );
 
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,

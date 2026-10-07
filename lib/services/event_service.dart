@@ -68,10 +68,12 @@ class EventService {
       final res = await _db.rpc('event_categories', params: {});
       return (res as List)
           .whereType<Map>()
-          .map((r) => KlayKEventCategory(
-                name: r['category']?.toString() ?? '',
-                count: (r['cnt'] as num?)?.toInt() ?? 0,
-              ))
+          .map(
+            (r) => KlayKEventCategory(
+              name: r['category']?.toString() ?? '',
+              count: (r['cnt'] as num?)?.toInt() ?? 0,
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -83,7 +85,10 @@ class EventService {
     final uid = _myId;
     if (!_configured || uid == null || uid.isEmpty) return false;
     try {
-      final res = await _db.rpc('event_rsvp_state', params: {'p_event_id': eventId});
+      final res = await _db.rpc(
+        'event_rsvp_state',
+        params: {'p_event_id': eventId},
+      );
       return res == true;
     } catch (_) {
       return false;
@@ -103,7 +108,10 @@ class EventService {
             .eq('event_id', eventId)
             .eq('user_id', uid);
       } else {
-        await _db.from('event_rsvps').insert({'event_id': eventId, 'user_id': uid});
+        await _db.from('event_rsvps').insert({
+          'event_id': eventId,
+          'user_id': uid,
+        });
       }
       return !currently;
     } catch (_) {
@@ -122,9 +130,13 @@ class EventService {
   List<KlayKEvent> _toEvents(Object? res, {required bool markGoing}) {
     return (res as List? ?? const [])
         .whereType<Map>()
-        .map((r) => KlayKEvent.fromJson(
-              Map<String, dynamic>.from(r.map((k, v) => MapEntry(k.toString(), v))),
-            ).copyWith(iAmGoing: markGoing))
+        .map(
+          (r) => KlayKEvent.fromJson(
+            Map<String, dynamic>.from(
+              r.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          ).copyWith(iAmGoing: markGoing),
+        )
         .toList();
   }
 }

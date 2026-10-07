@@ -40,23 +40,24 @@ class Draft {
   });
 
   factory Draft.fromMap(Map<String, dynamic> json) => Draft(
-        id: json['id']?.toString() ?? '',
-        videoPath: json['video_path']?.toString() ?? '',
-        coverPath: json['cover_path']?.toString() ?? '',
-        description: json['description']?.toString() ?? '',
-        audioName: json['audio_name']?.toString() ?? '',
-        hashtags: (json['hashtags'] as List?)?.map((e) => e.toString()).toList() ??
-            const [],
-        location: json['location']?.toString() ?? '',
-        durationSeconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
-        postId: json['post_id']?.toString() ?? '',
-        createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '')
-                ?.toLocal() ??
-            DateTime.now(),
-        updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? '')
-                ?.toLocal() ??
-            DateTime.now(),
-      );
+    id: json['id']?.toString() ?? '',
+    videoPath: json['video_path']?.toString() ?? '',
+    coverPath: json['cover_path']?.toString() ?? '',
+    description: json['description']?.toString() ?? '',
+    audioName: json['audio_name']?.toString() ?? '',
+    hashtags:
+        (json['hashtags'] as List?)?.map((e) => e.toString()).toList() ??
+        const [],
+    location: json['location']?.toString() ?? '',
+    durationSeconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
+    postId: json['post_id']?.toString() ?? '',
+    createdAt:
+        DateTime.tryParse(json['created_at']?.toString() ?? '')?.toLocal() ??
+        DateTime.now(),
+    updatedAt:
+        DateTime.tryParse(json['updated_at']?.toString() ?? '')?.toLocal() ??
+        DateTime.now(),
+  );
 }
 
 /// Contrato de armazenamento de rascunhos. [DraftsService] é a implementação
@@ -175,23 +176,28 @@ class DraftsService implements DraftStore {
   }) async {
     final uid = await _uid();
     final now = DateTime.now().toUtc().toIso8601String();
-    final res = await _db.from('drafts').insert({
-      'user_id': uid,
-      'video_path': videoPath,
-      'cover_path': coverPath,
-      'description': description,
-      'audio_name': audioName,
-      'hashtags': hashtags,
-      'location': location,
-      'duration_seconds': durationSeconds,
-      'created_at': now,
-      'updated_at': now,
-    }).select().single();
+    final res = await _db
+        .from('drafts')
+        .insert({
+          'user_id': uid,
+          'video_path': videoPath,
+          'cover_path': coverPath,
+          'description': description,
+          'audio_name': audioName,
+          'hashtags': hashtags,
+          'location': location,
+          'duration_seconds': durationSeconds,
+          'created_at': now,
+          'updated_at': now,
+        })
+        .select()
+        .single();
     return Draft.fromMap(_stringMap(res));
   }
 
   @override
-  Future<void> update(Draft d, {
+  Future<void> update(
+    Draft d, {
     String? videoPath,
     String? coverPath,
     String? description,
@@ -203,10 +209,7 @@ class DraftsService implements DraftStore {
   }) async {
     final uid = await _uid();
     final now = DateTime.now().toUtc().toIso8601String();
-    final patch = <String, dynamic>{
-      'user_id': uid,
-      'updated_at': now,
-    };
+    final patch = <String, dynamic>{'user_id': uid, 'updated_at': now};
     if (videoPath != null) patch['video_path'] = videoPath;
     if (coverPath != null) patch['cover_path'] = coverPath;
     if (description != null) patch['description'] = description;
@@ -237,10 +240,14 @@ class DraftsService implements DraftStore {
   @override
   Future<void> markPublished(String id) async {
     final uid = await _uid();
-    await _db.from('drafts').update({
-      'status': 'published',
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', id).eq('user_id', uid);
+    await _db
+        .from('drafts')
+        .update({
+          'status': 'published',
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', id)
+        .eq('user_id', uid);
   }
 
   // ---------------------------------------------------------------------------
@@ -249,9 +256,9 @@ class DraftsService implements DraftStore {
 
   Future<String> uploadVideo(String path, String mime) async {
     final uid = await _uid();
-    final signed = await _db.storage.from('drafts').createSignedUploadUrl(
-          '$uid/videos/$path',
-        );
+    final signed = await _db.storage
+        .from('drafts')
+        .createSignedUploadUrl('$uid/videos/$path');
     return signed.token;
   }
 
@@ -259,12 +266,15 @@ class DraftsService implements DraftStore {
   /// completo (a ser gravado em `drafts.video_path`).
   @override
   Future<String> uploadVideoBytes(
-    String path, Uint8List bytes, {
+    String path,
+    Uint8List bytes, {
     String contentType = 'video/mp4',
   }) async {
     final uid = await _uid();
     final full = '$uid/videos/$path';
-    await _db.storage.from('drafts').uploadBinary(
+    await _db.storage
+        .from('drafts')
+        .uploadBinary(
           full,
           bytes,
           fileOptions: FileOptions(contentType: contentType, upsert: true),
@@ -308,12 +318,15 @@ class DraftsService implements DraftStore {
   /// completo (a ser gravado em `drafts.cover_path`).
   @override
   Future<String> uploadCoverBytes(
-    String path, Uint8List bytes, {
+    String path,
+    Uint8List bytes, {
     String contentType = 'image/jpeg',
   }) async {
     final uid = await _uid();
     final full = '$uid/covers/$path';
-    await _db.storage.from('drafts').uploadBinary(
+    await _db.storage
+        .from('drafts')
+        .uploadBinary(
           full,
           bytes,
           fileOptions: FileOptions(contentType: contentType, upsert: true),
@@ -325,7 +338,9 @@ class DraftsService implements DraftStore {
   Future<String?> temporaryUrl(Draft d) async {
     if (d.videoPath.isEmpty) return null;
     try {
-      final r = await _db.storage.from('drafts').createSignedUrl(d.videoPath, 3600);
+      final r = await _db.storage
+          .from('drafts')
+          .createSignedUrl(d.videoPath, 3600);
       return r;
     } catch (_) {
       return null;
@@ -404,9 +419,10 @@ class DraftsService implements DraftStore {
   }) async {
     final uid = await _uid();
     final name = path.split('/').last;
-    final newPath =
-        '$uid/${DateTime.now().millisecondsSinceEpoch}_$name';
-    await _db.storage.from(bucket).uploadBinary(
+    final newPath = '$uid/${DateTime.now().millisecondsSinceEpoch}_$name';
+    await _db.storage
+        .from(bucket)
+        .uploadBinary(
           newPath,
           bytes,
           fileOptions: FileOptions(
@@ -427,7 +443,6 @@ class DraftsService implements DraftStore {
     return 'image/jpeg';
   }
 
-  Map<String, dynamic> _stringMap(Map<dynamic, dynamic> m) => m.map(
-        (k, v) => MapEntry(k.toString(), v),
-      );
+  Map<String, dynamic> _stringMap(Map<dynamic, dynamic> m) =>
+      m.map((k, v) => MapEntry(k.toString(), v));
 }

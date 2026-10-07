@@ -80,10 +80,12 @@ class AudioRoomService {
       final res = await _db.rpc('audio_room_categories', params: {});
       return (res as List)
           .whereType<Map>()
-          .map((r) => AudioRoomCategory(
-                name: r['category']?.toString() ?? '',
-                count: (r['cnt'] as num?)?.toInt() ?? 0,
-              ))
+          .map(
+            (r) => AudioRoomCategory(
+              name: r['category']?.toString() ?? '',
+              count: (r['cnt'] as num?)?.toInt() ?? 0,
+            ),
+          )
           .toList();
     } catch (_) {
       return const [];
@@ -102,10 +104,7 @@ class AudioRoomService {
       description: description,
       category: category,
     );
-    await _liveKit.startAudioRoom(
-      roomName: res.roomName,
-      withMic: joinWithMic,
-    );
+    await _liveKit.startAudioRoom(roomName: res.roomName, withMic: joinWithMic);
     return AudioRoom(
       id: res.audioRoomId,
       title: title,
@@ -156,30 +155,27 @@ class AudioRoomService {
 
   List<AudioRoom> _toRooms(Object? res) {
     final myId = _myId ?? '';
-    return (res as List? ?? const [])
-        .whereType<Map>()
-        .map((r) {
-          final room = AudioRoom.fromJson(
-            Map<String, dynamic>.from(r.map((k, v) => MapEntry(k.toString(), v))),
-          );
-          final isMine = myId.isNotEmpty && myId == room.ownerId;
-          return AudioRoom(
-            id: room.id,
-            title: room.title,
-            slug: room.slug,
-            description: room.description,
-            category: room.category,
-            roomName: room.roomName,
-            ownerId: room.ownerId,
-            ownerDisplayName: room.ownerDisplayName,
-            ownerUsername: room.ownerUsername,
-            ownerAvatarUrl: room.ownerAvatarUrl,
-            participantCount: room.participantCount,
-            speakerCount: room.speakerCount,
-            isPublic: room.isPublic,
-            iOwnIt: isMine,
-          );
-        })
-        .toList();
+    return (res as List? ?? const []).whereType<Map>().map((r) {
+      final room = AudioRoom.fromJson(
+        Map<String, dynamic>.from(r.map((k, v) => MapEntry(k.toString(), v))),
+      );
+      final isMine = myId.isNotEmpty && myId == room.ownerId;
+      return AudioRoom(
+        id: room.id,
+        title: room.title,
+        slug: room.slug,
+        description: room.description,
+        category: room.category,
+        roomName: room.roomName,
+        ownerId: room.ownerId,
+        ownerDisplayName: room.ownerDisplayName,
+        ownerUsername: room.ownerUsername,
+        ownerAvatarUrl: room.ownerAvatarUrl,
+        participantCount: room.participantCount,
+        speakerCount: room.speakerCount,
+        isPublic: room.isPublic,
+        iOwnIt: isMine,
+      );
+    }).toList();
   }
 }

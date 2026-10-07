@@ -21,6 +21,10 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
     id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+    // Processa android/app/google-services.json (FCM como transporte apenas;
+    // Firebase continua NÃO sendo o backend — o Supabase é). Só o cliente com
+    // package_name == applicationId (com.klayk.klay_k) é usado.
+    id("com.google.gms.google-services") version "4.4.3" apply false
 }
 
 include(":app")

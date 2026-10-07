@@ -91,7 +91,8 @@ class AdCreative {
     final metrics = _asMap(json['metrics']);
     return AdCreative(
       id: json['id']?.toString() ?? '',
-      campaignId: campaign['id']?.toString() ?? json['campaign_id']?.toString() ?? '',
+      campaignId:
+          campaign['id']?.toString() ?? json['campaign_id']?.toString() ?? '',
       campaignName: campaign['name']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
@@ -105,10 +106,12 @@ class AdCreative {
       advertiserLogo: advert['business_logo']?.toString() ?? '',
       advertiserCategory: advert['category']?.toString() ?? '',
       verified: advert['is_verified'] as bool? ?? false,
-      impressions: (metrics['impressions'] as num?)?.toInt() ??
+      impressions:
+          (metrics['impressions'] as num?)?.toInt() ??
           json['impressions'] as int? ??
           0,
-      clicks: (metrics['clicks'] as num?)?.toInt() ?? json['clicks'] as int? ?? 0,
+      clicks:
+          (metrics['clicks'] as num?)?.toInt() ?? json['clicks'] as int? ?? 0,
     );
   }
 
@@ -144,13 +147,13 @@ class AdCreative {
     );
   }
 
-  double get ctr =>
-      impressions == 0 ? 0 : (clicks / impressions * 100);
+  double get ctr => impressions == 0 ? 0 : (clicks / impressions * 100);
 
   static Map<String, dynamic> _asMap(dynamic v) {
     if (v is Map) {
       return Map<String, dynamic>.from(
-          v.map((k, e) => MapEntry(k.toString(), e)));
+        v.map((k, e) => MapEntry(k.toString(), e)),
+      );
     }
     return const {};
   }
@@ -162,6 +165,20 @@ class AdCampaignRow {
   final String campaignName;
   final AdStatus campaignStatus;
   final double budget;
+
+  /// Orçamento diário (KLAY$). Vem de `ads_campaigns.daily_budget`, coluna
+  /// criada em 20260927120000. Continua vazio enquanto a migration não for
+  /// aplicada — a UI trata como "não definido".
+  final double? dailyBudget;
+
+  /// Teto de gasto (KLAY$), mesma migration.
+  final double? spendCap;
+
+  /// Posicionamentos marcados: for_you, between_videos, highlights, discovery.
+  final List<String> placements;
+
+  /// Contagem de cliques, não dinheiro. Ver `ads_my_list()`: a cobrança ainda
+  /// não é calculada no servidor, então este campo nunca aparece como moeda.
   final int spent;
   final String creativeId;
   final String title;
@@ -180,6 +197,9 @@ class AdCampaignRow {
     required this.campaignName,
     required this.campaignStatus,
     this.budget = 0,
+    this.dailyBudget,
+    this.spendCap,
+    this.placements = const [],
     this.spent = 0,
     required this.creativeId,
     required this.title,
@@ -198,14 +218,24 @@ class AdCampaignRow {
     return AdCampaignRow(
       campaignId: json['campaign_id']?.toString() ?? '',
       campaignName: json['campaign_name']?.toString() ?? '',
-      campaignStatus:
-          AdStatus.fromRaw(json['campaign_status']?.toString()),
+      campaignStatus: AdStatus.fromRaw(json['campaign_status']?.toString()),
       budget: (json['budget'] as num?)?.toDouble() ?? 0,
+      dailyBudget: (json['daily_budget'] as num?)?.toDouble(),
+      spendCap: (json['spend_cap'] as num?)?.toDouble(),
+      placements: switch (json['placements']) {
+        final List<dynamic> l => l.map((e) => e.toString()).toList(),
+        final String s when s.isNotEmpty && s != '{}' =>
+          s.replaceAll(RegExp(r'[\[\]{}"]'), '')
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toList(),
+        _ => const <String>[],
+      },
       spent: (json['spent'] as num?)?.toInt() ?? 0,
       creativeId: json['creative_id']?.toString() ?? '',
       title: json['creative_title']?.toString() ?? '',
-      creativeStatus:
-          AdStatus.fromRaw(json['creative_status']?.toString()),
+      creativeStatus: AdStatus.fromRaw(json['creative_status']?.toString()),
       media: json['creative_media']?.toString() ?? '',
       cta: json['creative_cta']?.toString() ?? '',
       ctaUrl: json['creative_url']?.toString() ?? '',
@@ -214,7 +244,7 @@ class AdCampaignRow {
       rejectionReason: json['rejection_reason']?.toString() ?? '',
       createdAt:
           DateTime.tryParse(json['created_at']?.toString() ?? '') ??
-              DateTime.now(),
+          DateTime.now(),
       approvedAt: DateTime.tryParse(json['approved_at']?.toString() ?? ''),
     );
   }
@@ -309,7 +339,8 @@ class AdminAdRow {
       impressions: (json['impressions'] as num?)?.toInt() ?? 0,
       clicks: (json['clicks'] as num?)?.toInt() ?? 0,
       rejectionReason: json['rejection_reason']?.toString() ?? '',
-      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
           DateTime.now(),
       approvedAt: DateTime.tryParse(json['approved_at']?.toString() ?? ''),
     );
@@ -347,7 +378,8 @@ class AdReport {
       description: json['description']?.toString() ?? '',
       status: json['report_status']?.toString() ?? 'open',
       reporterUsername: json['reporter_username']?.toString() ?? '',
-      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
           DateTime.now(),
     );
   }

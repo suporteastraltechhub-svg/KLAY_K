@@ -22,26 +22,41 @@ void main() {
 
     expect(find.text('Para você'), findsOneWidget);
     expect(find.text('Seguindo'), findsOneWidget);
-    expect(find.text('Live'), findsOneWidget);
+    expect(find.text('Ao vivo'), findsOneWidget);
     expect(find.text('Início'), findsOneWidget);
-    expect(find.text('Jogo'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(KlayKBottomNavigation),
+        matching: find.text('Jogos'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Jogo tab renders the games catalog header', (tester) async {
     await pumpKlayK(tester);
 
-    await tester.tap(find.text('Jogo'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(KlayKBottomNavigation),
+        matching: find.text('Jogos'),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('Jogos'), findsOneWidget);
-    expect(find.text('Divirta-se e ganhe cristais'), findsOneWidget);
+    // O catálogo abre com o título real (l10n.gameTitle) e o header premium.
+    expect(find.widgetWithText(AppBar, 'Jogos'), findsOneWidget);
+    expect(find.text('JOGOS KLAY K'), findsOneWidget);
+    // A navegação inferior permanece visível com a aba Jogos.
+    expect(find.text('Jogos'), findsWidgets);
     // Em demo/offline o catálogo vem vazio; não deve estourar layout.
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('KLAY K has no layout overflow on a small device',
-      (tester) async {
+  testWidgets('KLAY K has no layout overflow on a small device', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -104,7 +119,9 @@ void main() {
     expect(find.text('Editar perfil'), findsOneWidget);
   });
 
-  testWidgets('Feed shows Live and Destaques tabs and keeps Loja', (tester) async {
+  testWidgets('Feed mostra as 4 categorias e a aba Ao vivo funciona', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(400, 1100);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -122,13 +139,18 @@ void main() {
 
     await pumpKlayK(tester);
 
+    // O feed mostra apenas as 4 categorias principais.
+    expect(find.text('Seguindo'), findsOneWidget);
     expect(find.text('Para você'), findsOneWidget);
-    expect(find.text('Destaques'), findsOneWidget);
-    expect(find.text('Loja'), findsOneWidget);
+    expect(find.text('Ao vivo'), findsOneWidget);
+    expect(find.text('Jogos'), findsWidgets);
+    // As abas antigas não são mais listadas na faixa superior.
+    expect(find.text('Destaques'), findsNothing);
+    expect(find.text('Loja'), findsNothing);
 
-    await tester.ensureVisible(find.text('Live'));
+    await tester.ensureVisible(find.text('Ao vivo'));
     await tester.pump();
-    await tester.tap(find.text('Live'));
+    await tester.tap(find.text('Ao vivo'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
@@ -139,27 +161,6 @@ void main() {
     expect(find.text('Filmes'), findsWidgets);
     expect(find.text('Jogos'), findsWidgets);
     expect(find.text('Ao vivo agora'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-
-    await tester.ensureVisible(find.text('Destaques'));
-    await tester.pump();
-    await tester.tap(find.text('Destaques'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-
-    expect(find.text('Vídeos em alta'), findsOneWidget);
-    expect(find.text('Criadores em alta'), findsOneWidget);
-    expect(find.text('Jogos'), findsWidgets);
-    expect(find.text('Transmissões ao vivo'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-
-    await tester.ensureVisible(find.text('Loja'));
-    await tester.pump();
-    await tester.tap(find.text('Loja'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-
-    expect(find.text('Para você'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

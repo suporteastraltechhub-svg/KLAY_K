@@ -25,12 +25,12 @@ class PostAuthor {
       : (username ?? 'Usuário');
 
   factory PostAuthor.fromJson(Map<String, dynamic> json) => PostAuthor(
-        id: json['id'] as String? ?? '',
-        username: json['username'] as String?,
-        displayName: json['display_name'] as String?,
-        avatarUrl: json['avatar_url'] as String?,
-        isVerified: json['is_verified'] == true,
-      );
+    id: json['id'] as String? ?? '',
+    username: json['username'] as String?,
+    displayName: json['display_name'] as String?,
+    avatarUrl: json['avatar_url'] as String?,
+    isVerified: json['is_verified'] == true,
+  );
 }
 
 /// Um post/vídeo do feed. Mapeia `public.posts` + join de autor + estados do
@@ -191,9 +191,10 @@ class PostComment {
       text: json['text'] as String? ?? '',
       createdAt: json['created_at'] is DateTime
           ? (json['created_at'] as DateTime).toLocal()
-          : DateTime.tryParse(json['created_at']?.toString() ?? '')
-                  ?.toLocal() ??
-              DateTime.now(),
+          : DateTime.tryParse(
+                  json['created_at']?.toString() ?? '',
+                )?.toLocal() ??
+                DateTime.now(),
       editedAt: json['edited_at'] is DateTime
           ? (json['edited_at'] as DateTime).toLocal()
           : DateTime.tryParse(json['edited_at']?.toString() ?? '')?.toLocal(),
@@ -244,9 +245,10 @@ class AppNotification {
       read: json['read'] as bool? ?? false,
       createdAt: json['created_at'] is DateTime
           ? (json['created_at'] as DateTime).toLocal()
-          : DateTime.tryParse(json['created_at']?.toString() ?? '')
-                  ?.toLocal() ??
-              DateTime.now(),
+          : DateTime.tryParse(
+                  json['created_at']?.toString() ?? '',
+                )?.toLocal() ??
+                DateTime.now(),
       actor: actorJson.isEmpty ? null : PostAuthor.fromJson(actorJson),
     );
   }

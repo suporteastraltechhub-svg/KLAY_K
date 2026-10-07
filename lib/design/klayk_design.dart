@@ -5,16 +5,16 @@ import '../theme/klayk_theme.dart';
 /// ============================================================================
 /// KLAY K — Design System
 ///
-/// Componentes reutilizáveis que dão a identidade visual premium do KLAY K:
-/// fundo profundo escuro + roxo neon com glow equilibrado. Tudo aqui usa as
-/// cores do [KlaykColors] já existente — nunca duplica a paleta.
+/// Componentes reutilizáveis da identidade visual premium do KLAY K: fundo
+/// preto/grafite, texto branco/cinza e roxo apenas como detalhe de marca.
+/// Tudo usa as cores do [KlaykColors] — nunca duplica a paleta.
 /// ============================================================================
 
 /// Acessor: cores do tema (fallback seguro para paleta dark).
 KlaykColors kc(BuildContext context) => kcolors(context);
 
 /// Raio padrão de cards / superfícies.
-const double kRadiusCard = 18;
+const double kRadiusCard = 14;
 const double kRadiusChip = 999;
 
 /// ---------------------------------------------------------------------------
@@ -43,22 +43,20 @@ class KlaykRadius {
   static const double pill = 999;
 }
 
-/// Sombras padrão do KLAY K (glow roxo + sombra escura de profundidade).
+/// Sombras padrão do KLAY K (profundidade discreta, sem glow roxo dominante).
 class KlaykShadows {
   KlaykShadows._();
 
-  /// Glow roxo para elementos de destaque (botão CRIAR, badges).
-  static List<BoxShadow> glow(BuildContext context,
-          {double blur = 18, double opacity = 0.35}) =>
-      kGlow(context, blur: blur, opacity: opacity);
+  /// Glow roxo SUTIL — apenas para destaques pontuais (botão CRIAR, badges).
+  static List<BoxShadow> glow(
+    BuildContext context, {
+    double blur = 14,
+    double opacity = 0.22,
+  }) => kGlow(context, blur: blur, opacity: opacity);
 
   /// Profundidade discreta para cards.
   static const List<BoxShadow> elevation = [
-    BoxShadow(
-      color: Color(0x59000000),
-      blurRadius: 14,
-      offset: Offset(0, 4),
-    ),
+    BoxShadow(color: Color(0x59000000), blurRadius: 14, offset: Offset(0, 4)),
   ];
 }
 
@@ -108,11 +106,19 @@ class KlaykTypography {
 /// GLOW ROXO
 /// ---------------------------------------------------------------------------
 
-/// Sombra "glow" roxa para dar destaque sem poluir a tela.
-List<BoxShadow> kGlow(BuildContext context, {double blur = 18, double opacity = 0.35}) {
+/// Sombra "glow" roxa SUTIL — só para destaques de marca, nunca dominante.
+List<BoxShadow> kGlow(
+  BuildContext context, {
+  double blur = 16,
+  double opacity = 0.2,
+}) {
   final color = kc(context).primary;
   return [
-    BoxShadow(color: color.withValues(alpha: opacity), blurRadius: blur, offset: const Offset(0, 3)),
+    BoxShadow(
+      color: color.withValues(alpha: opacity),
+      blurRadius: blur,
+      offset: const Offset(0, 3),
+    ),
   ];
 }
 
@@ -136,7 +142,7 @@ class KlayKButton extends StatelessWidget {
     this.icon,
     this.loading = false,
     this.expanded = false,
-    this.height = 48,
+    this.height = 46,
   });
 
   @override
@@ -144,23 +150,26 @@ class KlayKButton extends StatelessWidget {
     final colors = kc(context);
     final button = FilledButton.icon(
       onPressed: loading ? null : onPressed,
-      style: FilledButton.styleFrom(
-        backgroundColor: colors.primary,
-        foregroundColor: Colors.white,
-        minimumSize: Size(expanded ? double.infinity : 0, height),
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(kRadiusCard),
-          side: BorderSide(color: colors.primarySoft.withValues(alpha: 0.4)),
-        ),
-      ).copyWith(
-        shadowColor: WidgetStatePropertyAll(colors.glow),
-        elevation: WidgetStateProperty.resolveWith((s) {
-          if (s.contains(WidgetState.pressed)) return 2;
-          return 8;
-        }),
-      ),
+      style:
+          FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: Colors.white,
+            minimumSize: Size(expanded ? double.infinity : 0, height),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(kRadiusCard),
+              side: BorderSide(
+                color: colors.primarySoft.withValues(alpha: 0.25),
+              ),
+            ),
+          ).copyWith(
+            shadowColor: WidgetStatePropertyAll(colors.glow),
+            elevation: WidgetStateProperty.resolveWith((s) {
+              if (s.contains(WidgetState.pressed)) return 1;
+              return 3;
+            }),
+          ),
       icon: loading
           ? const SizedBox(
               width: 18,
@@ -173,7 +182,11 @@ class KlayKButton extends StatelessWidget {
           : (icon != null ? Icon(icon, size: 20) : null),
       label: Text(
         label,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+        ),
       ),
     );
     if (!expanded) return button;
@@ -205,14 +218,22 @@ class KlayKSecondaryButton extends StatelessWidget {
         foregroundColor: Colors.white,
         backgroundColor: colors.bgElevated,
         side: BorderSide(color: colors.border),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        minimumSize: Size(expanded ? double.infinity : 0, 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusCard)),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        minimumSize: Size(expanded ? double.infinity : 0, 46),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kRadiusCard),
+        ),
       ),
-      icon: icon != null ? Icon(icon, size: 20, color: colors.primarySoft) : null,
+      icon: icon != null
+          ? Icon(icon, size: 20, color: colors.primarySoft)
+          : null,
       label: Text(
         label,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white),
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
       ),
     );
     if (!expanded) return button;
@@ -252,9 +273,9 @@ class KlayKIconButton extends StatelessWidget {
           height: size,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: colors.surface.withValues(alpha: 0.72),
-            border: Border.all(color: colors.border.withValues(alpha: 0.6)),
-            boxShadow: glow ? kGlow(context, blur: 12, opacity: 0.3) : null,
+            color: colors.surface,
+            border: Border.all(color: colors.border.withValues(alpha: 0.7)),
+            boxShadow: glow ? kGlow(context, blur: 10, opacity: 0.2) : null,
           ),
           child: Stack(
             clipBehavior: Clip.none,
@@ -266,8 +287,7 @@ class KlayKIconButton extends StatelessWidget {
                   size: size * 0.5,
                 ),
               ),
-              if (badge != null)
-                Positioned(right: -2, top: -2, child: badge!),
+              if (badge != null) Positioned(right: -2, top: -2, child: badge!),
             ],
           ),
         ),
@@ -280,7 +300,7 @@ class KlayKIconButton extends StatelessWidget {
 /// CARD
 /// ---------------------------------------------------------------------------
 
-/// Card moderno do KLAY K: fundo elevado escuro, borda discreta e glow sutil.
+/// Card moderno do KLAY K: fundo grafite, borda discreta e sombra leve.
 class KlayKCard extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -327,7 +347,8 @@ class KlayKCard extends StatelessWidget {
 /// CHIP / TAB
 /// ---------------------------------------------------------------------------
 
-/// Chip de filtro/categoria. Quando [selected], ganha preenchimento roxo + glow.
+/// Chip de filtro/categoria. Quando [selected], fundo roxo suave + borda fina
+/// roxa (sem glow forte). Quando neutro, superfície grafite.
 class KlayKChip extends StatelessWidget {
   final String label;
   final IconData? icon;
@@ -354,15 +375,16 @@ class KlayKChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: selected
-              ? colors.primary.withValues(alpha: 0.9)
-              : colors.surface.withValues(alpha: 0.55),
+              ? colors.primary.withValues(alpha: 0.22)
+              : colors.surface,
           borderRadius: BorderRadius.circular(kRadiusChip),
           border: Border.all(
             color: selected
-                ? colors.primarySoft.withValues(alpha: 0.6)
-                : colors.border.withValues(alpha: 0.5),
+                ? colors.primarySoft.withValues(alpha: 0.65)
+                : colors.border.withValues(alpha: 0.6),
+            width: selected ? 1.2 : 1,
           ),
-          boxShadow: selected ? kGlow(context, blur: 14, opacity: 0.4) : null,
+          boxShadow: selected ? kGlow(context, blur: 10, opacity: 0.18) : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -394,7 +416,8 @@ class KlayKChip extends StatelessWidget {
 /// AVATAR
 /// ---------------------------------------------------------------------------
 
-/// Avatar do KLAY K: foto em círculo com borda roxa e badge "+"/check opcional.
+/// Avatar do KLAY K: foto em círculo com borda (roxa fina ao seguir) e badge
+/// "+"/check opcional. Sem glow dominante.
 class KlayKAvatar extends StatelessWidget {
   final String imageUrl;
   final double size;
@@ -418,8 +441,7 @@ class KlayKAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = kc(context);
-    final border = borderColor ??
-        (following ? colors.primary : colors.border);
+    final border = borderColor ?? (following ? colors.primary : colors.border);
     return Semantics(
       label: 'Perfil',
       button: true,
@@ -433,9 +455,9 @@ class KlayKAvatar extends StatelessWidget {
               height: size,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: border, width: 2),
+                border: Border.all(color: border, width: following ? 1.6 : 1.2),
                 boxShadow: following
-                    ? kGlow(context, blur: 12, opacity: 0.45)
+                    ? kGlow(context, blur: 8, opacity: 0.25)
                     : [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.35),
@@ -591,16 +613,10 @@ class KlayKSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  title,
-                  style: KlaykTypography.title,
-                ),
+                Text(title, style: KlaykTypography.title),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    subtitle!,
-                    style: KlaykTypography.subtitle,
-                  ),
+                  Text(subtitle!, style: KlaykTypography.subtitle),
                 ],
               ],
             ),
@@ -739,9 +755,10 @@ class _KlayKSkeletonState extends State<KlayKSkeleton>
   Widget build(BuildContext context) {
     final base = widget.color ?? kc(context).surfaceAlt.withValues(alpha: 0.6);
     return FadeTransition(
-      opacity: Tween<double>(begin: 0.45, end: 1).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-      ),
+      opacity: Tween<double>(
+        begin: 0.45,
+        end: 1,
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut)),
       child: Container(
         width: widget.width,
         height: widget.height,
@@ -861,10 +878,7 @@ class KlayKAppBar extends StatelessWidget implements PreferredSizeWidget {
       centerTitle: centerTitle,
       leading: leading,
       actions: actions,
-      title: Text(
-        title,
-        style: KlaykTypography.title.copyWith(fontSize: 18),
-      ),
+      title: Text(title, style: KlaykTypography.title.copyWith(fontSize: 18)),
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
         child: Divider(
@@ -942,6 +956,7 @@ class KlayKLiveCard extends StatelessWidget {
   final String? creatorName;
   final String? avatarUrl;
   final int viewerCount;
+
   /// `false` para lives que já encerraram (sem badge).
   final bool live;
   final VoidCallback onTap;
@@ -969,8 +984,14 @@ class KlayKLiveCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(kRadiusCard),
-          border: Border.all(color: colors.primary.withValues(alpha: 0.35)),
-          boxShadow: KlaykShadows.glow(context, blur: 14, opacity: 0.22),
+          border: Border.all(color: colors.border.withValues(alpha: 0.8)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -979,8 +1000,7 @@ class KlayKLiveCard extends StatelessWidget {
               Image.network(
                 imageUrl!,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) =>
-                    const _LiveCardFallback(),
+                errorBuilder: (_, __, ___) => const _LiveCardFallback(),
                 loadingBuilder: (context, child, progress) =>
                     progress == null ? child : const _LiveCardFallback(),
               )
@@ -1054,8 +1074,11 @@ class KlayKLiveCard extends StatelessWidget {
                     ),
                     if (live) ...[
                       const SizedBox(width: 6),
-                      const Icon(Icons.remove_red_eye_rounded,
-                          color: Colors.white70, size: 14),
+                      const Icon(
+                        Icons.remove_red_eye_rounded,
+                        color: Colors.white70,
+                        size: 14,
+                      ),
                       const SizedBox(width: 3),
                       Text(
                         viewerCount > 0 ? '$viewerCount' : '--',
@@ -1077,7 +1100,7 @@ class KlayKLiveCard extends StatelessWidget {
   }
 }
 
-/// Fundo de fallback: gradiente roxo profundo + ícone de transmissão.
+/// Fundo de fallback: grafite neutro + ícone de transmissão (sem roxo forte).
 class _LiveCardFallback extends StatelessWidget {
   const _LiveCardFallback();
 
@@ -1088,15 +1111,11 @@ class _LiveCardFallback extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF2A1B4D), Color(0xFF14142B)],
+          colors: [Color(0xFF1D1D1D), Color(0xFF111111)],
         ),
       ),
-      child: Center(
-        child: Icon(
-          Icons.live_tv_rounded,
-          color: kc(context).primary.withValues(alpha: 0.7),
-          size: 40,
-        ),
+      child: const Center(
+        child: Icon(Icons.live_tv_rounded, color: Colors.white24, size: 40),
       ),
     );
   }
@@ -1168,7 +1187,9 @@ class KlayKVideoCard extends StatelessWidget {
                     bottom: 6,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 2),
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(5),
@@ -1176,9 +1197,10 @@ class KlayKVideoCard extends StatelessWidget {
                       child: Text(
                         duration!,
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700),
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
@@ -1204,8 +1226,11 @@ class KlayKVideoCard extends StatelessWidget {
                         const SizedBox(height: 2),
                         Row(
                           children: [
-                            const Icon(Icons.play_arrow_rounded,
-                                color: Colors.white70, size: 12),
+                            const Icon(
+                              Icons.play_arrow_rounded,
+                              color: Colors.white70,
+                              size: 12,
+                            ),
                             const SizedBox(width: 2),
                             Flexible(
                               child: Text(
@@ -1213,7 +1238,9 @@ class KlayKVideoCard extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                    color: Colors.white70, fontSize: 10),
+                                  color: Colors.white70,
+                                  fontSize: 10,
+                                ),
                               ),
                             ),
                           ],
@@ -1231,10 +1258,10 @@ class KlayKVideoCard extends StatelessWidget {
   }
 
   Widget centerIcon(KlaykColors colors) => Center(
-        child: Icon(
-          Icons.play_circle_fill_rounded,
-          color: colors.primary.withValues(alpha: 0.6),
-          size: 34,
-        ),
-      );
+    child: Icon(
+      Icons.play_circle_fill_rounded,
+      color: colors.primary.withValues(alpha: 0.6),
+      size: 34,
+    ),
+  );
 }

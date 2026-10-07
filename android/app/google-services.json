@@ -1,0 +1,105 @@
+{
+  "project_info": {
+    "project_number": "557073766082",
+    "project_id": "astral-tech-hub-f9fb4",
+    "storage_bucket": "astral-tech-hub-f9fb4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:557073766082:android:e4edbec15364f7cc2b4d5b",
+        "android_client_info": {
+          "package_name": "com.klayk.klay_k"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "557073766082-h28u5j0tau9baj5dqf7bbcd9751vvg7i.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHfWXz_zKwLr2TJJWDaWNt4HtVPmnlMUw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "117192206814747063153",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:557073766082:android:8d4201031687d69b2b4d5b",
+        "android_client_info": {
+          "package_name": "com.klayk.live.klay_k"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "557073766082-h28u5j0tau9baj5dqf7bbcd9751vvg7i.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHfWXz_zKwLr2TJJWDaWNt4HtVPmnlMUw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "117192206814747063153",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:557073766082:android:3c9cbe13075ce4762b4d5b",
+        "android_client_info": {
+          "package_name": "com.tech.klay_k"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "557073766082-c2s4kunt398kuh6003kcvgs6skh6n9v9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tech.klay_k",
+            "certificate_hash": "69bcb91965f59fa2999583492de7c2278f3c09a1"
+          }
+        },
+        {
+          "client_id": "557073766082-h28u5j0tau9baj5dqf7bbcd9751vvg7i.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHfWXz_zKwLr2TJJWDaWNt4HtVPmnlMUw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "117192206814747063153",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

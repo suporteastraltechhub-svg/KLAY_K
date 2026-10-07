@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/post_models.dart';
 import '../../services/content_service.dart';
 import '../../services/supabase_service.dart';
@@ -40,8 +41,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
 
   Future<void> _init() async {
     try {
-      final url =
-          await ContentService.instance.resolveVideoUrl(widget.post);
+      final url = await ContentService.instance.resolveVideoUrl(widget.post);
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       _controller = controller;
       await controller.initialize();
@@ -125,6 +125,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
       SupabaseService.instance.currentUser?.id == widget.post.userId;
 
   Future<void> _editPost() async {
+    final l10n = AppLocalizations.of(context)!;
     final res = await editPostDialog(
       context,
       description: widget.post.description,
@@ -138,24 +139,22 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
     );
     if (!mounted) return;
     if (ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vídeo atualizado.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.videoUpdated)));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Não foi possível atualizar agora. Tente de novo.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.updateFail)));
     }
   }
 
   Future<void> _deletePost() async {
+    final l10n = AppLocalizations.of(context)!;
     final go = await confirmDeleteDialog(
       context,
-      title: 'Apagar vídeo?',
-      message:
-          'O vídeo, a capa, curtidas e comentários serão removidos '
-          'permanentemente. Essa ação não pode ser desfeita.',
+      title: l10n.deleteVideoTitle,
+      message: l10n.deleteVideoBody,
     );
     if (!go || !mounted) return;
     try {
@@ -166,10 +165,10 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Não foi possível apagar o vídeo.')),
+        SnackBar(content: Text(ContentService.deletePostErrorMessage(e, l10n))),
       );
     }
   }
@@ -177,6 +176,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
   @override
   Widget build(BuildContext context) {
     final author = widget.post.author;
+    final l10n = AppLocalizations.of(context)!;
     final topPadding = MediaQuery.of(context).padding.top;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
@@ -200,7 +200,8 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
             else
               Container(
                 color: const Color(0xFF131118),
-                child: widget.post.coverUrl != null &&
+                child:
+                    widget.post.coverUrl != null &&
                         widget.post.coverUrl!.isNotEmpty
                     ? Image.network(
                         widget.post.coverUrl!,
@@ -225,10 +226,10 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                 ),
               ),
             if (_error)
-              const Center(
+              Center(
                 child: Text(
-                  'Não foi possível carregar o vídeo',
-                  style: TextStyle(color: Colors.white70),
+                  l10n.videoLoadFail,
+                  style: const TextStyle(color: Colors.white70),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -273,15 +274,19 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                             radius: 18,
                             backgroundImage:
                                 (author != null &&
-                                        author.avatarUrl != null &&
-                                        author.avatarUrl!.isNotEmpty)
-                                    ? NetworkImage(author.avatarUrl!)
-                                    : null,
-                            child: (author == null ||
+                                    author.avatarUrl != null &&
+                                    author.avatarUrl!.isNotEmpty)
+                                ? NetworkImage(author.avatarUrl!)
+                                : null,
+                            child:
+                                (author == null ||
                                     author.avatarUrl == null ||
                                     author.avatarUrl!.isEmpty)
-                                ? const Icon(Icons.person,
-                                    color: Colors.white, size: 20)
+                                ? const Icon(
+                                    Icons.person,
+                                    color: Colors.white,
+                                    size: 20,
+                                  )
                                 : null,
                           ),
                           const SizedBox(width: 10),
@@ -290,7 +295,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                               children: [
                                 Flexible(
                                   child: Text(
-                                    author?.name ?? 'Usuário',
+                                    author?.name ?? l10n.user,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                       color: Colors.white,
@@ -306,8 +311,11 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                               ],
                             ),
                           ),
-                          const Icon(Icons.chevron_right_rounded,
-                              color: Colors.white60, size: 20),
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            color: Colors.white60,
+                            size: 20,
+                          ),
                         ],
                       ),
                     ),
@@ -316,7 +324,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                       onTap: _openProfile,
                       child: Text(
                         widget.post.description.isEmpty
-                            ? 'Vídeo de ${author?.name ?? 'KLAY K'}'
+                            ? l10n.videoOf(author?.name ?? 'KLAY K')
                             : widget.post.description,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,

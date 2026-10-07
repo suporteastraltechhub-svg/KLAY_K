@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/user_profile.dart';
 import '../../services/profile_service.dart';
 import '../../widgets/profile_widgets.dart';
@@ -86,7 +87,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _uploading = false);
-      _snack('Não foi possível enviar a imagem: $e');
+      _snack(AppLocalizations.of(context)!.profileImgFail(e));
     }
   }
 
@@ -94,7 +95,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     FocusScope.of(context).unfocus();
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      _snack('Informe um nome de exibição.');
+      _snack(AppLocalizations.of(context)!.profileNameRequired);
       return;
     }
     setState(() => _saving = true);
@@ -116,24 +117,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      _snack('Não foi possível salvar: $e');
+      _snack(AppLocalizations.of(context)!.saveError(e));
     }
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text(
-          'Editar perfil',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        title: Text(
+          l10n.editProfile,
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         centerTitle: true,
         leading: IconButton(
@@ -151,7 +152,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   fontSize: 14,
                 ),
               ),
-              child: const Text('Salvar'),
+              child: Text(l10n.save),
             ),
           if (_saving)
             const Padding(
@@ -172,59 +173,59 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _bannerEditor(),
+          _bannerEditor(l10n),
           const SizedBox(height: 14),
-          _avatarEditor(),
+          _avatarEditor(l10n),
           const SizedBox(height: 18),
           _field(
-            label: 'Nome de usuário',
+            label: l10n.username,
             controller: _usernameController,
-            hint: 'usuario',
+            hint: l10n.profileFieldUsernameHint,
             prefix: '@',
             maxLength: 20,
           ),
           const SizedBox(height: 10),
           _field(
-            label: 'Nome de exibição',
+            label: l10n.profileFieldDisplayName,
             controller: _nameController,
-            hint: 'Seu nome',
+            hint: l10n.profileFieldDisplayNameHint,
             maxLength: 30,
           ),
           const SizedBox(height: 10),
           _field(
-            label: 'Biografia',
+            label: l10n.profileFieldBio,
             controller: _bioController,
-            hint: 'Conte um pouco sobre você',
+            hint: l10n.profileFieldBioHint,
             maxLines: 3,
             maxLength: 160,
           ),
           const SizedBox(height: 10),
           _field(
-            label: 'Site',
+            label: l10n.profileFieldWebsite,
             controller: _websiteController,
-            hint: 'https://exemplo.com',
+            hint: l10n.profileFieldWebsiteHint,
             keyboardType: TextInputType.url,
           ),
           const SizedBox(height: 10),
           _field(
-            label: 'Localização',
+            label: l10n.profileFieldLocation,
             controller: _locationController,
-            hint: 'Cidade, Estado',
+            hint: l10n.profileFieldLocationHint,
             maxLength: 60,
           ),
           const SizedBox(height: 10),
           _field(
-            label: 'Pronomes',
+            label: l10n.profileFieldPronouns,
             controller: _pronounsController,
-            hint: 'ex.: ele/dele',
+            hint: l10n.profileFieldPronounsHint,
             maxLength: 20,
           ),
           if (_uploading) ...[
             const SizedBox(height: 16),
-            const Center(
+            Center(
               child: Text(
-                'Enviando imagem…',
-                style: TextStyle(color: Colors.white54, fontSize: 13),
+                l10n.profileImageUploading,
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
               ),
             ),
           ],
@@ -233,7 +234,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  Widget _bannerEditor() {
+  Widget _bannerEditor(AppLocalizations l10n) {
     final hasBanner = _bannerUrl != null && _bannerUrl!.isNotEmpty;
     return GestureDetector(
       onTap: _uploading ? null : () => _pickAndUpload(false),
@@ -254,9 +255,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ),
             if (hasBanner)
               Positioned.fill(
-                child: Container(
-                  color: Colors.black.withValues(alpha: 0.25),
-                ),
+                child: Container(color: Colors.black.withValues(alpha: 0.25)),
               ),
             Center(
               child: Container(
@@ -279,7 +278,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      hasBanner ? 'Trocar capa' : 'Adicionar capa',
+                      hasBanner
+                          ? l10n.profileBannerChange
+                          : l10n.profileBannerAdd,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 13,
@@ -306,13 +307,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ),
       ),
       child: const Center(
-        child: Icon(Icons.add_photo_alternate_outlined,
-            color: Colors.white24, size: 40),
+        child: Icon(
+          Icons.add_photo_alternate_outlined,
+          color: Colors.white24,
+          size: 40,
+        ),
       ),
     );
   }
 
-  Widget _avatarEditor() {
+  Widget _avatarEditor(AppLocalizations l10n) {
     return Center(
       child: Column(
         children: [
@@ -363,7 +367,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Toque para alterar a foto',
+            l10n.profileAvatarTapHint,
             style: TextStyle(
               color: _uploading ? Colors.white24 : Colors.white38,
               fontSize: 12,

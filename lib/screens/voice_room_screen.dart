@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/audio_room_models.dart';
 import '../services/audio_room_service.dart';
 import '../services/live_kit_service.dart';
@@ -41,6 +42,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     _speakers = widget.room.speakerCount;
     _lk.participantsCount.addListener(_onStats);
     _lk.activeSpeakers.addListener(_onStats);
+    _lk.lastError.addListener(_onConnectionError);
+    _lk.reconnecting.addListener(_onReconnecting);
     _join();
   }
 
@@ -48,6 +51,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   void dispose() {
     _lk.participantsCount.removeListener(_onStats);
     _lk.activeSpeakers.removeListener(_onStats);
+    _lk.lastError.removeListener(_onConnectionError);
+    _lk.reconnecting.removeListener(_onReconnecting);
     super.dispose();
   }
 
@@ -57,6 +62,26 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       _participants = _lk.participantsCount.value;
       _speakers = _lk.activeSpeakers.value;
     });
+  }
+
+  /// Detecta queda de conexão no meio da sessão (LiveKit já estava conectado):
+  /// em vez de ficar preso no estado antigo, marca como falha e dá "Tentar de novo".
+  void _onConnectionError() {
+    if (!mounted) return;
+    final err = _lk.lastError.value;
+    if (err == null) return;
+    setState(() {
+      _connected = false;
+      _joining = false;
+      _failed = true;
+    });
+  }
+
+  /// Enquanto o LiveKit tenta restabelecer a conexão, mostra transparência de
+  /// reconexão no lugar do grid de participantes (sem deslogar o usuário).
+  void _onReconnecting() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _join() async {
@@ -112,6 +137,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
@@ -124,7 +150,10 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
               child: Text(
                 widget.room.title,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ],
@@ -133,7 +162,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           TextButton.icon(
             onPressed: _leaving ? null : _leave,
             icon: const Icon(Icons.logout_rounded, size: 18),
-            label: const Text('Sair'),
+            label: Text(l10n.leaveRoom),
             style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
           ),
         ],
@@ -157,12 +186,31 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   }
 
   Widget _buildStatus() {
+    final l10n = AppLocalizations.of(context)!;
     if (_joining) {
-      return const Column(
+      return Column(
         children: [
-          CircularProgressIndicator(color: _kAccent),
-          SizedBox(height: 16),
-          Text('Entrando na sala…', style: TextStyle(color: Colors.white70)),
+          const CircularProgressIndicator(color: _kAccent),
+          const SizedBox(height: 16),
+          Text(l10n.joiningRoom, style: const TextStyle(color: Colors.white70)),
+        ],
+      );
+    }
+    if (_lk.reconnecting.value) {
+      return Column(
+        children: [
+          const CircularProgressIndicator(color: _kAccent),
+          const SizedBox(height: 16),
+          Text(
+            l10n.reconnecting,
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            l10n.reconnectingBody,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white38, fontSize: 12),
+          ),
         ],
       );
     }
@@ -171,13 +219,16 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         children: [
           const Icon(Icons.cloud_off_outlined, color: Colors.white38, size: 44),
           const SizedBox(height: 12),
-          const Text('Não foi possível entrar na sala.', style: TextStyle(color: Colors.white70)),
+          Text(
+            l10n.joinRoomFail,
+            style: const TextStyle(color: Colors.white70),
+          ),
           const SizedBox(height: 12),
           FilledButton.icon(
             style: FilledButton.styleFrom(backgroundColor: _kAccent),
             onPressed: _join,
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Tentar novamente'),
+            label: Text(l10n.retry),
           ),
         ],
       );
@@ -187,13 +238,21 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            _statTile('$_participants', Icons.people_outline_rounded, 'participantes'),
-            _statTile('$_speakers', Icons.mic_rounded, 'falando'),
+            _statTile(
+              '$_participants',
+              Icons.people_outline_rounded,
+              l10n.participantsCountLabel,
+            ),
+            _statTile('$_speakers', Icons.mic_rounded, l10n.speakersCountLabel),
           ],
         ),
         const SizedBox(height: 16),
         Text(
-          widget.isOwner ? 'Você é o(a) dono(a) da sala' : 'Você entrou ${widget.joinWithMic ? 'para falar' : 'para ouvir'}',
+          widget.isOwner
+              ? l10n.youAreRoomOwner
+              : (widget.joinWithMic
+                    ? l10n.youJoinedToSpeak
+                    : l10n.youJoinedToListen),
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
       ],
@@ -205,29 +264,48 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       children: [
         Icon(icon, color: _kAccent, size: 22),
         const SizedBox(height: 4),
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
-        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 18,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
+        ),
       ],
     );
   }
 
   Widget _buildStageGrid() {
+    final l10n = AppLocalizations.of(context)!;
     final others = _lk.guests;
     final total = _participants < 1 ? 1 : _participants;
     final slots = total.clamp(1, 6);
     return Column(
       children: [
-        _avatarCard(_ownerInitial, widget.room.ownerName, speaker: _speakers > 0),
+        _avatarCard(
+          _ownerInitial,
+          widget.room.ownerName,
+          speaker: _speakers > 0,
+        ),
         const SizedBox(height: 10),
         for (int i = 0; i < slots - 1; i++) ...[
-          _avatarCard('🙂', 'Participante ${i + 2}', speaker: i < (slots - 1) && _speakers > i),
+          _avatarCard(
+            '🙂',
+            l10n.participantNumber(i + 2),
+            speaker: i < (slots - 1) && _speakers > i,
+          ),
           const SizedBox(height: 10),
         ],
         if (others.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              '+${others.length} na sala',
+              l10n.othersInRoom(others.length),
               style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
           ),
@@ -238,9 +316,14 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   }
 
   Widget _avatarCard(String initial, String name, {required bool speaker}) {
+    final l10n = AppLocalizations.of(context)!;
     return GestureDetector(
       onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$name está ${speaker ? 'falando' : 'na sala'}')),
+        SnackBar(
+          content: Text(
+            speaker ? l10n.nameIsSpeaking(name) : l10n.nameInRoom(name),
+          ),
+        ),
       ),
       child: Column(
         children: [
@@ -260,13 +343,24 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
               ),
             ),
             alignment: Alignment.center,
-            child: Text(initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 26)),
+            child: Text(
+              initial,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 26,
+              ),
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             name,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -274,19 +368,20 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   }
 
   Widget _buildControls() {
+    final l10n = AppLocalizations.of(context)!;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _controlButton(
           icon: _micOn ? Icons.mic_rounded : Icons.mic_off_rounded,
-          label: _micOn ? 'Silenciar' : 'Falar',
+          label: _micOn ? l10n.mute : l10n.speak,
           highlighted: _micOn,
           onTap: _connected ? _toggleMic : null,
         ),
         const SizedBox(width: 16),
         _controlButton(
           icon: Icons.call_end_rounded,
-          label: 'Sair',
+          label: l10n.leaveRoom,
           danger: true,
           onTap: _leaving ? null : _leave,
         ),
@@ -304,8 +399,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     final color = danger
         ? Colors.redAccent
         : highlighted
-            ? _kAccent
-            : const Color(0xFF2A2540);
+        ? _kAccent
+        : const Color(0xFF2A2540);
     return Column(
       children: [
         Material(
@@ -322,7 +417,10 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           ),
         ),
         const SizedBox(height: 6),
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
       ],
     );
   }

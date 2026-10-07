@@ -11,17 +11,12 @@ import '../theme/klayk_theme.dart';
 import '../widgets/ad_widgets.dart';
 import '../widgets/klayk_ux.dart';
 import '../widgets/verified_badge.dart';
+import '../l10n/app_localizations.dart';
 import 'profile/user_profile_screen.dart';
 
 const Color _kAccent = Color(0xFF8B5CF6);
 
-const List<({String label, String value})> _kScopes = [
-  (label: 'Tudo', value: 'all'),
-  (label: 'Pessoas', value: 'user'),
-  (label: 'Vídeos', value: 'post'),
-  (label: 'Hashtags', value: 'hashtag'),
-  (label: 'Lives', value: 'live'),
-];
+const List<String> _kScopes = ['all', 'user', 'post', 'hashtag', 'live'];
 
 /// Descobrir & Tendências do KLAY K: busca real, tendências de hashtags e
 /// recentes, alimentados pelo backend (sem dados inventados).
@@ -187,28 +182,34 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
 
   void _openAuthor(String userId) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => UserProfileScreen(userId: userId),
-      ),
+      MaterialPageRoute(builder: (_) => UserProfileScreen(userId: userId)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = kcolors(context);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: const Color(0xFF0E0C16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0E0C16),
-        title: const Text(
-          'Descobrir',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        title: Text(
+          l10n.discoverTitle,
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
           TextButton.icon(
             onPressed: () => Navigator.of(context).pop(),
-            icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20),
-            label: const Text('Fechar', style: TextStyle(color: Colors.white70)),
+            icon: const Icon(
+              Icons.close_rounded,
+              color: Colors.white70,
+              size: 20,
+            ),
+            label: Text(
+              l10n.close,
+              style: const TextStyle(color: Colors.white70),
+            ),
           ),
         ],
       ),
@@ -237,7 +238,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       style: const TextStyle(color: Colors.white),
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
-        hintText: 'Buscar criadores, vídeos, lives…',
+        hintText: AppLocalizations.of(context)!.searchEverythingHint,
         hintStyle: const TextStyle(color: Colors.white38),
         prefixIcon: const Icon(Icons.search, color: Colors.white38),
         suffixIcon: _searchCtrl.text.trim().isEmpty
@@ -268,6 +269,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   Widget _scopeStrip() {
+    final l10n = AppLocalizations.of(context)!;
     return SizedBox(
       height: 46,
       child: ListView.separated(
@@ -276,15 +278,30 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         itemCount: _kScopes.length,
         separatorBuilder: (_, _) => const SizedBox(width: 2),
         itemBuilder: (context, i) {
-          final s = _kScopes[i];
+          final value = _kScopes[i];
           return KlayKChip(
-            label: s.label,
-            selected: _scope == s.value,
-            onTap: () => _selectScope(s.value),
+            label: _scopeLabel(l10n, value),
+            selected: _scope == value,
+            onTap: () => _selectScope(value),
           );
         },
       ),
     );
+  }
+
+  String _scopeLabel(AppLocalizations l10n, String value) {
+    switch (value) {
+      case 'user':
+        return l10n.searchScopePeople;
+      case 'post':
+        return l10n.videos;
+      case 'hashtag':
+        return l10n.searchScopeHashtags;
+      case 'live':
+        return l10n.searchScopeLives;
+      default:
+        return l10n.searchScopeAll;
+    }
   }
 
   Widget _body(KlaykColors colors) {
@@ -293,8 +310,8 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       return _loadingHome
           ? const KlaykListSkeleton(rows: 6)
           : _homeFailed
-              ? _errorState(colors)
-              : _homeContent(colors);
+          ? _errorState(colors)
+          : _homeContent(colors);
     }
 
     // Modo de busca ativa.
@@ -307,36 +324,43 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     if (_results.isEmpty) {
       return KlaykEmptyState(
         icon: Icons.search_off_rounded,
-        title: 'Nada encontrado',
-        message:
-            'Não achamos resultados para "${_query.trim()}". Tente outra palavra-chave ou hashtag.',
+        title: AppLocalizations.of(context)!.noResults,
+        message: AppLocalizations.of(context)!.noResultsQuery(_query.trim()),
       );
     }
     return _resultsList(colors);
   }
 
   Widget _errorState(KlaykColors colors) {
+    final l10n = AppLocalizations.of(context)!;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_outlined, color: Colors.white38, size: 40),
+            const Icon(
+              Icons.cloud_off_outlined,
+              color: Colors.white38,
+              size: 40,
+            ),
             const SizedBox(height: 14),
-            const Text(
-              'Erro ao carregar',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+            Text(
+              l10n.errorLoading,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Não conseguimos carregar. Verifique sua conexão e tente novamente.',
+            Text(
+              l10n.discoverLoadFail,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white54, height: 1.4),
+              style: const TextStyle(color: Colors.white54, height: 1.4),
             ),
             const SizedBox(height: 18),
             KlayKButton(
-              label: 'Tentar novamente',
+              label: l10n.retry,
               icon: Icons.refresh_rounded,
               onPressed: _hasSearched ? _retrySearch : _loadHome,
             ),
@@ -356,46 +380,45 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   Widget _homeContent(KlaykColors colors) {
+    final l10n = AppLocalizations.of(context)!;
     final hasRecents = _recents.isNotEmpty;
     final hasTrends = _trends.isNotEmpty;
     if (!hasRecents && !hasTrends) {
-      return const KlaykEmptyState(
+      return KlaykEmptyState(
         icon: Icons.explore_outlined,
-        title: 'Comece a explorar',
-        message:
-            'Busque criadores, vídeos, hashtags e lives. As tendências aparecem aqui.',
+        title: l10n.exploreStart,
+        message: l10n.exploreStartBody,
       );
     }
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
         if (hasRecents) ...[
-          _sectionHeader('Recentes', onClear: _clearRecents),
+          _sectionHeader(l10n.recentSearches, onClear: _clearRecents),
           _recentsList(),
           const SizedBox(height: 18),
         ],
         if (hasTrends) ...[
-          _sectionHeader('Tendências do momento', icon: Icons.trending_up_rounded),
+          _sectionHeader(l10n.trendingNow, icon: Icons.trending_up_rounded),
           _trendsList(),
         ],
         if (_ads.isNotEmpty) ...[
           const SizedBox(height: 18),
-          _sectionHeader('Anúncios', icon: Icons.campaign_rounded),
+          _sectionHeader(l10n.advertisements, icon: Icons.campaign_rounded),
           const SizedBox(height: 10),
-          ..._ads.map((a) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: AdCard(
-                  ad: a,
-                  onHidden: () => _removeAd(a.id),
-                ),
-              )),
+          ..._ads.map(
+            (a) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: AdCard(ad: a, onHidden: () => _removeAd(a.id)),
+            ),
+          ),
           const SizedBox(height: 4),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                'Anúncios aprovados pelo KLAY K.',
-                style: TextStyle(color: Colors.white38, fontSize: 11),
+                l10n.approvedAdsNote,
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
             ],
           ),
@@ -414,13 +437,20 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         Expanded(
           child: Text(
             title,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
           ),
         ),
         if (onClear != null)
           TextButton(
             onPressed: onClear,
-            child: const Text('Limpar', style: TextStyle(color: Colors.white54, fontSize: 13)),
+            child: Text(
+              AppLocalizations.of(context)!.clear,
+              style: const TextStyle(color: Colors.white54, fontSize: 13),
+            ),
           ),
       ],
     );
@@ -432,13 +462,24 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         return ListTile(
           dense: true,
           contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.history_rounded, color: Colors.white38, size: 22),
+          leading: const Icon(
+            Icons.history_rounded,
+            color: Colors.white38,
+            size: 22,
+          ),
           title: Text(
             term,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          trailing: const Icon(Icons.north_west_rounded, color: Colors.white24, size: 16),
+          trailing: const Icon(
+            Icons.north_west_rounded,
+            color: Colors.white24,
+            size: 16,
+          ),
           onTap: () => _applyRecent(term),
         );
       }).toList(),
@@ -470,13 +511,16 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 child: Text(
                   '#${t.tag}',
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
           ),
           subtitle: Text(
-            '${t.count} ${t.count == 1 ? 'post' : 'posts'}',
+            AppLocalizations.of(context)!.hashtagPostCount(t.count),
             style: const TextStyle(color: Colors.white38, fontSize: 12),
           ),
           onTap: () => _applyHashtag(t.tag),
@@ -521,12 +565,17 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           CircleAvatar(
             radius: 20,
             backgroundColor: const Color(0xFF1E1B2E),
-            backgroundImage:
-                r.avatarUrl != null && r.avatarUrl!.isNotEmpty
-                    ? NetworkImage(r.avatarUrl!)
-                    : null,
-            child: (r.type == 'user' && (r.avatarUrl == null || r.avatarUrl!.isEmpty))
-                ? const Icon(Icons.person_rounded, color: Color(0xFFB28DFF), size: 20)
+            backgroundImage: r.avatarUrl != null && r.avatarUrl!.isNotEmpty
+                ? NetworkImage(r.avatarUrl!)
+                : null,
+            child:
+                (r.type == 'user' &&
+                    (r.avatarUrl == null || r.avatarUrl!.isEmpty))
+                ? const Icon(
+                    Icons.person_rounded,
+                    color: Color(0xFFB28DFF),
+                    size: 20,
+                  )
                 : Icon(typeIcon, color: const Color(0xFFB28DFF), size: 20),
           ),
           const SizedBox(width: 12),
@@ -537,7 +586,10 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 Text(
                   r.title,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
