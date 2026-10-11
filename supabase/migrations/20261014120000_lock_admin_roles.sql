@@ -1,0 +1,54 @@
+-- KLAY K · fecha a leitura direta de `admin_roles`
+--
+-- ---------------------------------------------------------------------------
+-- O ACHADO
+-- ---------------------------------------------------------------------------
+-- `admin_roles` tem RLS ligada, mas com UMA policy de leitura:
+--
+--   create policy admin_roles_select on public.admin_roles
+--     for select using (true);
+--
+-- `using (true)` não filtra nada. Combinado com o GRANT padrão do Supabase,
+-- qualquer papel — inclusive `anon`, sem login nenhum — lia a tabela inteira
+-- pelo PostgREST:
+--
+--   GET /rest/v1/admin_roles?select=*
+--   -> 200  [{"id":"admin","name":"Administrador","rank":80,
+--             "capabilities":["users","moderation","verification", ...]}, ...]
+--
+-- Não é escalada de privilégio, mas é vazamento de informação relevante: o
+-- mapa completo de papéis, `rank` e capacidades do sistema, incluindo a role
+-- `founder` com `capabilities: ["*"]`. Serve de guia para um atacante escolher
+-- onde tentar.
+--
+-- ---------------------------------------------------------------------------
+-- POR QUE É SEGURO FECHAR
+-- ---------------------------------------------------------------------------
+-- Ninguém no app lê a tabela direto. A permissão é resolvida por RPC:
+--
+--   has_perm(p_cap)  e  my_caps()  ->  SECURITY DEFINER, leem admin_roles
+--                                        internamente, sempre filtrando por
+--                                        `p.id = auth.uid()`
+--
+-- As duas são `SECURITY DEFINER`, então continuam enxergando a tabela mesmo
+-- com o SELECT revogado. O próprio app não referencia `admin_roles` em lugar
+-- nenhum — só `admin_service.dart`, via `my_caps()`.
+--
+-- Escrita já estava bloqueada pela RLS (não há policy de INSERT/UPDATE/DELETE);
+-- confirmado empiricamente — INSERT e UPDATE Returns 42501 "new row violates
+-- row-level security policy". Aqui a escrita é revogada também, para não
+-- depender só da RLS.
+--
+-- Quem precisa de verdade: `service_role` (painel, Edge Functions, service
+-- role do cliente Supabase) e o dono da tabela. Ambos mantêm o acesso.
+
+-- Sem leitura direta para nenhum papel do cliente.
+revoke select on table public.admin_roles from anon, authenticated;
+
+-- Escrita: só o dono da tabela e o service_role escrevem (migrations e
+-- admin_set_role, que é SECURITY DEFINER e ignora GRANT).
+revoke insert, update, delete, truncate on table public.admin_roles from anon, authenticated;
+
+-- A policy `using (true)` deixa de ter efeito para esses papéis; fica só
+-- para service_role e para o dono. Não é removida porque o painel e as
+-- Edge Functions podem continuar usando o PostgREST com service_role.
