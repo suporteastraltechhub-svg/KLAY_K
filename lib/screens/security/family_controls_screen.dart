@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/privacy_security_service.dart';
+import '../../services/family_service.dart';
+import 'family_control_screens.dart';
 import 'security_center_screen.dart';
 import 'youth_shield_screen.dart';
 
@@ -41,6 +43,7 @@ class _FamilyControlsScreenState extends State<FamilyControlsScreen> {
   List<FamilyLink> _links = const [];
   String? _busyLink;
   bool _requesting = false;
+  int _pedidosPendentes = 0;
   String _relationship = 'responsavel';
   final TextEditingController _memberId = TextEditingController();
 
@@ -48,6 +51,7 @@ class _FamilyControlsScreenState extends State<FamilyControlsScreen> {
   void initState() {
     super.initState();
     _load();
+    _carregarPedidos();
   }
 
   @override
@@ -288,16 +292,16 @@ class _FamilyControlsScreenState extends State<FamilyControlsScreen> {
             () => _open(const SecurityCenterScreen()),
           ),
           const SizedBox(height: 24),
-          _header('O que ainda não existe'),
+          _header('Controles da família'),
           const Text(
-            'Estes itens não aparecem com interruptores porque ainda não há '
-            'suporte no servidor:',
-            style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
+            'Estes três recursos já têm suporte no servidor. Cada um valida, '
+            'no banco, se quem age é o próprio membro ou um responsável ativo.',
+            style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
           ),
-          const SizedBox(height: 8),
-          const _PendingRow('Limite de tempo definido por um responsável'),
-          const _PendingRow('Relatório de atividade para responsáveis'),
-          const _PendingRow('Aprovação de novos seguidores'),
+          const SizedBox(height: 10),
+          _tileTempo(),
+          _tileRelatorio(),
+          _tileAprovacao(),
           const SizedBox(height: 24),
           const Text(
             'Enquanto isso, a melhor proteção continua sendo: conta privada, '
@@ -306,6 +310,143 @@ class _FamilyControlsScreenState extends State<FamilyControlsScreen> {
             style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.5),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Quem este usuário pode proteger? Só vínculos ATIVOS e com
+  /// `canManageSafety`. A lista vem de `family_links`; a autorização de
+  /// verdade é refeita no servidor a cada chamada.
+  List<FamilyLink> get _gerenciados {
+    if (_cargoAtual != 'responsavel') return const [];
+    return _links
+        .where((l) => l.status == 'active' && l.canManageSafety)
+        .toList();
+  }
+
+  String get _cargoAtual => _relationship;
+
+  // ---------------------------------------------------------------------------
+  // 1) Limite de tempo definido por um responsável
+  // ---------------------------------------------------------------------------
+  Widget _tileTempo() {
+    final podeVer = _gerenciados.isNotEmpty;
+    return _tileFam(
+      icone: Icons.timer_outlined,
+      titulo: 'Limite de tempo definido por um responsável',
+      subtitulo: podeVer
+          ? 'Defina quantos minutos por dia cada membro pode usar o app.'
+          : 'Vincule um responsável ativo para definir limites.',
+      acao: podeVer ? _abrirLimite : null,
+    );
+  }
+
+  Future<void> _abrirLimite() async {
+    if (_gerenciados.isEmpty) return;
+    final alvo = _gerenciados.first;
+    _open(
+      FamilyTimeLimitScreen(
+        memberId: alvo.otherId,
+        memberLabel: alvo.otherId.isEmpty ? 'Membro' : alvo.otherId.substring(0, 8),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2) Relatório de atividade para responsáveis
+  // ---------------------------------------------------------------------------
+  Widget _tileRelatorio() {
+    final podeVer = _gerenciados.isNotEmpty;
+    return _tileFam(
+      icone: Icons.insights_outlined,
+      titulo: 'Relatório de atividade para responsáveis',
+      subtitulo: podeVer
+          ? 'Veja o uso real do app de quem está sob sua responsabilidade.'
+          : 'Disponível para responsáveis ativos.',
+      acao: podeVer ? _abrirRelatorio : null,
+    );
+  }
+
+  Future<void> _abrirRelatorio() async {
+    if (_gerenciados.isEmpty) return;
+    final alvo = _gerenciados.first;
+    _open(
+      FamilyReportScreen(
+        memberId: alvo.otherId,
+        memberLabel: alvo.otherId.isEmpty ? 'Membro' : alvo.otherId.substring(0, 8),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3) Aprovação de novos seguidores
+  // ---------------------------------------------------------------------------
+  Widget _tileAprovacao() {
+    return _tileFam(
+      icone: Icons.person_add_alt_outlined,
+      titulo: 'Aprovação de novos seguidores',
+      subtitulo:
+          'Exija aprovação antes de aceitar quem te seguir. Você decide.',
+      acao: _abrirAprovacao,
+      badge: _pedidosPendentes,
+    );
+  }
+
+  Future<void> _abrirAprovacao() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => const FollowApprovalScreen()),
+    );
+    if (mounted) _carregarPedidos();
+  }
+
+  Future<void> _carregarPedidos() async {
+    try {
+      final l = await FamilyService.instance.myIncomingRequests();
+      if (!mounted) return;
+      setState(() => _pedidosPendentes = l.length);
+    } catch (_) {
+      // Sem sessão ou sem rede: a tela mostra o próprio estado vazio.
+    }
+  }
+
+  /// Linha dos três recursos familiares agora implementados.
+  Widget _tileFam({
+    required IconData icone,
+    required String titulo,
+    required String subtitulo,
+    VoidCallback? acao,
+    int badge = 0,
+  }) {
+    return Card(
+      color: _card,
+      elevation: 0,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        leading: Icon(icone, color: _accent),
+        title: Text(titulo, style: const TextStyle(color: Colors.white)),
+        subtitle: Text(
+          subtitulo,
+          style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.3),
+        ),
+        trailing: badge > 0
+            ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _accent,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  '$badge',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              )
+            : const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+        onTap: acao,
       ),
     );
   }
@@ -1119,51 +1260,3 @@ class _SafetySheetState extends State<_SafetySheet> {
   );
 }
 
-class _PendingRow extends StatelessWidget {
-  const _PendingRow(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label:
-          '$title. Esse recurso será disponibilizado quando o sistema '
-          'familiar estiver habilitado.',
-      container: true,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: _card.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.hourglass_empty_rounded,
-              color: Colors.white38,
-              size: 20,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(color: Colors.white54, fontSize: 14),
-              ),
-            ),
-            const Text(
-              'Aguardando backend',
-              style: TextStyle(
-                color: Colors.white38,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
