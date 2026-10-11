@@ -60,6 +60,76 @@ jobs:
         run: |
           flutter doctor -v
 
+      # O keystore e o key.properties vivem apenas fora do Git (android/.gitignore
+      # cobre key.properties, *.jks e *.keystore). Sem este passo o
+      # build.gradle.kts carrega um Properties vazio, o signingConfig "release"
+      # fica sem storeFile e o :app:packageRelease falha no empacotamento.
+      - name: Restaurar assinatura de release
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          ausentes=0
+          for var in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!var:-}" ]; then
+              echo "ERRO: secret $var ausente ou vazio."
+              ausentes=1
+            fi
+          done
+
+          if [ "$ausentes" -ne 0 ]; then
+            echo ""
+            echo "Configure em Settings > Secrets and variables > Actions:"
+            echo "  KEYSTORE_BASE64   -> base64 do .jks de release"
+            echo "  KEYSTORE_PASSWORD -> storePassword"
+            echo "  KEY_ALIAS         -> keyAlias"
+            echo "  KEY_PASSWORD      -> keyPassword"
+            exit 1
+          fi
+
+          # umask antes de criar qualquer arquivo impede janela de permissao
+          # aberta entre a criacao e o chmod.
+          umask 077
+
+          # O keystore tem que cair em android/app/ porque e onde o modulo Android
+          # procura; o storeFile gerado abaixo aponta para esse caminho absoluto.
+          base64 --decode > android/app/klayk-upload.jks <<< "$KEYSTORE_BASE64"
+          chmod 600 android/app/klayk-upload.jks
+
+          # build.gradle.kts le o arquivo com rootProject.file("key.properties"),
+          # que resolve para android/key.properties (raiz do projeto android).
+          # storeFile recebe caminho absoluto em vez do relativo usado no
+          # key.properties local: assim nao depende de como file() resolve
+          # dentro do bloco android, que muda entre versoes do AGP.
+          {
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storeFile=$GITHUB_WORKSPACE/android/app/klayk-upload.jks"
+          } > android/key.properties
+          chmod 600 android/key.properties
+
+          echo ""
+          echo "Permissões:"
+          ls -l android/app/klayk-upload.jks android/key.properties
+
+          # Confere o formato e se o alias existe antes de gastar minutos
+          # compilando; keytool falha cedo se a senha ou o base64 estiverem errados.
+          KEYTOOL="${JAVA_HOME:+$JAVA_HOME/bin/}keytool"
+          command -v "$KEYTOOL" >/dev/null 2>&1 || KEYTOOL=keytool
+
+          "$KEYTOOL" -list \
+            -keystore android/app/klayk-upload.jks \
+            -alias "$KEY_ALIAS" \
+            -storepass "$KEYSTORE_PASSWORD" >/dev/null
+
+          echo ""
+          echo "Keystore validado. Alias: $KEY_ALIAS"
+
       - name: Gerar KLAY K Release ARM64
         run: |
           flutter build apk \
@@ -98,14 +168,26 @@ jobs:
 
       - name: Verificar assinatura
         run: |
+          set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
 
-          if command -v apksigner >/dev/null 2>&1; then
-            apksigner verify --verbose "$APK"
-          else
-            echo "apksigner não encontrado no PATH."
-            echo "A verificação automática da assinatura foi ignorada."
+          # O setup-java não põe o build-tools no PATH, então procurar apenas por
+          # "apksigner" no PATH escondia a falha de verificação. Um Release
+          # assinado é requisito de publicação: não pode ser um passo opcional.
+          APKSIGNER=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" \
+            -name apksigner -type f 2>/dev/null | sort -V | tail -1)
+
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERRO: apksigner não encontrado em \$ANDROID_HOME/build-tools."
+            exit 1
           fi
+
+          echo "Usando: $APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+          echo ""
+          echo "ABIs presentes no APK (deve ser apenas arm64-v8a):"
+          unzip -l "$APK" | awk '/lib\// {print $4}' | cut -d/ -f2 | sort -u
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
@@ -114,3 +196,11 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      # O runner é descartado, mas apagar explicitamente evita que o keystore
+      # entre no cache do post-job ou em qualquer passo de diagnóstico.
+      - name: Descartar material de assinatura
+        if: always()
+        run: |
+          rm -f android/app/klayk-upload.jks android/key.properties
+          echo "Keystore e key.properties removidos do workspace."
