@@ -86,7 +86,7 @@
   "authRecoveryEmailSent": "已发送重置邮件！",
   "authRecoverySendFail": "无法发送重置邮件：{error}",
   "authSignupFail": "无法创建账户，请重试。",
-  "authTagline": "连接。创作。闪耀。💜",
+  "authTagline": "KLAY K — 数字世界中的你的品牌.",
   "authUsername": "用户名",
   "authUsernameHelper": "@ 字母、数字和下划线（3~20）",
   "authUsernameRules": "用户名：3-20个字符（字母、数字和下划线）。",

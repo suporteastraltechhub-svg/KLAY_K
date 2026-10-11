@@ -86,7 +86,7 @@
   "authRecoveryEmailSent": "E-mail de récupération envoyé !",
   "authRecoverySendFail": "Impossible d’envoyer la récupération : {error}",
   "authSignupFail": "Impossible de créer le compte. Réessayez.",
-  "authTagline": "Connectez. Créez. Brillez. 💜",
+  "authTagline": "KLAY K — Votre marque dans le monde numérique.",
   "authUsername": "Nom d’utilisateur",
   "authUsernameHelper": "@ lettres, chiffres et _ (3 à 20)",
   "authUsernameRules": "Nom d’utilisateur : 3 à 20 caractères (lettres, chiffres et _).",

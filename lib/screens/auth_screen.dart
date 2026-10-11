@@ -419,7 +419,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,
-                      vertical: 28,
+                      vertical: 18,
                     ),
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 420),
@@ -955,6 +955,11 @@ class _BrandHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = strings ?? AppLocalizations.of(context)!;
+    // Slogan: a marca vem separada da mensagem (ver bloco abaixo).
+    final slogan = l10n.authTagline;
+    final mensagem = slogan.contains('—')
+        ? slogan.split('—').last.trim()
+        : slogan;
     return Column(
       children: [
         Container(
@@ -1004,12 +1009,42 @@ class _BrandHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          l10n.authTagline,
-          style: const TextStyle(
-            color: Color(0xFFB7A3E8),
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+        // Slogan: "KLAY K — Sua marca no mundo digital."
+        //
+        // A marca vem primeiro e a mensagem depois, em estilos diferentes.
+        // Sem essa separação o bloco repetiria "KLAY K" logo abaixo do logo e
+        // a marca perderia força em vez de ancorar a frase.
+        //
+        // O `—` fica com a mensagem (cor do texto suave), e não com a marca,
+        // para a quebra entre as duas partes ser limpa.
+        //
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                const TextSpan(
+                  text: 'KLAY K ',
+                  style: TextStyle(
+                    color: Color(0xFFC084F0),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2,
+                  ),
+                ),
+                TextSpan(
+                  text: mensagem,
+                  style: const TextStyle(
+                    color: Color(0xFFB7A3E8),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
           ),
         ),
       ],
