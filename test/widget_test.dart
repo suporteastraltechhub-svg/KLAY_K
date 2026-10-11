@@ -139,14 +139,28 @@ void main() {
 
     await pumpKlayK(tester);
 
-    // O feed mostra apenas as 4 categorias principais.
+    // A faixa superior mostra as 5 chips do feed, na ordem definida por
+    // _FeedTopBar.tabTitles: Ao vivo, Para você, Seguindo, Loja, Jogos.
+    //
+    // Este teste antes exigia `Loja findsNothing`: ele travava o defeito de a
+    // aba existir no código mas não ter chip, ou seja, ser inalcançável por
+    // toque. Agora a Loja é um chip de verdade e o feed segue mostrando vídeos.
     expect(find.text('Seguindo'), findsOneWidget);
     expect(find.text('Para você'), findsOneWidget);
     expect(find.text('Ao vivo'), findsOneWidget);
     expect(find.text('Jogos'), findsWidgets);
-    // As abas antigas não são mais listadas na faixa superior.
+    expect(find.text('Loja'), findsOneWidget);
+    // A aba antiga de Destaques continua sem chip (não entra em tabTitles).
     expect(find.text('Destaques'), findsNothing);
-    expect(find.text('Loja'), findsNothing);
+
+    // Ordem dos chips: a primeira posição é "Ao vivo".
+    final chips = <Offset>[];
+    for (final label in <String>['Ao vivo', 'Para você', 'Loja']) {
+      final box = tester.getRect(find.text(label).first);
+      chips.add(box.topLeft);
+    }
+    expect(chips[0].dx, lessThan(chips[1].dx));
+    expect(chips[1].dx, lessThan(chips[2].dx));
 
     await tester.ensureVisible(find.text('Ao vivo'));
     await tester.pump();
