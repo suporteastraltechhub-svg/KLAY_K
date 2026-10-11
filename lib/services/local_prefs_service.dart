@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'family_service.dart';
+
 /// Preferências LOCAIS de acessibilidade e bem-estar digital.
 ///
 /// Tudo aqui é verdadeiramente local (SharedPreferences) e funciona offline.
@@ -148,6 +150,16 @@ class LocalPrefsService {
       '_day': today,
       'minutes': todayUsageMinutes.value,
     });
+
+    // Heartbeat para o limite de tempo dos CONTROLES FAMILIARES.
+    //
+    // É o MESMO minuto que já acabamos de contar localmente: quem define o
+    // limite precisa enxergar o uso real, e este ticker é o único lugar do app
+    // que já sabe "o usuário está há 1 minuto em primeiro plano".
+    //
+    // Fire-and-forget de propósito: uma falha aqui não pode interromper o
+    // `_flush` nem travar o app. A RPC só grava se existir limite ativo.
+    unawaited(FamilyService.instance.usageTick());
   }
 
   static String _dayKey(DateTime d) =>

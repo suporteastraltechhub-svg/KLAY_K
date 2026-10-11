@@ -2122,33 +2122,49 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
 
   Future<void> _endLive() async {
     if (widget.role != LiveRole.streamer) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C26),
-        title: const Text(
-          'Encerrar live',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          'Todos os espectadores serão desconectados.',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text(
-              'Cancelar',
-              style: TextStyle(color: Colors.white54),
+    // A bolinha de captura é uma JANELA ANDROID (`TYPE_APPLICATION_OVERLAY`),
+    // então ela é desenhada por cima de QUALQUER superfície Flutter — inclusive
+    // deste diálogo. Esconder enquanto ele estiver aberto é o que evita a
+    // sobreposição visual.
+    //
+    // `hide()`/`restore()` já existiam dos dois lados (Kotlin ACTION_HIDE /
+    // ACTION_RESTORE, e os métodos no `KlayLiveGameOverlay`) mas nunca eram
+    // chamados. Não é preciso código novo de plataforma aqui.
+    unawaited(KlayLiveGameOverlay.instance.hide());
+    bool? ok;
+    try {
+      ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1C1C26),
+          title: const Text(
+            'Encerrar live',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: const Text(
+            'Todos os espectadores serão desconectados.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text(
+                'Cancelar',
+                style: TextStyle(color: Colors.white54),
+              ),
             ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Encerrar', style: TextStyle(color: _kLiveRed)),
-          ),
-        ],
-      ),
-    );
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Encerrar', style: TextStyle(color: _kLiveRed)),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      // `finally`: a bolinha volta mesmo se o diálogo fechar por fora
+      // (bar do Android) ou se algo lançar no meio.
+      unawaited(KlayLiveGameOverlay.instance.restore());
+    }
     if (ok != true || !mounted) return;
     try {
       await _db.endLive(_liveId);
@@ -2241,6 +2257,18 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
               ),
             ),
           SafeArea(
+            // A LIVE roda em `SystemUiMode.immersiveSticky` (barra de status
+            // escondida). Nesse modo `MediaQuery.padding.top` é ZERO, então o
+            // `SafeArea` sozinho não empurra nada e o "AO VIVO" / contador de
+            // espectadores ficavam sob o notch.
+            //
+            // `viewPadding` continua reportando status bar e display cutout
+            // mesmo com a barra escondida, então ele é a medida certa aqui.
+            // `minimum` só define o piso — se o aparelho não tiver cutout, o
+            // comportamento é idêntico ao de antes.
+            minimum: EdgeInsets.only(
+              top: MediaQuery.viewPaddingOf(context).top,
+            ),
             child: Column(
               children: [
                 _buildTopBar(),
@@ -2658,33 +2686,124 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     );
   }
 
+  /// Escolhe o que é conteúdo principal e o que é janela de câmera.
+  ///
+  /// Em Live de Jogo o gameplay é o principal e a câmera vira um "facecam"
+  /// pequeno. Antes a sala desenhava UMA track só, e o preview local ainda
+  /// preferia a câmera — então o streamer via a si mesmo em vez do jogo, e o
+  /// espectador podia receber a câmera no lugar da tela.
+  ///
+  /// Usa os getters que já existiam em [LiveKitService] e eram ignorados:
+  /// [LiveKitService.localScreenShareTrack], [LiveKitService.localCameraTrack]
+  /// e as publicações de vídeo do participante.
+  ({VideoTrack? main, VideoTrack? camera}) _pickVideoTracks() {
+    if (widget.role == LiveRole.streamer) {
+      final screen = _lk.localScreenShareTrack;
+      final camera = _lk.localCameraTrack;
+      // Tela é principal e a câmera entra como janela ao lado.
+      if (screen != null) return (main: screen, camera: camera);
+      // Sem tela, a câmera é o próprio conteúdo.
+      return (main: camera, camera: null);
+    }
+
+    final guests = _lk.guests;
+    if (guests.isEmpty) return (main: null, camera: null);
+    final host = guests.first;
+
+    VideoTrack? screen;
+    VideoTrack? camera;
+    for (final pub in host.videoTrackPublications) {
+      if (!pub.subscribed || pub.muted) continue;
+      final t = pub.track;
+      if (t is! VideoTrack) continue;
+      if (pub.isScreenShare) {
+        screen ??= t;
+      } else {
+        camera ??= t;
+      }
+    }
+    if (screen != null) return (main: screen, camera: camera);
+    return (main: camera, camera: null);
+  }
+
   Widget _buildVideoLayer() {
     if (_error != null) return const SizedBox.shrink();
+
+    final tracks = _pickVideoTracks();
+    final isStreamer = widget.role == LiveRole.streamer;
+    final main = tracks.main;
+
     Widget content;
-    if (widget.role == LiveRole.streamer) {
-      final track = _lk.localVideoTrack;
-      content = track != null
-          ? VideoTrackRenderer(track, fit: VideoViewFit.cover)
-          : _buildPlaceholder('Você está ao vivo', Icons.videocam_rounded);
+    if (main != null) {
+      content = VideoTrackRenderer(main, fit: VideoViewFit.cover);
+    } else if (isStreamer) {
+      content = _buildPlaceholder('Você está ao vivo', Icons.videocam_rounded);
     } else {
-      final primary = _lk.primaryRemoteVideo;
-      VideoTrack? track;
-      if (primary != null) {
-        for (final pub in primary.videoTrackPublications) {
-          if (pub.subscribed && !pub.muted && pub.track is VideoTrack) {
-            track = pub.track as VideoTrack;
-            break;
-          }
-        }
-      }
-      content = track != null
-          ? VideoTrackRenderer(track, fit: VideoViewFit.cover)
-          : _buildPlaceholder('Aguardando sinal...', Icons.tv_rounded);
+      content = _buildPlaceholder('Aguardando sinal...', Icons.tv_rounded);
     }
+
+    // Facecam: só aparece quando a tela é o conteúdo principal.
+    final camera = tracks.camera;
+    if (camera != null && !isStreamer) {
+      content = Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          content,
+          Positioned(
+            top: _facecamTop(context),
+            right: 10,
+            child: _buildFacecam(camera),
+          ),
+        ],
+      );
+    } else if (camera != null) {
+      // O próprio streamer também quer ver a própria câmera quando transmite
+      // o jogo — é o_preview_ dele, não uma janela de participante.
+      content = Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          content,
+          Positioned(
+            top: _facecamTop(context),
+            right: 10,
+            child: _buildFacecam(camera),
+          ),
+        ],
+      );
+    }
+
     return GestureDetector(
       onDoubleTap: widget.role == LiveRole.viewer ? _toggleLike : null,
       onTap: _toggleViewerVideo,
       child: content,
+    );
+  }
+
+  /// Altura para a janela de câmera ficar abaixo da barra superior da sala.
+  double _facecamTop(BuildContext context) =>
+      MediaQuery.of(context).padding.top + 58;
+
+  /// Janelinha da câmera (facecam) sobre o gameplay.
+  Widget _buildFacecam(VideoTrack track) {
+    return Container(
+      width: 104,
+      height: 78,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.28),
+          width: 1.5,
+        ),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.45),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: VideoTrackRenderer(track, fit: VideoViewFit.cover),
     );
   }
 

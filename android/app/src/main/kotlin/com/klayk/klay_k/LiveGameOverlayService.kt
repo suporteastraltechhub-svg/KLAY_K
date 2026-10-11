@@ -51,6 +51,9 @@ class LiveGameOverlayService : Service() {
     private var windowManager: WindowManager? = null
     private var bubbleView: View? = null
     private var panelView: View? = null
+    // Painel aberto. separado de [hidden]: fechar o painel nao pode
+    // ressuscitar uma bolinha que o streamer ocultou de proposito.
+    private var panelOpen = false
     private var hiddenIndicatorView: View? = null
 
     private var bubbleCollapsedX = 24
@@ -130,7 +133,13 @@ class LiveGameOverlayService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         updateScreenSize()
         refreshSafeInsets()
-        // Posição inicial da bolinha: canto direito, abaixo da status bar.
+        // Posição inicial da bolinha: ESQUERDA, abaixo da status bar.
+        //
+        // O comentário antigo dizia "canto direito", mas o código sempre usou
+        // `dp(24)` (esquerda). Quem está certo é o código: a coluna de ações
+        // laterais da LIVE fica em `right: 8`, verticalmente centrada — se a
+        // bolinha fosse para a direita ela cairia exatamente em cima daqueles
+        // botões. Mantido à esquerda, e o comentário corrigido.
         bubbleCollapsedX = dp(24)
         bubbleCollapsedY = safeTop + dp(180)
         clampBubbleToBounds()
@@ -335,6 +344,21 @@ class LiveGameOverlayService : Service() {
             return
         }
 
+        // Idempotente de propósito.
+        //
+        // `onStartCommand` pode chegar mais de uma vez (o serviço é
+        // START_STICKY, e o app também pode chamar `start()` de novo ao
+        // reconectar). Sem remover a view anterior aqui, cada chamada
+        // ADICIONAVA uma bolinha nova e sobrescrevia o campo `bubbleView` — a
+        // bolinha antiga virava órfã: continuava desenhada na tela, mas já não
+        // havia referência para removê-la. Resultado: duas bolinhas em
+        // posições diferentes (a órfã congelada onde o usuário tinha
+        // arrastado) e nenhuma forma de limpar.
+        //
+        // `showHiddenIndicator()` já fazia isso (chama `removeBubble()`), por
+        // isso o bug só aparecia indo e voltando entre os dois estados.
+        removeBubble()
+
         val bubble = createBubbleView(wm)
         bubbleView = bubble
         try {
@@ -470,7 +494,22 @@ class LiveGameOverlayService : Service() {
             size,
             size,
             type,
+            // FLAG_NOT_TOUCH_MODAL é o que impede a bolinha de "roubar" toque de
+            // janela do próprio app. Sem ele, FLAG_NOT_FOCUSABLE sozinho NÃO
+            // basta: a janela de overlay continua recebendo toques dentro dos
+            // seus limites e cobria o "Encerrar live" — o diálogo abria por
+            // baixo da bolinha e o clique podia não chegar.
+            //
+            // Com esta flag, quando existe qualquer janela do app na frente
+            // (diálogo, bottom sheet, menu), o toque vai para ela. A bolinha
+            // continua visível e continua arrastável/clicável normalmente
+            // quando não há nada na frente.
+            //
+            // FLAG_LAYOUT_NO_LIMITS foi mantido: é ele que permite ao
+            // arrastar a bolinha até a borda, e o clamp (clampX/clampY) já
+            // garante que ela fique dentro da área segura.
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT,
         ).apply {
@@ -521,7 +560,21 @@ class LiveGameOverlayService : Service() {
      *  views e espelha o estado no Flutter (Native → Dart). */
     private fun setHidden(hide: Boolean) {
         hidden = hide
-        if (hide) showHiddenIndicator() else showBubble()
+
+        // Com o painel aberto ele JÁ é a superfície de controle — adicionar
+        // bolinha ou indicador por cima só recriaria a sobreposição que o
+        // openPanel()/closePanel() existem para evitar. O estado fica
+        // registrado e closePanel() aplica quando o painel fechar.
+        //
+        // "Ocultar" ACIONADO DE DENTRO do painel fecha o painel e oculta de
+        // fato — é o que o usuário quer ao tocar nesse botão.
+        if (hide && panelOpen) {
+            closePanel()
+        }
+
+        if (!panelOpen) {
+            if (hide) showHiddenIndicator() else showBubble()
+        }
         notifyAction("overlayVisibilityChanged", mapOf("hidden" to hidden))
     }
 
@@ -573,7 +626,11 @@ class LiveGameOverlayService : Service() {
             w,
             h,
             type,
+            // Mesma razão da bolinha: sem FLAG_NOT_TOUCH_MODAL, este indicador
+            // também engole toques do app enquanto um diálogo Flutter
+            // estiver aberto por cima.
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT,
         ).apply {
@@ -614,6 +671,14 @@ class LiveGameOverlayService : Service() {
             Log.e(TAG, "openPanel: falha ao adicionar painel ao WindowManager", t)
             panelView = null
         }
+        // Enquanto o painel está aberto ele JÁ é a superfície de controle:
+        // deixar a bolinha por cima só criava sobreposição visual.
+        //
+        // `panelOpen` é separado de `hidden` de propósito — se o streamer
+        // tinha ocultado a bolinha de propósito, fechar o painel não pode
+        // ressuscitá-la.
+        panelOpen = true
+        if (!hidden) removeBubble()
         refreshControls()
         notifyAction("panelVisibilityChanged", mapOf("open" to true))
     }
@@ -623,16 +688,30 @@ class LiveGameOverlayService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-        // Compacto: acompanha o conteúdo (grade 2×4), nunca ocupa a maior
-        // parte da tela — o vídeo/jogo continua visível ao redor.
+        // Não centralizado.
+        //
+        // Antes era `Gravity.CENTER`, o que jogava o painel bem no meio do
+        // vídeo — exatamente onde o espectador está olhando — e ainda
+        // encostava na coluna de ações laterais da LIVE (que fica em
+        // `right: 8`, verticalmente centrada).
+        //
+        // Agora encosta na ESQUERDA, verticalmente centrada: o lado direito
+        // fica livre para os controles da LIVE e o painel não cobre o centro
+        // da transmissão. Como o painel é `WRAP_CONTENT`, ele acompanha o
+        // conteúdo (grade 2×4) sem ocupar a tela inteira.
         return WindowManager.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            // FLAG_NOT_TOUCH_MODAL: o painel não rouba toque de janela do app
+            // que estiver na frente (diálogo Flutter, por exemplo). A bolinha
+            // e o indicador colapsado já usam a mesma flag.
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.CENTER
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            x = clampX(dp(12))
         }
     }
 
@@ -765,6 +844,9 @@ class LiveGameOverlayService : Service() {
     private fun closePanel() {
         Log.d(TAG, "closePanel: ocultando painel (bolinha permanece)")
         removePanel()
+        panelOpen = false
+        // Devolve a bolinha só se ela não estava ocultada de propósito.
+        if (!hidden) showBubble()
         notifyAction("panelVisibilityChanged", mapOf("open" to false))
     }
 
