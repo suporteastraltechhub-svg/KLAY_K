@@ -117,8 +117,15 @@ class RewardService {
 /// - Faz dispose correto do timer.
 class RewardTimerController extends ChangeNotifier {
   static const int cycleMilliseconds = 20000;
-  static const int tickMilliseconds = 200;
-  static const int ticksPerCycle = cycleMilliseconds ~/ tickMilliseconds; // 100
+
+  /// Antes 200ms: 5 `notifyListeners()` por segundo, ou seja, 5 rebuilds do
+  /// botão a cada segundo enquanto a bolinha estivesse visível, o dia inteiro.
+  ///
+  /// 500ms mantém o anel visualmente suave (40 passos nos 20s do ciclo) e corta
+  /// o trabalho pela metade. O anel usa gradiente rotativo, então 40 passos
+  /// continuam imperceptíveis como "salto".
+  static const int tickMilliseconds = 500;
+  static const int ticksPerCycle = cycleMilliseconds ~/ tickMilliseconds; // 40
 
   final void Function(RewardClaimResult result)? onClaimed;
 

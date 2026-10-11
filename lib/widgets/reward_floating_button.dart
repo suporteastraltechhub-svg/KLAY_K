@@ -8,6 +8,7 @@ import '../screens/wallet_sheet.dart';
 import '../services/reward_service.dart';
 import '../services/supabase_service.dart';
 import 'bubble_dismissal.dart';
+import 'klayk_coin_bubble.dart';
 
 /// Botão flutuante premium de "Ganhar Moedas" do feed.
 ///
@@ -49,6 +50,9 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late final RewardTimerController _controller;
   late final AnimationController _plusAnim;
+
+  /// Timer do texto flutuante (+N moedas), cancelado em [dispose].
+  Timer? _floatingTimer;
   Offset _pos = const Offset(16, 200);
   bool _loaded = false;
   bool _bubbleLoaded = false;
@@ -147,6 +151,7 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
     widget.paused?.removeListener(_onPausedChanged);
     WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
+    _floatingTimer?.cancel();
     _plusAnim.dispose();
     super.dispose();
   }
@@ -168,7 +173,10 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
     _plusAnim
       ..reset()
       ..forward();
-    Timer(const Duration(seconds: 2), () {
+    // Timer guardado em campo: o antigo ficava órfão e disparava setState
+    // depois do dispose. Com o ciclo de 20s isso acontecia a cada recompensa.
+    _floatingTimer?.cancel();
+    _floatingTimer = Timer(const Duration(seconds: 2), () {
       if (mounted && _floatingText == text) {
         setState(() => _floatingText = null);
       }
@@ -316,22 +324,35 @@ class _RewardFloatingButtonState extends State<RewardFloatingButton>
               ),
             ],
           ),
-          child: CircularRewardProgress(
-            ringWidth: RewardFloatingButton.ringWidth,
-            progress: _controller.progress,
-            size: RewardFloatingButton.size,
-            claiming: _controller.isClaiming,
-            child: Image.asset(
-              RewardFloatingButton._asset,
-              fit: BoxFit.contain,
-              width: RewardFloatingButton.size,
-              height: RewardFloatingButton.size,
-              errorBuilder: (_, __, ___) => const Icon(
-                Icons.monetization_on_rounded,
-                color: Color(0xFFFFD700),
-                size: RewardFloatingButton.size * 0.5,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Anel neon + brilhos + estrela ao redor da moeda.
+              // Fica ATRÁS do anel de progresso, então o progresso de 20s
+              // continua legível por cima e nenhum dos dois some.
+              KlaykCoinBubble(
+                size: RewardFloatingButton.size,
+                coinAsset: RewardFloatingButton._asset,
+                paused: _pausedBySignal,
               ),
-            ),
+              CircularRewardProgress(
+                ringWidth: RewardFloatingButton.ringWidth,
+                progress: _controller.progress,
+                size: RewardFloatingButton.size,
+                claiming: _controller.isClaiming,
+                child: Image.asset(
+                  RewardFloatingButton._asset,
+                  fit: BoxFit.contain,
+                  width: RewardFloatingButton.size,
+                  height: RewardFloatingButton.size,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.monetization_on_rounded,
+                    color: Color(0xFFFFD700),
+                    size: RewardFloatingButton.size * 0.5,
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },

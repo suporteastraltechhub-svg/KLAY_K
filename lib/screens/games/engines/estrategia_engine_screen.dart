@@ -23,6 +23,9 @@ class EstrategiaEngineScreen extends StatefulWidget {
 }
 
 class _EstrategiaEngineScreenState extends State<EstrategiaEngineScreen> {
+  /// Timer do movimento da CPU — cancelado em [dispose] para não
+  /// disparar setState depois de a tela sair.
+  Timer? _cpuTimer;
   List<String> _board = List.filled(9, '');
   bool _playerTurn = true;
   bool _gameOver = false;
@@ -72,7 +75,14 @@ class _EstrategiaEngineScreenState extends State<EstrategiaEngineScreen> {
       _finish(winner);
       return;
     }
-    Timer(const Duration(milliseconds: 420), _cpuMove);
+    _cpuTimer?.cancel();
+    _cpuTimer = Timer(const Duration(milliseconds: 420), _cpuMove);
+  }
+
+  @override
+  void dispose() {
+    _cpuTimer?.cancel();
+    super.dispose();
   }
 
   void _cpuMove() {

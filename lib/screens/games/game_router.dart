@@ -3,12 +3,17 @@ import 'package:flutter/material.dart';
 import '../../services/game_service.dart';
 import '../../widgets/klayk_ux.dart';
 import 'engines/arcade_engine_screen.dart';
+import 'engines/arcade_engines.dart';
 import 'engines/estrategia_engine_screen.dart';
 import 'engines/matematica_engine_screen.dart';
 import 'engines/memoria_engine_screen.dart';
 import 'engines/palavras_engine_screen.dart';
 import 'engines/reflex_engine_screen.dart';
 import 'engines/trivia_engine_screen.dart';
+
+/// Registro dos minijogos arcade, construído uma única vez.
+final Map<String, KlaykArcadeBuilder> _arcadeEngines =
+    buildKlaykArcadeEngines();
 
 /// ============================================================================
 /// Roteador único de jogos por ENGINE.
@@ -19,6 +24,7 @@ import 'engines/trivia_engine_screen.dart';
 /// perguntas padrão), então catálogo novo nunca abre em tela errada.
 ///
 /// Usado tanto pela aba Jogos quanto pela área Jogos da Home (sem duplicar a
+
 /// lógica de roteamento).
 /// ============================================================================
 
@@ -38,6 +44,10 @@ Widget gameScreenFor(GameInfo game) {
     case 'estrategia':
       return EstrategiaEngineScreen(game: game);
     default:
+      // Minijogos arcade do KLAY K (slot, roda, dados, cartas, mines, crash,
+      // baú e cara-ou-coroa). Todos recreativos: só pontuação/XP virtual.
+      final arcade = _arcadeEngines[game.engine];
+      if (arcade != null) return arcade(game: game);
       return TriviaEngineScreen(game: game);
   }
 }

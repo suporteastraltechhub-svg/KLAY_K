@@ -17,6 +17,9 @@ class TicTacToeScreen extends StatefulWidget {
 }
 
 class _TicTacToeScreenState extends State<TicTacToeScreen> {
+  /// Timer do movimento da CPU — cancelado em [dispose] para não
+  /// disparar setState depois de a tela sair.
+  Timer? _cpuTimer;
   final _svc = GameService.instance;
   List<String> _board = List.filled(9, '');
   bool _playerTurn = true;
@@ -64,7 +67,14 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
       _finish(winner);
       return;
     }
-    Timer(const Duration(milliseconds: 450), _cpuMove);
+    _cpuTimer?.cancel();
+    _cpuTimer = Timer(const Duration(milliseconds: 450), _cpuMove);
+  }
+
+  @override
+  void dispose() {
+    _cpuTimer?.cancel();
+    super.dispose();
   }
 
   void _cpuMove() {

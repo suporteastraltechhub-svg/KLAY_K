@@ -30,7 +30,6 @@ import 'screens/auth_screen.dart';
 import 'screens/boot_diagnostics_screen.dart';
 import 'screens/live_room_screen.dart';
 import 'screens/messages_hub_screen.dart';
-import 'screens/notifications_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/games/game_screen.dart';
 import 'screens/games/game_leaderboard_screen.dart';
@@ -40,6 +39,7 @@ import 'screens/profile/user_profile_screen.dart';
 import 'screens/profile/video_preview_screen.dart';
 import 'screens/live_games_screen.dart';
 import 'screens/live_hub_screen.dart';
+import 'screens/store/store_market_screen.dart';
 import 'screens/start_live_screen.dart';
 import 'screens/communities/communities_screen.dart';
 import 'screens/discover_screen.dart';
@@ -68,12 +68,12 @@ import 'services/live_kit_service.dart';
 import 'theme/klayk_theme.dart';
 import 'design/klayk_design.dart';
 import 'widgets/klayk_ux.dart';
+import 'widgets/search_result_opener.dart';
 import 'widgets/ad_widgets.dart';
 import 'widgets/ad_spot.dart';
 import 'widgets/klayk_game_card.dart';
 import 'widgets/reward_floating_button.dart';
 import 'widgets/feed_loading_hud.dart';
-import 'widgets/quest_bubble.dart';
 
 /// A cada N vídeos, um anúncio aprovado entra no feed (intercalação
 /// transparente com badge ANÚNCIO). Não afeta a lógica de vídeo existente.
@@ -473,6 +473,10 @@ final ValueNotifier<int> kNavIndex = ValueNotifier<int>(0);
 // MODELOS
 // ============================================================
 
+/// Quantos comentários a cada página na sheet. Antes era um corte fixo
+/// de 200 linhas, sem scroll incremental.
+const int kCommentPageSize = 30;
+
 class Comment {
   final String id;
   final String username;
@@ -490,6 +494,10 @@ class Comment {
   bool edited;
   final bool isVerified;
 
+  /// ID do comentário pai quando este é uma resposta — é o que permite
+  /// desenhar a resposta recuada abaixo do comentário original.
+  final String? parentCommentId;
+
   Comment({
     required this.id,
     required this.username,
@@ -503,7 +511,28 @@ class Comment {
     this.mine = false,
     this.edited = false,
     this.isVerified = false,
+    this.parentCommentId,
   });
+
+  /// Cópia com campos trocados — usado pela atualização otimista da curtida,
+  /// que precisa reverter sem recarregar a lista inteira.
+  Comment copyWith({int? likes, bool? liked, String? replyTo}) {
+    return Comment(
+      id: id,
+      username: username,
+      text: text,
+      timestamp: timestamp,
+      replyTo: replyTo ?? this.replyTo,
+      authorId: authorId,
+      avatarUrl: avatarUrl,
+      likes: likes ?? this.likes,
+      liked: liked ?? this.liked,
+      mine: mine,
+      edited: edited,
+      isVerified: isVerified,
+      parentCommentId: parentCommentId,
+    );
+  }
 }
 
 class KlayKVideo {
@@ -1046,13 +1075,14 @@ class _MainScreenState extends State<MainScreen> {
             visibleTab: _currentIndex,
             paused: _rewardPaused,
           ),
-          // Bolinha de missões/nível — abre a tela de missões reais.
+          // A bolinha roxa de missões/nível (QuestBubble) foi removida do
+          // overlay. Ela flutuava sobre as demais abas — inclusive sobre a de
+          // Mensagens — com o anel de progresso e o X logo abaixo.
           //
-          // Não é mais exibida no FEED PRINCIPAL (aba 0): ali ela ficava solta sobre o
-          // vídeo e cobria o canto superior esquerdo. Continua disponível nas demais abas
-          // e, principalmente, dentro da tela de Missões. O sistema de nível/XP não foi
-          // alterado — só a renderização flutuante do feed.
-          if (_currentIndex != 0) QuestBubble(visibleTab: _currentIndex),
+          // Nada de Missões foi perdido: `MissionsScreen` continua acessível
+          // pelo Central de Recompensas, que é alcançado pelas Configurações
+          // e pela tela de Jogos. O sistema de nível/XP segue intacto, só
+          // perdeu a renderização flutuante.
         ],
       ),
       bottomNavigationBar: KlayKBottomNavigation(
@@ -1666,8 +1696,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   RealtimeChannel? _livesChannel;
   Timer? _livesRefreshDebounce;
 
-  int _notifUnread = 0;
-  RealtimeChannel? _notifChannel;
   StreamSubscription<AuthState>? _authSub;
 
   String _myAvatarUrl = '';
@@ -1679,7 +1707,30 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   /// Um anúncio entra a cada [kAdsFeedEveryN] vídeos. Só entram itens
   /// APPROVED vindos da RPC pública (nunca decididos pelo cliente).
   /// As lives vêm do Supabase (nunca do catálogo de demonstração).
+  /// Cache do getter [feedItems] para a duração de um frame.
+  ///
+  /// O getter é lido em 7 pontos (`:2049`, `:2075`, `:2111`, `:2162`, `:2171`,
+  /// `:2216`, `:2238`) e cada leitura percorria todos os vídeos remontando a
+  /// lista — inclusive de dentro do `itemBuilder`, ou seja, uma vez por item
+  /// construído. Aqui a lista é montada uma vez por frame de build.
+  List<Object>? _feedItemsCache;
+  Object? _feedItemsCacheStamp;
+
+  /// Identidade das entradas que afetam a composição da lista.
+  Object get _feedItemsStamp =>
+      '${videos.length}|${_feedAds.length}|${_feedLives.length}|$_feedTab';
+
   List<Object> get feedItems {
+    final stamp = _feedItemsStamp;
+    final cached = _feedItemsCache;
+    if (cached != null && _feedItemsCacheStamp == stamp) return cached;
+    final built = _buildFeedItems();
+    _feedItemsCache = built;
+    _feedItemsCacheStamp = stamp;
+    return built;
+  }
+
+  List<Object> _buildFeedItems() {
     final withAds = _feedAds.isNotEmpty;
     final withLives =
         _feedTab == _FeedTopBar.forYouIndex && _feedLives.isNotEmpty;
@@ -1768,7 +1819,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     _loadFeed();
     _loadFeedAds();
     _loadFeedLives();
-    _initNotifications();
+    _initAuthAndLives();
     _loadAvatar();
     _updateRewardPause();
   }
@@ -1816,55 +1867,34 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _initNotifications() {
+  // Assina as mudanças de sessão para recarregar avatar e lives do cabeçalho.
+//
+// A Central de Notificações NÃO é aberta por aqui: ela vive como aba dentro
+// do hub de Mensagens (`messages_hub_screen.dart`), que tem realtime próprio.
+// Antes este bloco também mantinha um canal só para atualizar o contador do
+// sino do feed — que foi removido, junto com o polling que o alimentava.
+void _initAuthAndLives() {
     if (!SupabaseService.instance.isConfigured) return;
-    _notifBadgeRefresh();
-    try {
-      _notifChannel ??= SupabaseService.instance.subscribeToNotifications((_) {
-        _notifBadgeRefresh();
-      });
-    } catch (_) {
-      // Sem sessão ainda: entra quando o usuário fizer login.
-    }
     _authSub = SupabaseService.instance.client.auth.onAuthStateChange.listen((
       authState,
     ) {
       final event = authState.event;
       final session = authState.session;
       if (event == AuthChangeEvent.signedIn && session != null) {
-        _notifBadgeRefresh();
         _loadAvatar();
         _loadFeedLives();
-        try {
-          _notifChannel ??= SupabaseService.instance.subscribeToNotifications((
-            _,
-          ) {
-            _notifBadgeRefresh();
-          });
-        } catch (_) {}
       } else if (event == AuthChangeEvent.signedOut) {
-        final ch = _notifChannel;
-        _notifChannel = null;
-        if (ch != null) SupabaseService.instance.removeChannel(ch);
         final lc = _livesChannel;
         _livesChannel = null;
         if (lc != null) SupabaseService.instance.removeChannel(lc);
         if (mounted) {
           setState(() {
-            _notifUnread = 0;
             _myAvatarUrl = '';
             _feedLives = const [];
           });
         }
       }
     });
-  }
-
-  Future<void> _notifBadgeRefresh() async {
-    final c = await ContentService.instance.unreadNotificationCount();
-    if (mounted && c != _notifUnread) {
-      setState(() => _notifUnread = c);
-    }
   }
 
   /// Avatar real do usuário logado para o topo da Home.
@@ -1892,10 +1922,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
       _livesChannel = null;
     }
     _authSub?.cancel();
-    final ch = _notifChannel;
-    if (ch != null) {
-      SupabaseService.instance.removeChannel(ch);
-    }
     _pageController.dispose();
     _pullExtent.dispose();
     super.dispose();
@@ -2115,6 +2141,34 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
     AdsService.instance.trackEvent(item.id, 'impression');
   }
 
+  /// Grava a visualização do vídeo que entrou na tela.
+  ///
+  /// Antes disso `posts.views_count` nunca era escrito: a coluna existia, o
+  /// Creator Dashboard lia, e o número ficava sempre zerado. A RPC
+  /// `record_post_view` só conta a primeira vez por usuário e vídeo, então
+  /// deslizar para frente e voltar não infla o contador.
+  ///
+  /// Só conta vídeo de criador — anúncio tem métrica própria (`impression`)
+  /// e LIVE não é `posts`.
+  void _recordFeedView(int combinedIndex) {
+    if (_feedTab != _FeedTopBar.forYouIndex &&
+        _feedTab != _FeedTopBar.followingIndex &&
+        _feedTab != _FeedTopBar.storeIndex) {
+      return;
+    }
+    final items = feedItems;
+    if (combinedIndex < 0 || combinedIndex >= items.length) return;
+    final item = items[combinedIndex];
+    if (item is! KlayKVideo) return;
+    if (_viewedPostIds.contains(item.id)) return;
+    _viewedPostIds.add(item.id);
+    unawaited(ContentService.instance.recordPostView(item.id));
+  }
+
+  /// Ids já contabilizados nesta sessão, para não repetir a chamada quando o
+  /// usuário desliza para trás e para frente no mesmo vídeo.
+  final Set<String> _viewedPostIds = <String>{};
+
   /// Mantém o sinal de pausa da recompensa sincronizado: o ciclo só conta
   /// tempo quando o Feed (aba ativa) está na sub-aba que reproduz vídeos.
   void _updateRewardPause() {
@@ -2133,15 +2187,23 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
+    final isMarketplace = _feedTab == _FeedTopBar.storeIndex;
     final showFeed =
-        _feedTab == _FeedTopBar.followingIndex ||
-        _feedTab == _FeedTopBar.forYouIndex ||
-        _feedTab == _FeedTopBar.storeIndex;
+        !isMarketplace &&
+        (_feedTab == _FeedTopBar.followingIndex ||
+            _feedTab == _FeedTopBar.forYouIndex);
 
     return Scaffold(
       backgroundColor: kc(context).bg,
       body: Stack(
         children: [
+          // A aba Loja é o Marketplace: tela cheia com busca, filtros, grade
+          // e "Minha loja". Substitui o PageView de vídeos — o conteúdo de
+          // vídeo da Loja nunca foi próprio, era o mesmo feed com chip marcado.
+          if (isMarketplace)
+            Positioned.fill(
+              child: StoreMarketScreen(topPadding: topPadding),
+            ),
           if (showFeed)
             NotificationListener<ScrollNotification>(
               onNotification: _onFeedScrollNotification,
@@ -2166,6 +2228,7 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
                   });
                   _trackAdImpression(index);
                   _maybeLoadMore(index);
+                  _recordFeedView(index);
                 },
                 itemBuilder: (context, index) {
                   final item = feedItems[index];
@@ -2308,8 +2371,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
               onSearch: () {
                 showSearch(context: context, delegate: KlayKSearchDelegate());
               },
-              onNotifications: _openNotifications,
-              notificationUnread: _notifUnread,
               avatarUrl: _myAvatarUrl,
               onProfile: () => kNavIndex.value = 5,
             ),
@@ -2402,13 +2463,6 @@ class _FeedScreenState extends State<FeedScreen> with WidgetsBindingObserver {
   bool _isGameLiveFeed(RealLive live) =>
       live.category.toLowerCase().contains('jogo') ||
       (live.gameName != null && live.gameName!.isNotEmpty);
-
-  Future<void> _openNotifications() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
-    _notifBadgeRefresh();
-  }
 
   Future<void> _openCommunities() async {
     await Navigator.of(
@@ -2574,8 +2628,6 @@ class _FeedTopBar extends StatelessWidget {
   final int feedTab;
   final ValueChanged<int> onTabChanged;
   final VoidCallback onSearch;
-  final VoidCallback onNotifications;
-  final int notificationUnread;
   final String avatarUrl;
   final VoidCallback onProfile;
 
@@ -2584,29 +2636,43 @@ class _FeedTopBar extends StatelessWidget {
     required this.feedTab,
     required this.onTabChanged,
     required this.onSearch,
-    required this.onNotifications,
     required this.onProfile,
-    this.notificationUnread = 0,
     this.avatarUrl = '',
   });
 
-  static const int followingIndex = 0;
+  /// Ordem dos chips no topo do feed.
+  ///
+  /// A ordem segue a [_tabTitles] e o índice é a posição na lista, então os
+  /// dois precisam andar juntos. Loja (antigo `storeIndex`) e Jogos
+  /// (`gamesIndex`) tinham índices invertidos em relação ao desejado, e como
+  /// todo o código compara com estas constantes, trocar os valores aqui realoca
+  /// as abas sem quebrar nenhum `if`.
+  static const int liveIndex = 0;
   static const int forYouIndex = 1;
-  static const int liveIndex = 2;
-  static const int gamesIndex = 3;
+  static const int followingIndex = 2;
 
+  /// Índice da aba Loja (mostra o mesmo feed de vídeos, com o chip destacado).
+  static const int storeIndex = 3;
+
+  /// Índice da aba Jogos.
+  static const int gamesIndex = 4;
+
+  /// Índice da aba que abre a vitrine de Destaques. Sem chip que a alcance —
+  /// ver [_tabTitles].
+  static const int destaquesIndex = 5;
+
+  /// Títulos dos chips, na MESMA ordem dos índices acima.
+  ///
+  /// Antes esta lista tinha só 4 entradas enquanto existiam 13 índices, o que
+  /// tornava Loja e Destaques inalcançáveis por toque: `_DestaquesArea` e o
+  /// chip de Loja eram código morto.
   static List<String> tabTitles(AppLocalizations l10n) => [
-    l10n.followingFeedsTab,
-    l10n.forYouTab,
     l10n.liveTab,
+    l10n.forYouTab,
+    l10n.followingFeedsTab,
+    l10n.store,
     l10n.gamesTab,
   ];
-
-  /// Índice da aba Loja (exibe o mesmo feed como antes, só troca o chip).
-  static const int storeIndex = 4;
-
-  /// Índice da aba que abre a vitrine de Destaques.
-  static const int destaquesIndex = 5;
 
   /// Índice da aba que abre a exploração de Descobrir/Tendências em tela cheia.
   static const int discoverIndex = 6;
@@ -2646,12 +2712,9 @@ class _FeedTopBar extends StatelessWidget {
           ],
         ),
       ),
-      child: Stack(
-        clipBehavior: Clip.none,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
               // Categorias do feed + pesquisa na mesma linha, junta do topo,
               // horizontalmente rolável. A lupa compacta fica logo após
               // "Jogos" e usa o mesmo detector real de pesquisa.
@@ -2746,49 +2809,6 @@ class _FeedTopBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-            ],
-          ),
-          // Sino de notificações com contador REAL de não lidas (backend),
-          // sempre visível no canto superior direito. Abre a Central de
-          // Notificações.
-          Positioned(
-            top: 2,
-            right: 8,
-            child: Semantics(
-              label: AppLocalizations.of(context)!.notificationsTab,
-              button: true,
-              child: GestureDetector(
-                onTap: onNotifications,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      const Icon(
-                        Icons.notifications_none_rounded,
-                        color: Colors.white,
-                        size: 24,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black87,
-                            blurRadius: 8,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      if (notificationUnread > 0)
-                        Positioned(
-                          right: -2,
-                          top: -2,
-                          child: KlayKBadge(count: notificationUnread),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -3067,6 +3087,7 @@ class _FeedLiveItem extends StatelessWidget {
             children: [
               if (live.coverUrl != null && live.coverUrl!.isNotEmpty)
                 Image.network(
+                  cacheWidth: imageDecodeWidth(context, 180),
                   live.coverUrl!,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) =>
@@ -3201,6 +3222,7 @@ class _FeedLiveFallback extends StatelessWidget {
               child: avatarUrl != null && avatarUrl!.isNotEmpty
                   ? Image.network(
                       avatarUrl!,
+                      cacheWidth: imageDecodeWidth(context, 92),
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) =>
                           const _FallbackInitialAvatar(),
@@ -3271,6 +3293,7 @@ class _FeedAdItem extends StatelessWidget {
           children: [
             if (ad.mediaUrl.isNotEmpty)
               Image.network(
+                cacheWidth: imageDecodeWidth(context, 180),
                 ad.mediaUrl,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => const _AdFallbackBg(),
@@ -3857,7 +3880,7 @@ class _VideoItemState extends State<VideoItem>
       case 'instagram':
         await Share.share(shareText);
         if (!mounted) return;
-        setState(() => widget.video.shares++);
+        await _countShare();
         await _notifyShare();
       case 'facebook':
         await _launchShareUrl(
@@ -3867,7 +3890,7 @@ class _VideoItemState extends State<VideoItem>
       case 'system':
         await Share.share(shareText);
         if (!mounted) return;
-        setState(() => widget.video.shares++);
+        await _countShare();
         await _notifyShare();
       case 'report':
         await showReportDialog(
@@ -3881,6 +3904,30 @@ class _VideoItemState extends State<VideoItem>
 
   /// Notifica o dono do vídeo quando alguém compartilha de verdade (evento
   /// real de compartilhamento — nunca gera aviso para o próprio autor).
+  /// Conta o compartilhamento de verdade.
+  ///
+  /// Antes os quatro caminhos de compartilhamento faziam
+  /// `setState(() => widget.video.shares++)`: o número subia na tela e sumia ao
+  /// sair, porque `posts.shares_count` não tinha trigger nem gravação. Agora a
+/// RPC `increment_post_share` persiste e devolve o total do banco, que é o que
+  /// aparece. Se a gravação falhar, mantemos o incremento local para a
+  /// experiência não parecer quebrada — e o próximo compartilhamento tenta de novo.
+  ///
+  /// O total do servidor só é aplicado quando é >= o valor local. Sem essa
+  /// guarda, um servidor desatualizado (réplica, RPC que devolveu o valor
+  /// corrente para anônimo) fazia o contador VOLTAR: o usuário compartilhava,
+  /// o número subia para 1 na hora e no `setState` seguinte caía para 0.
+  /// Com o teto de 1/hora, um segundo compartilhamento legítimo já devolve
+  /// exatamente o valor anterior — também nesse caso o local é a verdade melhor.
+  Future<void> _countShare() async {
+    if (!mounted) return;
+    setState(() => widget.video.shares++);
+    if (!SupabaseService.instance.isConfigured) return;
+    final total = await ContentService.instance.incrementShare(widget.video.id);
+    if (!mounted || total == null || total < widget.video.shares) return;
+    setState(() => widget.video.shares = total);
+  }
+
   Future<void> _notifyShare() async {
     if (!SupabaseService.instance.isConfigured) return;
     final me = SupabaseService.instance.client.auth.currentUser?.id;
@@ -3907,7 +3954,7 @@ class _VideoItemState extends State<VideoItem>
     }
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (launched) {
-      setState(() => widget.video.shares++);
+      await _countShare();
       await _notifyShare();
     } else {
       _showSnack(l10n.couldNotOpen(label));
@@ -4016,7 +4063,7 @@ class _VideoItemState extends State<VideoItem>
       _showSnack(
         l10n.videoSentTo(friend.displayName ?? friend.username ?? l10n.friend),
       );
-      setState(() => widget.video.shares++);
+      await _countShare();
     } catch (_) {
       _showSnack(l10n.sendVideoFail);
     }
@@ -4459,6 +4506,7 @@ class _VideoItemState extends State<VideoItem>
             Image.network(
               cover,
               fit: BoxFit.cover,
+              cacheWidth: imageDecodeWidth(context, 220),
               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
             ),
           // Velatura dark com identidade KLAY K: mantém legíveis os overlays
@@ -4504,11 +4552,23 @@ class CommentsSheet extends StatefulWidget {
 class _CommentsSheetState extends State<CommentsSheet> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  String? _replyTo;
+
+  /// ID do comentário sendo respondido. Sem isto a resposta era criada como
+  /// comentário solto: a coluna `parent_id` existe no banco mas nunca era
+  /// enviada, então "responder" não formava thread nenhuma.
+  /// Nome do autor do comentário respondido (só para o rótulo na UI).
+  String? _replyToName;
+  String? _replyToId;
+
   Comment? _editingComment;
 
   List<Comment> _comments = [];
   bool _loading = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _totalComments = 0;
+  final ScrollController _listScroll = ScrollController();
+
   bool get _real =>
       SupabaseService.instance.isConfigured && widget.video.id.isNotEmpty;
 
@@ -4516,46 +4576,93 @@ class _CommentsSheetState extends State<CommentsSheet> {
   void initState() {
     super.initState();
     _comments = List.from(widget.video.commentList);
+    _listScroll.addListener(_onListScroll);
     if (_real) _loadComments();
+  }
+
+  /// Traz a próxima página quando chega perto do fim da lista.
+  void _onListScroll() {
+    if (!_listScroll.hasClients) return;
+    final nearEnd =
+        _listScroll.position.pixels >=
+        _listScroll.position.maxScrollExtent - 320;
+    if (nearEnd && _real && _hasMore && !_loading && !_loadingMore) {
+      _loadMoreComments();
+    }
   }
 
   @override
   void dispose() {
+    _listScroll
+      ..removeListener(_onListScroll)
+      ..dispose();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
+  /// Converte um [PostComment] do banco no modelo de exibição, preservando o
+  /// vínculo de resposta e as curtidas.
+  Comment _toView(PostComment c) => Comment(
+    id: c.id,
+    username: c.author?.username != null
+        ? '@${c.author!.username}'
+        : AppLocalizations.of(context)!.user,
+    text: c.text,
+    timestamp: c.createdAt,
+    // O rótulo mostra QUEM foi respondido (o autor do pai), não a palavra
+    // fixa "resposta" que não dizia nada.
+    replyTo: c.parentId != null ? _parentAuthorLabel(c.parentId!) : null,
+    parentCommentId: c.parentId,
+    authorId: c.author?.id,
+    avatarUrl: c.author?.avatarUrl,
+    likes: c.likesCount,
+    liked: c.likedByMe,
+    edited: c.editedAt != null,
+    isVerified: c.author?.isVerified ?? false,
+    mine:
+        c.userId != null &&
+        c.userId == SupabaseService.instance.client.auth.currentUser?.id,
+  );
+
+  /// Nome de quem recebeu a resposta, resolvido na lista já carregada.
+  String _parentAuthorLabel(String parentId) {
+    for (final c in _comments) {
+      if (c.id == parentId) return c.username;
+    }
+    for (final c in _rawComments) {
+      if (c.id == parentId) {
+        return c.author?.username != null
+            ? '@${c.author!.username}'
+            : AppLocalizations.of(context)!.user;
+      }
+    }
+    return AppLocalizations.of(context)!.user;
+  }
+
+  ///_BR_: última página bruta do banco, usada só para resolver o nome do pai.
+  List<PostComment> _rawComments = const <PostComment>[];
+
   Future<void> _loadComments() async {
     setState(() => _loading = true);
     try {
-      final real = await ContentService.instance.fetchComments(widget.video.id);
-      final mapped = real
-          .map(
-            (c) => Comment(
-              id: c.id,
-              username: c.author?.username != null
-                  ? '@${c.author!.username}'
-                  : AppLocalizations.of(context)!.user,
-              text: c.text,
-              timestamp: c.createdAt,
-              replyTo: c.parentId != null ? 'resposta' : null,
-              authorId: c.author?.id,
-              avatarUrl: c.author?.avatarUrl,
-              edited: c.editedAt != null,
-              isVerified: c.author?.isVerified ?? false,
-              mine:
-                  c.userId != null &&
-                  c.userId ==
-                      SupabaseService.instance.client.auth.currentUser?.id,
-            ),
-          )
-          .toList();
+      final results = await Future.wait<dynamic>(<Future<dynamic>>[
+        ContentService.instance.fetchComments(
+          widget.video.id,
+          limit: kCommentPageSize,
+        ),
+        ContentService.instance.countComments(widget.video.id),
+      ]);
+      final raw = (results[0] as List<PostComment>);
+      _rawComments = raw;
+      final mapped = raw.map(_toView).toList();
+      _totalComments = (results[1] as int);
+      _hasMore = mapped.length < _totalComments;
       if (mounted) {
         setState(() {
           _comments = mapped;
           widget.video.commentList = mapped;
-          widget.video.comments = mapped.length;
+          widget.video.comments = _totalComments;
           _loading = false;
         });
       }
@@ -4564,21 +4671,110 @@ class _CommentsSheetState extends State<CommentsSheet> {
     }
   }
 
+  /// Paginação: busca o próximo bloco a partir do que já foi carregado.
+  Future<void> _loadMoreComments() async {
+    setState(() => _loadingMore = true);
+    try {
+      final more = await ContentService.instance.fetchComments(
+        widget.video.id,
+        limit: kCommentPageSize,
+        offset: _rawComments.length,
+      );
+      if (!mounted) return;
+      if (more.isEmpty) {
+        setState(() {
+          _hasMore = false;
+          _loadingMore = false;
+        });
+        return;
+      }
+      _rawComments = <PostComment>[..._rawComments, ...more];
+      final mapped = _rawComments.map(_toView).toList();
+      setState(() {
+        _comments = mapped;
+        _hasMore = mapped.length < _totalComments;
+        _loadingMore = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  /// Curte/descurte persistindo de verdade. Antes isto só mudava o objeto em
+  /// memória e sumia ao fechar a sheet.
+  Future<void> _toggleLike(Comment c) async {
+    if (!_real) {
+      setState(() {
+        final i = _comments.indexWhere((x) => x.id == c.id);
+        if (i < 0) return;
+        _comments[i] = _comments[i].copyWith(
+          liked: !_comments[i].liked,
+          likes: _comments[i].likes + (_comments[i].liked ? -1 : 1),
+        );
+      });
+      return;
+    }
+    // Otimista: a UI responde na hora e reverte se o banco recusar.
+    final prevLiked = c.liked;
+    final prevLikes = c.likes;
+    setState(() {
+      final i = _comments.indexWhere((x) => x.id == c.id);
+      if (i < 0) return;
+      _comments[i] = _comments[i].copyWith(
+        liked: !prevLiked,
+        likes: prevLikes + (prevLiked ? -1 : 1),
+      );
+    });
+    try {
+      final r = await ContentService.instance.toggleCommentLike(c.id);
+      if (!mounted) return;
+      setState(() {
+        final i = _comments.indexWhere((x) => x.id == c.id);
+        if (i < 0) return;
+        _comments[i] = _comments[i].copyWith(liked: r.liked, likes: r.count);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        final i = _comments.indexWhere((x) => x.id == c.id);
+        if (i < 0) return;
+        _comments[i] = _comments[i].copyWith(
+          liked: prevLiked,
+          likes: prevLikes,
+        );
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível curtir agora.')),
+      );
+    }
+  }
+
   Future<void> _addComment() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
     _controller.clear();
-    setState(() => _replyTo = null);
+    final parentId = _replyToId;
+    setState(() {
+      _replyToName = null;
+      _replyToId = null;
+    });
     _focusNode.unfocus();
 
     if (_real) {
       try {
-        await ContentService.instance.addComment(widget.video.id, text);
+        // Enviando o parentId é o que cria a thread de verdade. Antes o
+        // argumento era omitido, então toda "resposta" era salva como
+        // comentário solto mesmo existindo a coluna no banco.
+        await ContentService.instance.addComment(
+          widget.video.id,
+          text,
+          parentId: parentId,
+        );
         await _loadComments();
         if (mounted) {
           setState(() {
-            widget.video.comments = _comments.length;
+            widget.video.comments = _totalComments;
           });
         }
       } catch (_) {
@@ -4602,7 +4798,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
           username: 'KLAY K OFICIAL',
           text: text,
           timestamp: DateTime.now(),
-          replyTo: _replyTo,
+          replyTo: _replyToName,
           mine: true,
         ),
       ];
@@ -4640,14 +4836,17 @@ class _CommentsSheetState extends State<CommentsSheet> {
   }
 
   void _startReply(Comment comment) {
-    setState(() => _replyTo = comment.username);
+    setState(() {
+      _replyToName = comment.username;
+      _replyToId = comment.id;
+    });
     _focusNode.requestFocus();
   }
 
   void _startEditComment(Comment comment) {
     setState(() {
       _editingComment = comment;
-      _replyTo = null;
+      _replyToName = null;
       _controller.text = comment.text;
       _controller.selection = TextSelection.collapsed(
         offset: _controller.text.length,
@@ -4810,26 +5009,64 @@ class _CommentsSheetState extends State<CommentsSheet> {
                   message: AppLocalizations.of(context)!.shareYourOpinion,
                 )
               : ListView.builder(
+                  controller: _listScroll,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _comments.length,
+                  itemCount: _comments.length + (_loadingMore ? 1 : 0),
                   itemBuilder: (context, index) {
-                    return _CommentTile(
-                      comment: _comments[index],
-                      onReply: () => _startReply(_comments[index]),
-                      onEdit: () => _startEditComment(_comments[index]),
-                      onCopy: () => _copyComment(_comments[index]),
-                      onDelete: () =>
-                          _deleteComment(_comments[index], real: _real),
-                      onToggle: () {
-                        setState(() {
-                          final c = _comments[index];
-                          c.liked = !c.liked;
-                          c.likes += c.liked ? 1 : -1;
-                          if (c.likes < 0) c.likes = 0;
-                        });
-                      },
-                      onReport: () => _reportComment(_comments[index]),
-                      onProfile: () => _openCommentProfile(_comments[index]),
+                    if (index >= _comments.length) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      );
+                    }
+                    final c = _comments[index];
+                    // Resposta fica recuada e com linha de ligação, para
+                    // leitura de thread ficar óbvia.
+                    final isReply = c.parentCommentId != null;
+                    return Padding(
+                      padding: EdgeInsets.only(left: isReply ? 26 : 0),
+                      child: isReply
+                          // Resposta recuada, com linha de ligação roxa para
+                          // a leitura de thread ficar óbvia.
+                          ? Container(
+                              padding: const EdgeInsets.only(left: 10),
+                              decoration: const BoxDecoration(
+                                border: Border(
+                                  left: BorderSide(
+                                    color: Color(0xFF8B5CF6),
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                              child: _CommentTile(
+                                comment: c,
+                                onReply: () => _startReply(c),
+                                onEdit: () => _startEditComment(c),
+                                onCopy: () => _copyComment(c),
+                                onDelete: () => _deleteComment(c, real: _real),
+                                // Persiste no banco de verdade. Antes só
+                                // mudava o objeto em memória.
+                                onToggle: () => _toggleLike(c),
+                                onReport: () => _reportComment(c),
+                                onProfile: () => _openCommentProfile(c),
+                              ),
+                            )
+                          : _CommentTile(
+                              comment: c,
+                              onReply: () => _startReply(c),
+                              onEdit: () => _startEditComment(c),
+                              onCopy: () => _copyComment(c),
+                              onDelete: () => _deleteComment(c, real: _real),
+                              onToggle: () => _toggleLike(c),
+                              onReport: () => _reportComment(c),
+                              onProfile: () => _openCommentProfile(c),
+                            ),
                     );
                   },
                 ),
@@ -4849,13 +5086,13 @@ class _CommentsSheetState extends State<CommentsSheet> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (_replyTo != null) ...[
+                    if (_replyToName != null) ...[
                       InkWell(
-                        onTap: () => setState(() => _replyTo = null),
+                        onTap: () => setState(() => _replyToName = null),
                         child: Padding(
                           padding: const EdgeInsets.only(bottom: 2),
                           child: Text(
-                            '${AppLocalizations.of(context)!.replyToLabel(_replyTo!)} ✕',
+                            '${AppLocalizations.of(context)!.replyToLabel(_replyToName!)} ✕',
                             style: const TextStyle(
                               color: Color(0xFFB28DFF),
                               fontSize: 12,
@@ -5560,6 +5797,10 @@ class _CreatorAvatar extends StatelessWidget {
                 child: Image.network(
                   avatarUrl,
                   fit: BoxFit.cover,
+                  // Avatar de 52px: sem cacheWidth o Flutter decodifica a
+                  // imagem no tamanho original e segura os pixels em memória.
+                  // O helper já existia e era usado em outros pontos.
+                  cacheWidth: imageDecodeWidth(context, 52),
                   errorBuilder: (_, __, ___) => Container(
                     color: Colors.grey[800],
                     child: const Icon(
@@ -5785,7 +6026,7 @@ class _CreatorStrip extends StatelessWidget {
   });
 
   /// Linhas do texto antes de cortar. Curto aparece inteiro, sem "mais".
-  static const int _collapsedLines = 2;
+  static const int _collapsedLines = kCaptionCollapsedLines;
 
   /// Descrição + hashtags como UM único bloco de texto.
   ///
@@ -5905,13 +6146,16 @@ class _CreatorStrip extends StatelessWidget {
               final span = _captionSpan(colors.primarySoft);
               // Mede o texto real para só mostrar "mais" quando existe
               // conteúdo escondido de fato (e não por um chute de tamanho).
-              final painter = TextPainter(
-                text: span,
-                maxLines: _collapsedLines,
+              //
+              // A medição é cacheada por (texto, largura, direção): o
+              // `PageView` mantém 3 páginas vivas e esta medição rodava em
+              // todas elas a cada rebuild, não só na página ativa. A largura
+              // só muda em rotação ou split-screen, então o cache erra pouco.
+              final hidden = captionOverflows(
+                span: span,
+                maxWidth: constraints.maxWidth,
                 textDirection: Directionality.of(context),
-              )..layout(maxWidth: constraints.maxWidth);
-              final hidden = painter.didExceedMaxLines;
-              painter.dispose();
+              );
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -6506,6 +6750,10 @@ class _AudioScreenState extends State<AudioScreen> {
                                           p.coverUrl!,
                                           width: 56,
                                           height: 76,
+                                          cacheWidth: imageDecodeWidth(
+                                            context,
+                                            56,
+                                          ),
                                           fit: BoxFit.cover,
                                           errorBuilder: (_, __, ___) =>
                                               Container(
@@ -7670,6 +7918,7 @@ class _GameLiveRailCard extends StatelessWidget {
               Positioned.fill(
                 child: Image.network(
                   cUrl,
+                  cacheWidth: imageDecodeWidth(context, 180),
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   loadingBuilder: (context, child, progress) =>
@@ -8093,6 +8342,7 @@ class _LiveViewerScreenState extends State<_LiveViewerScreen> {
                           children: [
                             ClipOval(
                               child: Image.network(
+                                cacheWidth: imageDecodeWidth(context, 52),
                                 widget.live.avatarUrl,
                                 width: 52,
                                 height: 52,
@@ -8600,32 +8850,35 @@ class _GamesAreaState extends State<_GamesArea> {
                 ? const Center(child: KlaykLoader())
                 : RefreshIndicator(
                     onRefresh: _load,
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
-                      children: [
-                        if (_games.isEmpty)
-                          const KlaykEmptyState(
+                    child: _games.isEmpty
+                        ? const KlaykEmptyState(
                             icon: Icons.sports_esports_rounded,
                             title: 'Sem jogos no momento',
                             message: 'Novos jogos chegam em breve no KLAY K.',
                           )
-                        else
-                          for (var i = 0; i < _games.length; i++) ...[
-                            KlaykGameCard(
-                              game: _games[i],
-                              best: _records[_games[i].id] ?? 0,
-                              onPlay: _games[i].isActive
-                                  ? () => _openGame(_games[i])
-                                  : null,
-                              onRanking: _games[i].isActive
-                                  ? () => _openLeaderboard(_games[i])
-                                  : null,
-                            ),
-                            const SizedBox(height: 12),
-                          ],
-                        const SizedBox(height: 4),
-                      ],
-                    ),
+                        // `builder` em vez de `children`: antes os cards eram
+                        // todos construídos de uma vez, e o catálogo já tem 31
+                        // jogos e cresce. Agora só o que está visível é criado.
+                        : ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+                            itemCount: _games.length,
+                            itemBuilder: (context, i) {
+                              final g = _games[i];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: KlaykGameCard(
+                                  game: g,
+                                  best: _records[g.id] ?? 0,
+                                  onPlay: g.isActive
+                                      ? () => _openGame(g)
+                                      : null,
+                                  onRanking: g.isActive
+                                      ? () => _openLeaderboard(g)
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
                   ),
           ),
         ],
@@ -8783,6 +9036,7 @@ class _DestaquesAreaState extends State<_DestaquesArea> {
                                 ClipOval(
                                   child: Image.network(
                                     _creators[index]['avatarUrl']!,
+                                    cacheWidth: imageDecodeWidth(context, 64),
                                     width: 64,
                                     height: 64,
                                     fit: BoxFit.cover,
@@ -9027,6 +9281,7 @@ class _TrendingVideoCard extends StatelessWidget {
           children: [
             Image.network(
               avatarUrl,
+              cacheWidth: imageDecodeWidth(context, 86),
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Container(
                 color: const Color(0xFF23232E),
@@ -10040,11 +10295,22 @@ class KlayKSearchDelegate extends SearchDelegate {
                               _openAuthor(context, r.id);
                               break;
                             case 'hashtag':
-                              query = '#${r.subtitle}';
-                              _scope.value = 'post';
+                              // Antes só trocava a query para "#tag" e
+                              // refazia a busca. Agora abre a página da
+                              // hashtag, que é o que a pessoa esperava ao
+                              // tocar no resultado.
+                              close(context, null);
+                              openHashtag(
+                                context,
+                                r.subtitle.isNotEmpty ? r.subtitle : r.title,
+                              );
                               break;
                             default:
+                              // `post` e `live`: abrem o conteúdo. Fechar o
+                              // delegate primeiro mantém a busca fora da
+                              // pilha, então voltar volta para o feed.
                               close(context, null);
+                              openSearchResult(context, r);
                           }
                         },
                       );
@@ -10307,4 +10573,44 @@ class KlayKSearchDelegate extends SearchDelegate {
           .toList(),
     );
   }
+}
+
+/// Cache da medição de overflow da legenda do criador.
+///
+/// Chave: texto + largura arredondada + direção. Costuma existir um único par
+/// (texto, largura) por vídeo, então o custo é desprezível.
+final Map<String, bool> _captionOverflowCache = <String, bool>{};
+
+/// Quantas linhas a legenda do criador mostra antes de cortar.
+const int kCaptionCollapsedLines = 2;
+
+/// Diz se a legenda estoura as [kCaptionCollapsedLines] na largura dada.
+///
+/// Substitui o `TextPainter` montado a cada build: o `PageView` do feed mantém
+/// três páginas vivas e a medição rodava em todas elas a cada reconstrução,
+/// mesmo nas páginas que não estavam visíveis.
+bool captionOverflows({
+  required TextSpan span,
+  required double maxWidth,
+  required TextDirection textDirection,
+}) {
+  if (maxWidth <= 0) return false;
+  final key =
+      '${span.toPlainText()}|$maxWidth.toStringAsFixed(0)|${textDirection.index}';
+  final cached = _captionOverflowCache[key];
+  if (cached != null) return cached;
+
+  final painter = TextPainter(
+    text: span,
+    maxLines: kCaptionCollapsedLines,
+    textDirection: textDirection,
+  )..layout(maxWidth: maxWidth);
+  final hidden = painter.didExceedMaxLines;
+  painter.dispose();
+
+  // Teto curto: com rolagem infinita o texto muda sempre, e o cache não pode
+  // crescer sem limite.
+  if (_captionOverflowCache.length > 128) _captionOverflowCache.clear();
+  _captionOverflowCache[key] = hidden;
+  return hidden;
 }

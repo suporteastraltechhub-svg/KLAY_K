@@ -85,9 +85,23 @@ class ContentService {
           .from('saved_posts')
           .select('post_id')
           .eq('user_id', me);
-      final followsQ = onlyFollowing
-          ? _db.from('follows').select('following_id').eq('follower_id', me)
-          : null;
+      // Quem o usuário segue ENTRE OS AUTORES DESTA PÁGINA — e não a lista
+      // inteira de seguidores. Antes esta query só rodava na aba "Seguindo",
+      // então no "Para você" o selo de seguir ficava sempre "+" mesmo para
+      // quem já era seguido. Limitando aos `user_id` da página, o custo não
+      // cresce com o tamanho da lista de seguidores.
+      final authorIds = rows
+          .whereType<Map>()
+          .map((r) => r['user_id']?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toSet();
+      final followsQ = authorIds.isEmpty
+          ? null
+          : _db
+                .from('follows')
+                .select('following_id')
+                .eq('follower_id', me)
+                .inFilter('following_id', authorIds.toList());
 
       Future<List<dynamic>> safe(Future<dynamic> q) => q
           .timeout(SupabaseService.networkTimeout)
@@ -142,6 +156,142 @@ class ContentService {
   /// Busca os posts de um usuário (perfil do criador / meus vídeos).
   Future<List<FeedPost>> fetchPostsByUser(String userId) =>
       fetchFeed(userId: userId);
+
+  /// Grava que a pessoa assistiu a este vídeo.
+  ///
+  /// Chama a RPC `record_post_view`, que só conta a primeira vez por usuário e
+  /// por vídeo (o `user_history` tem chave única) e atualiza o
+  /// `total_views` do autor. Antes o contador de visualizações nunca era
+  /// gravado — a coluna existia e nada a escrevia.
+  ///
+  /// Falha silenciosa de propósito: uma visualização perdida não pode
+  /// interromper a reprodução do vídeo.
+  Future<void> recordPostView(String postId) async {
+    if (postId.isEmpty) return;
+    try {
+      await _db.rpc('record_post_view', params: {'p_post_id': postId});
+    } catch (_) {}
+  }
+
+  /// Persiste um compartilhamento e devolve o novo total do banco.
+  ///
+  /// O app já somava `video.shares++` em memória, o que sumia ao sair da tela.
+  /// Devolve `null` se não deu para gravar, para a UI decidir o que fazer.
+  Future<int?> incrementShare(String postId) async {
+    if (postId.isEmpty) return null;
+    try {
+      final r = await _db.rpc(
+        'increment_post_share',
+        params: {'p_post_id': postId},
+      );
+      if (r is num) return r.toInt();
+      if (r is Map && r['count'] is num) return (r['count'] as num).toInt();
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Um post pelo id, com o perfil do autor junto — usado para abrir um vídeo a
+  /// partir da busca, das notificações e do push.
+  ///
+  /// Mesma consulta que o feed usa (`profiles:user_id(...)`), então o
+  /// [FeedPost] chega completo e o [VideoPreviewScreen] abre igual ao do perfil.
+  Future<FeedPost?> fetchPostById(String postId) async {
+    if (postId.isEmpty) return null;
+    try {
+      final row = await _db
+          .from('posts')
+          .select(
+            '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+          )
+          .eq('id', postId)
+          .maybeSingle();
+      if (row == null) return null;
+      return FeedPost.fromJson(
+        Map<String, dynamic>.from(
+          (row as Map).map((k, v) => MapEntry(k.toString(), v)),
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Vídeos de uma hashtag, do mais novo para o mais antigo.
+  ///
+  /// `posts.hashtags` é `text[]` sem índice GIN e as tags são gravadas **como
+  /// digitadas** (`_parseHashtags` só tira o `#`, sem minúscula), então
+  /// `contains` é sensível a caixa. Por isso o filtro usa as variações
+  /// usuais em [hashtagCaseVariants] — é o que funciona sem mudar o schema.
+  Future<List<FeedPost>> fetchPostsByHashtag(
+    String tag, {
+    int limit = 30,
+  }) async {
+    final clean = _normalizeHashtag(tag);
+    if (clean.isEmpty) return const <FeedPost>[];
+    try {
+      final res = await _db
+          .from('posts')
+          .select(
+            '*, profiles:user_id(display_name, username, avatar_url, is_verified)',
+          )
+          .or(_hashtagFilter(clean))
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return (res as List)
+          .whereType<Map>()
+          .map(
+            (m) => FeedPost.fromJson(
+              Map<String, dynamic>.from(
+                m.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            ),
+          )
+          .toList();
+    } catch (_) {
+      return const <FeedPost>[];
+    }
+  }
+
+  /// Quantos vídeos usam a hashtag (cabeçalho da página da hashtag).
+  Future<int> countPostsByHashtag(String tag) async {
+    final clean = _normalizeHashtag(tag);
+    if (clean.isEmpty) return 0;
+    try {
+      final res = await _db
+          .from('posts')
+          .select('id')
+          .or(_hashtagFilter(clean))
+          .limit(1000);
+      return (res as List).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Filtro PostgREST que cobre as grafias mais comuns da tag.
+  static String _hashtagFilter(String clean) =>
+      hashtagCaseVariants(clean).map((v) => 'hashtags.cs.{$v}').join(',');
+
+  /// Variações de caixa de uma hashtag já normalizada.
+  ///
+  /// Público para poder ser testado sem banco: minúscula, capitalizada e
+  /// MAIÚSCULA cobrem o que as pessoas realmente digitam.
+  static List<String> hashtagCaseVariants(String clean) {
+    final lower = clean.toLowerCase();
+    final capitalized = lower.isEmpty
+        ? lower
+        : lower[0].toUpperCase() + lower.substring(1);
+    return <String>{lower, capitalized, lower.toUpperCase()}.toList();
+  }
+
+  /// Hashtag sem `#`, minúscula e sem espaços.
+  static String _normalizeHashtag(String raw) => raw
+      .trim()
+      .replaceAll('#', '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), '');
 
   /// Vídeos CURTIDOS pelo usuário atual (aba Curtidos do perfil). Consulta de
   /// dados reais de `post_likes` → `posts`; nunca inventa. Vazio se sem conta/
@@ -625,7 +775,11 @@ class ContentService {
   // Comentários
   // ---------------------------------------------------------------------------
 
-  Future<List<PostComment>> fetchComments(String postId) async {
+  Future<List<PostComment>> fetchComments(
+    String postId, {
+    int limit = 30,
+    int offset = 0,
+  }) async {
     final res = await _db
         .from('comments')
         .select(
@@ -633,8 +787,8 @@ class ContentService {
         )
         .eq('post_id', postId)
         .order('created_at', ascending: false)
-        .limit(200);
-    return res
+        .range(offset, offset + limit - 1);
+    final rows = res
         .whereType<Map>()
         .map(
           (row) => PostComment.fromJson(
@@ -644,6 +798,103 @@ class ContentService {
           ),
         )
         .toList();
+    return _markLikedComments(rows);
+  }
+
+  /// Quantos comentários tem o post — para a UI saber se ainda há página.
+  Future<int> countComments(String postId) async {
+    try {
+      final res = await _db
+          .from('comments')
+          .select('id')
+          .eq('post_id', postId)
+          .limit(5000);
+      return (res as List).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Preenche `likedByMe` consultando as curtidas do usuário numa ida só.
+  ///
+  /// Sem isto cada card precisaria de uma consulta própria, que é o que torna
+  /// "curtir comentário" inviável numa lista grande.
+  Future<List<PostComment>> _markLikedComments(
+    List<PostComment> comments,
+  ) async {
+    if (comments.isEmpty) return comments;
+    final ids = comments.map((c) => c.id).toList();
+    final me = SupabaseService.instance.client.auth.currentUser?.id;
+    if (me == null || me.isEmpty) return comments;
+    try {
+      final res = await _db
+          .from('comment_likes')
+          .select('comment_id')
+          .eq('user_id', me)
+          .inFilter('comment_id', ids);
+      final liked = (res as List)
+          .map((r) => (r as Map)['comment_id'].toString())
+          .toSet();
+      if (liked.isEmpty) return comments;
+      return comments
+          .map((c) => c.likedByMe || !liked.contains(c.id) ? c : _withLiked(c))
+          .toList();
+    } catch (_) {
+      // `comment_likes` ainda não aplicada no ambiente: segue sem marcar,
+      // que é o mesmo comportamento de antes.
+      return comments;
+    }
+  }
+
+  PostComment _withLiked(PostComment c) => PostComment(
+    id: c.id,
+    postId: c.postId,
+    userId: c.userId,
+    parentId: c.parentId,
+    text: c.text,
+    createdAt: c.createdAt,
+    editedAt: c.editedAt,
+    likesCount: c.likesCount,
+    likedByMe: true,
+    author: c.author,
+  );
+
+  /// Curte ou descurte um comentário. Devolve o novo estado e a contagem.
+  Future<({bool liked, int count})> toggleCommentLike(String commentId) async {
+    await SupabaseService.instance.ensureAuthenticated();
+    final me = SupabaseService.instance.client.auth.currentUser!.id;
+    final existing = await _db
+        .from('comment_likes')
+        .select('comment_id')
+        .eq('comment_id', commentId)
+        .eq('user_id', me)
+        .maybeSingle();
+    final wasLiked = existing != null;
+
+    if (wasLiked) {
+      await _db
+          .from('comment_likes')
+          .delete()
+          .eq('comment_id', commentId)
+          .eq('user_id', me);
+    } else {
+      await _db.from('comment_likes').insert({
+        'comment_id': commentId,
+        'user_id': me,
+      });
+    }
+
+    // O contador é do trigger; relemos para mostrar o número real.
+    int count = 0;
+    try {
+      final row = await _db
+          .from('comments')
+          .select('likes_count')
+          .eq('id', commentId)
+          .maybeSingle();
+      count = (row as Map?)?['likes_count'] as int? ?? 0;
+    } catch (_) {}
+    return (liked: !wasLiked, count: count);
   }
 
   Future<PostComment> addComment(
@@ -892,16 +1143,6 @@ class ContentService {
           ),
         )
         .toList();
-  }
-
-  Future<void> markNotificationsRead() async {
-    final me = _db.auth.currentUser?.id;
-    if (me == null) return;
-    await _db
-        .from('notifications')
-        .update({'read': true})
-        .eq('user_id', me)
-        .eq('read', false);
   }
 
   /// Marca uma única notificação como lida (ao tocar nela).

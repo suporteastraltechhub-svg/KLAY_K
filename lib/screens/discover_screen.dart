@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/search_result_opener.dart';
 import '../design/klayk_design.dart';
 import '../models/ad_models.dart';
 import '../services/ads_service.dart';
@@ -158,12 +159,6 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     } else {
       setState(() {});
     }
-  }
-
-  void _applyHashtag(String tag) {
-    final withHash = tag.startsWith('#') ? tag : '#$tag';
-    _searchCtrl.text = withHash;
-    _runSearch(withHash);
   }
 
   void _applyRecent(String term) {
@@ -523,7 +518,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             AppLocalizations.of(context)!.hashtagPostCount(t.count),
             style: const TextStyle(color: Colors.white38, fontSize: 12),
           ),
-          onTap: () => _applyHashtag(t.tag),
+          onTap: () => openHashtag(context, t.tag),
         );
       }),
     );
@@ -553,10 +548,13 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             _openAuthor(r.id);
             break;
           case 'hashtag':
-            _applyHashtag(r.subtitle.isNotEmpty ? r.subtitle : r.title);
+            // Era só refazer a busca com "#tag". Agora abre a página da
+            // hashtag, com contador, ordenação e grade de vídeos.
+            openHashtag(context, r.subtitle.isNotEmpty ? r.subtitle : r.title);
             break;
           default:
-            break;
+            // `post` e `live`: abrem o conteúdo de verdade.
+            openSearchResult(context, r);
         }
       },
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

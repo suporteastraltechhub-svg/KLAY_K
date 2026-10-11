@@ -162,6 +162,14 @@ class PostComment {
   final String text;
   final DateTime createdAt;
   final DateTime? editedAt;
+
+  /// Curtidas do comentário. A coluna é mantida por trigger no banco, então o
+  /// contador fica sempre consistente com a tabela `comment_likes`.
+  final int likesCount;
+
+  /// Se quem está vendo já curtiu este comentário.
+  final bool likedByMe;
+
   final PostAuthor? author;
 
   const PostComment({
@@ -172,6 +180,8 @@ class PostComment {
     required this.text,
     required this.createdAt,
     this.editedAt,
+    this.likesCount = 0,
+    this.likedByMe = false,
     this.author,
   });
 
@@ -198,6 +208,8 @@ class PostComment {
       editedAt: json['edited_at'] is DateTime
           ? (json['edited_at'] as DateTime).toLocal()
           : DateTime.tryParse(json['edited_at']?.toString() ?? '')?.toLocal(),
+      likesCount: (json['likes_count'] as num?)?.toInt() ?? 0,
+      likedByMe: json['liked_by_me'] == true,
       author: authorJson.isEmpty ? null : PostAuthor.fromJson(authorJson),
     );
   }

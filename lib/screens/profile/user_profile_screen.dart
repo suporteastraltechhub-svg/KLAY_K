@@ -36,6 +36,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   bool get _real => SupabaseService.instance.isConfigured;
 
+  /// Quem pode ver os vídeos de uma conta privada: o próprio dono e quem segue.
+  bool _canSeeVideos(UserProfile? p) {
+    if (p == null || !p.isPrivate) return true;
+    final me = SupabaseService.instance.client.auth.currentUser?.id;
+    if (me == null || me.isEmpty) return false;
+    if (me == p.id) return true;
+    return p.isFollowing;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -53,10 +62,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     });
     try {
       final profile = await ProfileService.instance.fetchProfile(widget.userId);
-      final posts = await ContentService.instance.fetchFeed(
-        userId: widget.userId,
-        limit: 9,
-      );
+      // Conta privada: os vídeos não são carregados para quem não é o dono
+      // nem segue a pessoa. Isto é a camada de INTERFACE — a RLS de `posts`
+      // ainda é pública (`posts_select_all using (true)`), então o bloqueio
+      // real precisa ser feito no banco. Ver README da Fatia 6.
+      final visible = _canSeeVideos(profile);
+      final posts = visible
+          ? await ContentService.instance.fetchFeed(
+              userId: widget.userId,
+              limit: 9,
+            )
+          : const <FeedPost>[];
       if (!mounted) return;
       setState(() {
         _profile = profile;
@@ -348,7 +364,45 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ),
           const SizedBox(height: 6),
           _sectionTitle(l10n.videos),
-          KlaykProfileVideoGrid(videos: _videos, onDeleted: _load),
+          // Conta privada sem vínculo: nada de grid vazio sem explicação.
+          if (_profile?.isPrivate == true && !_canSeeVideos(_profile))
+            _privateNotice()
+          else
+            KlaykProfileVideoGrid(videos: _videos, onDeleted: _load),
+        ],
+      ),
+    );
+  }
+
+  /// Aviso de conta privada para quem não segue.
+  Widget _privateNotice() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: const Column(
+        children: <Widget>[
+          Icon(Icons.lock_rounded, color: Colors.white54, size: 30),
+          SizedBox(height: 10),
+          Text(
+            'Esta conta é privada',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Siga para ver os vídeos.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );
