@@ -54,6 +54,22 @@ class StoreProduct {
   final bool isActive;
   final DateTime createdAt;
 
+  /// Fotos do anúncio. A primeira é a capa (`imageUrl`).
+  final List<String> photos;
+
+  /// `novo` ou `usado`.
+  final String condition;
+
+  /// Formas de entrega aceitas: `entrega`, `retirada`, `envio`.
+  final List<String> deliveryOptions;
+
+  /// `publicado`, `pausado` ou `vendido`.
+  final String status;
+
+  final String? city;
+  final String? state;
+  final int soldCount;
+
   const StoreProduct({
     required this.id,
     required this.sellerId,
@@ -66,9 +82,31 @@ class StoreProduct {
     this.featured = false,
     this.isActive = true,
     required this.createdAt,
+    this.photos = const [],
+    this.condition = 'novo',
+    this.deliveryOptions = const ['entrega'],
+    this.status = 'publicado',
+    this.city,
+    this.state,
+    this.soldCount = 0,
   });
 
   bool get outOfStock => stock <= 0;
+
+  bool get isNew => condition == 'novo';
+
+  /// Anúncio pausado ou vendido não aparece para comprador.
+  bool get isListed => status == 'publicado' && isActive && !outOfStock;
+
+  List<String> get allPhotos {
+    final l = <String>[...photos];
+    if (imageUrl.isNotEmpty && !l.contains(imageUrl)) l.insert(0, imageUrl);
+    return l;
+  }
+
+  bool get acceptsPickup => deliveryOptions.contains('retirada');
+
+  bool get acceptsShipping => deliveryOptions.contains('envio');
 
   factory StoreProduct.fromJson(Map<String, dynamic> json) => StoreProduct(
     id: json['id'] as String? ?? '',
@@ -84,6 +122,17 @@ class StoreProduct {
     createdAt:
         DateTime.tryParse(json['created_at'] as String? ?? '') ??
         DateTime.now(),
+    photos:
+        (json['photos'] as List?)?.map((e) => '$e').where((e) => e.isNotEmpty).toList() ??
+        const [],
+    condition: json['condition'] as String? ?? 'novo',
+    deliveryOptions:
+        (json['delivery_options'] as List?)?.map((e) => '$e').toList() ??
+        const ['entrega'],
+    status: json['status'] as String? ?? 'publicado',
+    city: json['city'] as String?,
+    state: json['state'] as String?,
+    soldCount: (json['sold_count'] as num?)?.toInt() ?? 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -146,6 +195,16 @@ class StoreOrder {
   final String buyerUsername;
   final String buyerDisplayName;
 
+  /// `aguardando_pagamento`, `pago`, `cancelado` ou `estornado`.
+  ///
+  /// O KLAY K não tem provedor de pagamento integrado: o pedido NASC como
+  /// `aguardando_pagamento` e só muda de estado por `service_role`. O app
+  /// nunca marca um pagamento por conta própria.
+  final String paymentStatus;
+
+  final String? cancelReason;
+  final DateTime? expiresAt;
+
   const StoreOrder({
     required this.id,
     required this.userId,
@@ -160,7 +219,25 @@ class StoreOrder {
     this.sellerDisplayName = '',
     this.buyerUsername = '',
     this.buyerDisplayName = '',
+    this.paymentStatus = 'aguardando_pagamento',
+    this.cancelReason,
+    this.expiresAt,
   });
+
+  bool get awaitingPayment => paymentStatus == 'aguardando_pagamento';
+
+  bool get isPaid => paymentStatus == 'pago';
+
+  bool get isCancelled =>
+      status == 'cancelado' || paymentStatus == 'cancelado';
+
+  /// Rótulo do estado do pagamento, pronto para a tela.
+  String get paymentLabel => switch (paymentStatus) {
+    'pago' => 'Pagamento confirmado',
+    'cancelado' => 'Pagamento cancelado',
+    'estornado' => 'Pagamento estornado',
+    _ => 'Aguardando pagamento',
+  };
 
   bool get cancellable => status == 'pendente';
 
@@ -180,6 +257,9 @@ class StoreOrder {
     sellerDisplayName: json['seller_display_name'] as String? ?? '',
     buyerUsername: json['buyer_username'] as String? ?? '',
     buyerDisplayName: json['buyer_display_name'] as String? ?? '',
+    paymentStatus: json['payment_status'] as String? ?? 'aguardando_pagamento',
+    cancelReason: json['cancel_reason'] as String?,
+    expiresAt: DateTime.tryParse(json['expires_at'] as String? ?? ''),
   );
 }
 
