@@ -97,8 +97,33 @@ jobs:
 
           # O keystore tem que cair em android/app/ porque e onde o modulo Android
           # procura; o storeFile gerado abaixo aponta para esse caminho absoluto.
-          base64 --decode > android/app/klayk-upload.jks <<< "$KEYSTORE_BASE64"
+          #
+          # O secret chega como foi colado. Se o Base64 foi gerado sem -w0, ou
+          # colado com quebras/ espacos, `base64 --decode` aborta com
+          # "invalid input" e o log nao diz qual era o problema. Normalizar
+          # primeiro resolve os dois casos e o `if !` transforma a falha em
+          # mensagem util em vez de um "exit code 1" sem contexto.
+          clean_b64=$(printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]')
+          chars=${#clean_b64}
+
+          if [ "$chars" -eq 0 ]; then
+            echo "ERRO: KEYSTORE_BASE64 ficou vazio apos remover espacos."
+            exit 1
+          fi
+
+          if ! printf '%s' "$clean_b64" | base64 --decode \
+                > android/app/klayk-upload.jks 2>/tmp/b64.err; then
+            echo "ERRO: KEYSTORE_BASE64 nao decodifica como Base64."
+            echo "      motivo : $(cat /tmp/b64.err)"
+            echo "      tamanho: $chars caracteres"
+            echo ""
+            echo "Regere o secret com:"
+            echo "  base64 -w0 android/app/klayk-upload.jks"
+            exit 1
+          fi
+
           chmod 600 android/app/klayk-upload.jks
+          echo "Keystore restaurado: $(stat -c%s android/app/klayk-upload.jks) bytes de $chars caracteres Base64."
 
           # build.gradle.kts le o arquivo com rootProject.file("key.properties"),
           # que resolve para android/key.properties (raiz do projeto android).
