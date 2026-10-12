@@ -1,6 +1,6 @@
 # KLAY K
 
-Aplicativo KLAY K (clone da interface Kwai) com sistema de **lives reais** integrado a
+Aplicativo KLAY K com sistema de **lives reais** integrado a
 **Supabase** (auth, Postgres + Realtime, Edge Functions) e **LiveKit Cloud** (vídeo/áudio),
 mais um bot assistente "KLAY K Bot" que roda no servidor.
 
