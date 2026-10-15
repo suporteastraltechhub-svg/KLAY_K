@@ -177,6 +177,27 @@ jobs:
           echo ""
           echo "Keystore validado. Alias: $KEY_ALIAS"
 
+          # keytool -list nao abre a chave privada, entao um keyPassword
+          # errado so apareceria 6 minutos depois, em :app:packageRelease,
+          # como "Get Key failed: Given final block not properly padded".
+          #
+          # Em PKCS12 nao existe senha de chave separada: o padrao ignora
+          # -srckeypass e usa storePassword para cifrar a chave privada.
+          # Por isso os dois secrets precisam ter o mesmo valor.
+          storetype=$("$KEYTOOL" -list \
+            -keystore android/app/klayk-upload.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            | awk -F': ' '/Keystore type/{print $2}' | tr -d ' ')
+
+          echo "Tipo do keystore: $storetype"
+
+          if [ "$storetype" = "PKCS12" ] && [ "$KEY_PASSWORD" != "$KEYSTORE_PASSWORD" ]; then
+            echo ""
+            echo "ERRO: keystore PKCS12 nao separa storePassword de keyPassword."
+            echo "      KEY_PASSWORD e KEYSTORE_PASSWORD precisam ser identicos."
+            exit 1
+          fi
+
       - name: Gerar KLAY K Release ARM64
         run: |
           flutter build apk \
