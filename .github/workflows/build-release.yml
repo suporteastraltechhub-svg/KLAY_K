@@ -143,14 +143,36 @@ jobs:
           ls -l android/app/klayk-upload.jks android/key.properties
 
           # Confere o formato e se o alias existe antes de gastar minutos
-          # compilando; keytool falha cedo se a senha ou o base64 estiverem errados.
+          # compilando. Abrir pelo storepass primeiro separa os dois erros
+          # possíveis: senha errada impede qualquer listagem; senha certa com
+          # alias errado mostra a lista e deixa o alias correto visível.
           KEYTOOL="${JAVA_HOME:+$JAVA_HOME/bin/}keytool"
           command -v "$KEYTOOL" >/dev/null 2>&1 || KEYTOOL=keytool
 
-          "$KEYTOOL" -list \
-            -keystore android/app/klayk-upload.jks \
-            -alias "$KEY_ALIAS" \
-            -storepass "$KEYSTORE_PASSWORD" >/dev/null
+          if ! "$KEYTOOL" -list \
+                -keystore android/app/klayk-upload.jks \
+                -storepass "$KEYSTORE_PASSWORD" \
+                >/tmp/ks.txt 2>/tmp/ks.err; then
+            echo "ERRO: nao consegui abrir o keystore."
+            echo "  keytool: $(head -1 /tmp/ks.err)"
+            echo ""
+            echo "Se a mensagem citar senha, KEYSTORE_PASSWORD nao corresponde a este keystore."
+            exit 1
+          fi
+
+          aliases=$(cut -d, -f1 /tmp/ks.txt \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | grep -vE "^(Your keystore contains|Keystore type|Certificate fingerprints|Entry type|$)")
+
+          echo "Alias presentes no keystore:"
+          echo "$aliases" | sed 's/^/  - /'
+
+          if ! echo "$aliases" | grep -qxF "$KEY_ALIAS"; then
+            echo ""
+            echo "ERRO: KEY_ALIAS='$KEY_ALIAS' nao existe neste keystore."
+            echo "      Use um dos alias listados acima, sem aspas."
+            exit 1
+          fi
 
           echo ""
           echo "Keystore validado. Alias: $KEY_ALIAS"
