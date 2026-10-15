@@ -154,7 +154,7 @@ jobs:
                 -storepass "$KEYSTORE_PASSWORD" \
                 >/tmp/ks.txt 2>/tmp/ks.err; then
             echo "ERRO: nao consegui abrir o keystore."
-            echo "  keytool: $(head -1 /tmp/ks.err)"
+            echo "  keytool: $(cat /tmp/ks.err /tmp/ks.txt | grep -m1 'keytool error' || echo 'sem mensagem')"
             echo ""
             echo "Se a mensagem citar senha, KEYSTORE_PASSWORD nao corresponde a este keystore."
             exit 1
